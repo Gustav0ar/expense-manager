@@ -1,0 +1,3 @@
+ALTER TABLE "import_batch" ADD COLUMN "failed_rows" jsonb DEFAULT '[]'::jsonb NOT NULL;--> statement-breakpoint
+CREATE INDEX "expense_workspace_posted_date_idx" ON "expense" USING btree ("workspace_id","expense_date","id") WHERE "expense"."deleted_at" is null and "expense"."status" = 'posted';--> statement-breakpoint
+CREATE INDEX "expense_workspace_posted_category_date_idx" ON "expense" USING btree ("workspace_id","category_id","expense_date") WHERE "expense"."deleted_at" is null and "expense"."status" = 'posted';
