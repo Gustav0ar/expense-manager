@@ -1,0 +1,213 @@
+import { error } from '@sveltejs/kit';
+import { and, asc, eq, gte, lte, or, sql } from 'drizzle-orm';
+import { db } from '$lib/server/db';
+import {
+	auditEvent,
+	category,
+	expense,
+	paymentMethod,
+	recurringExpense
+} from '$lib/server/db/schema';
+import { canWriteExpenses } from '$lib/server/security/roles';
+import { advanceDate, todayIso } from '$lib/server/utils/date';
+import { parseBrlToCents } from '$lib/server/utils/money';
+import { assertCategoryInWorkspace } from '$lib/server/utils/category';
+import type { WorkspaceContext } from './workspaces';
+import { resolveExpenseCatalogSelection } from './expense-catalogs';
+
+export type RecurringExpenseInput = {
+	categoryId: number;
+	description: string;
+	amount: string;
+	frequency: 'weekly' | 'monthly' | 'yearly';
+	intervalCount: number;
+	startDate: string;
+	endDate?: string | null;
+	paymentMethodId?: number | null;
+	notes?: string | null;
+};
+
+export async function listRecurringExpenses(context: WorkspaceContext) {
+	return db
+		.select({
+			id: recurringExpense.id,
+			description: recurringExpense.description,
+			amountCents: recurringExpense.amountCents,
+			frequency: recurringExpense.frequency,
+			intervalCount: recurringExpense.intervalCount,
+			startDate: recurringExpense.startDate,
+			nextRunDate: recurringExpense.nextRunDate,
+			endDate: recurringExpense.endDate,
+			paymentMethodId: recurringExpense.paymentMethodId,
+			paymentMethod: sql<
+				string | null
+			>`coalesce(${paymentMethod.name}, ${recurringExpense.paymentMethod})`,
+			notes: recurringExpense.notes,
+			status: recurringExpense.status,
+			categoryId: category.id,
+			categoryName: category.name,
+			categoryColor: category.color,
+			categoryIcon: category.icon
+		})
+		.from(recurringExpense)
+		.innerJoin(category, eq(category.id, recurringExpense.categoryId))
+		.leftJoin(paymentMethod, eq(paymentMethod.id, recurringExpense.paymentMethodId))
+		.where(eq(recurringExpense.workspaceId, context.workspaceId))
+		.orderBy(asc(recurringExpense.nextRunDate), asc(recurringExpense.description));
+}
+
+export async function createRecurringExpense(
+	context: WorkspaceContext,
+	input: RecurringExpenseInput
+) {
+	if (!canWriteExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
+	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
+
+	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input);
+	const amountCents = parseBrlToCents(input.amount);
+
+	return db.transaction(async (tx) => {
+		const [created] = await tx
+			.insert(recurringExpense)
+			.values({
+				workspaceId: context.workspaceId,
+				categoryId: input.categoryId,
+				createdByUserId: context.userId,
+				description: input.description,
+				amountCents,
+				frequency: input.frequency,
+				intervalCount: input.intervalCount,
+				startDate: input.startDate,
+				nextRunDate: input.startDate,
+				endDate: input.endDate || null,
+				paymentMethodId: catalogSelection.paymentMethodId,
+				paymentMethod: catalogSelection.paymentMethodName,
+				notes: input.notes || null
+			})
+			.returning({ id: recurringExpense.id });
+
+		await tx.insert(auditEvent).values({
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: 'recurring_expense.created',
+			entityType: 'recurring_expense',
+			entityId: String(created.id)
+		});
+
+		return created;
+	});
+}
+
+export async function setRecurringExpenseStatus(
+	context: WorkspaceContext,
+	id: number,
+	status: 'active' | 'paused'
+) {
+	if (!canWriteExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
+
+	const [updated] = await db
+		.update(recurringExpense)
+		.set({ status })
+		.where(and(eq(recurringExpense.id, id), eq(recurringExpense.workspaceId, context.workspaceId)))
+		.returning({ id: recurringExpense.id });
+
+	if (!updated) throw error(404, 'Recorrencia não encontrada.');
+
+	await db.insert(auditEvent).values({
+		workspaceId: context.workspaceId,
+		actorUserId: context.userId,
+		action: status === 'active' ? 'recurring_expense.resumed' : 'recurring_expense.paused',
+		entityType: 'recurring_expense',
+		entityId: String(id)
+	});
+}
+
+export async function materializeDueRecurringExpenses(
+	context: WorkspaceContext,
+	asOf = todayIso(context.timezone)
+) {
+	if (!canWriteExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
+
+	const schedules = await db
+		.select()
+		.from(recurringExpense)
+		.where(
+			and(
+				eq(recurringExpense.workspaceId, context.workspaceId),
+				eq(recurringExpense.status, 'active'),
+				lte(recurringExpense.nextRunDate, asOf),
+				or(
+					sql`${recurringExpense.endDate} is null`,
+					gte(recurringExpense.endDate, recurringExpense.nextRunDate)
+				)
+			)
+		)
+		.orderBy(asc(recurringExpense.nextRunDate), asc(recurringExpense.id))
+		.limit(50);
+
+	if (schedules.length === 0) return { createdCount: 0 };
+
+	let createdCount = 0;
+
+	await db.transaction(async (tx) => {
+		for (const schedule of schedules) {
+			const dates: string[] = [];
+			let nextRunDate = schedule.nextRunDate;
+
+			while (nextRunDate <= asOf && dates.length < 120) {
+				if (schedule.endDate && nextRunDate > schedule.endDate) break;
+				dates.push(nextRunDate);
+				nextRunDate = advanceDate(
+					nextRunDate,
+					schedule.frequency as 'weekly' | 'monthly' | 'yearly',
+					schedule.intervalCount
+				);
+			}
+
+			if (dates.length > 0) {
+				const inserted = await tx
+					.insert(expense)
+					.values(
+						dates.map((expenseDate) => ({
+							workspaceId: schedule.workspaceId,
+							categoryId: schedule.categoryId,
+							createdByUserId: schedule.createdByUserId,
+							description: schedule.description,
+							amountCents: schedule.amountCents,
+							expenseDate,
+							paymentMethodId: schedule.paymentMethodId,
+							paymentMethod: schedule.paymentMethod,
+							notes: schedule.notes,
+							sourceRecurringExpenseId: schedule.id
+						}))
+					)
+					.onConflictDoNothing()
+					.returning({ id: expense.id });
+
+				createdCount += inserted.length;
+			}
+
+			const shouldPause = schedule.endDate != null && nextRunDate > schedule.endDate;
+			await tx
+				.update(recurringExpense)
+				.set({
+					nextRunDate,
+					status: shouldPause ? 'paused' : schedule.status
+				})
+				.where(eq(recurringExpense.id, schedule.id));
+		}
+
+		if (createdCount > 0) {
+			await tx.insert(auditEvent).values({
+				workspaceId: context.workspaceId,
+				actorUserId: context.userId,
+				action: 'recurring_expense.materialized',
+				entityType: 'recurring_expense',
+				entityId: null,
+				metadata: { createdCount, asOf }
+			});
+		}
+	});
+
+	return { createdCount };
+}

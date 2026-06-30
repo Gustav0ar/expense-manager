@@ -1,0 +1,34 @@
+{
+	"name": "Expense Manager",
+	"dockerComposeFile": "compose.yml",
+	"service": "app",
+	"workspaceFolder": "/workspaces/expense-manager",
+	"remoteUser": "node",
+	"shutdownAction": "stopCompose",
+	"forwardPorts": [5173, 5432],
+	"portsAttributes": {
+		"5173": {
+			"label": "SvelteKit",
+			"onAutoForward": "notify"
+		},
+		"5432": {
+			"label": "PostgreSQL",
+			"onAutoForward": "silent"
+		}
+	},
+	"postCreateCommand": "pnpm install --frozen-lockfile && pnpm exec playwright install chromium && pnpm db:migrate",
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"dev.containers.dockerPath": "podman",
+				"terminal.integrated.defaultProfile.linux": "bash"
+			},
+			"extensions": [
+				"svelte.svelte-vscode",
+				"bradlc.vscode-tailwindcss",
+				"esbenp.prettier-vscode",
+				"dbaeumer.vscode-eslint"
+			]
+		}
+	}
+}

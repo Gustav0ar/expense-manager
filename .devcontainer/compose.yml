@@ -1,0 +1,67 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Containerfile
+    userns_mode: keep-id
+    command: sleep infinity
+    environment:
+      NODE_ENV: development
+      PUBLIC_APP_NAME: Expense Manager
+      ORIGIN: http://localhost:5173
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
+      BETTER_AUTH_SECRET: development-secret-development-secret-32
+      REQUIRE_EMAIL_VERIFICATION: 'false'
+      DATABASE_URL: postgres://expense_manager:expense_manager@postgres:5432/expense_manager
+      DB_POOL_MAX: '5'
+      DB_PREPARE_STATEMENTS: 'true'
+      SMTP_HOST: ''
+      SMTP_PORT: '587'
+      SMTP_SECURE: 'false'
+      SMTP_USER: ''
+      SMTP_PASSWORD: ''
+      SMTP_FROM: ''
+    volumes:
+      - ..:/workspaces/expense-manager:Z
+      - pnpm_store:/home/node/.local/share/pnpm/store:Z
+      - playwright_cache:/home/node/.cache/ms-playwright:Z
+      - node_modules:/workspaces/expense-manager/node_modules:Z
+    ports:
+      - '5173:5173'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - log_min_duration_statement=1000
+      - -c
+      - log_lock_waits=on
+      - -c
+      - max_connections=50
+    environment:
+      POSTGRES_DB: expense_manager
+      POSTGRES_USER: expense_manager
+      POSTGRES_PASSWORD: expense_manager
+    volumes:
+      - postgres_data:/var/lib/postgresql/data:Z
+      - ../docker/postgres/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro,Z
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  node_modules:
+  playwright_cache:
+  pnpm_store:
+  postgres_data:
