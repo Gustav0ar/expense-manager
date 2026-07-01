@@ -30,14 +30,15 @@ import {
 	planningFilterSchema,
 	recurringExpenseSchema
 } from '$lib/server/validation';
+import { translate } from '$lib/i18n';
 
 export const load: PageServerLoad = async (event) => {
 	const context = await requireWorkspaceContext(event);
 	const filters = planningFilterSchema.safeParse({
 		periodMonth: event.url.searchParams.get('periodMonth') || undefined
 	});
-	if (!filters.success) throw error(400, 'Filtros invalidos.');
-	const periodMonth = filters.data.periodMonth || firstDayOfMonth(new Date(), context.timezone);
+	if (!filters.success) throw error(400, translate(event.locals.locale, 'Filters are invalid.'));
+	const periodMonth = filters.data.periodMonth || firstDayOfMonth(new Date());
 
 	const [categories, catalogs, budgets, recurringExpenses, importBatches] = await Promise.all([
 		listCategories(context),
@@ -61,7 +62,8 @@ export const actions: Actions = {
 	upsertBudget: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const parsed = parseForm(await event.request.formData(), budgetSchema);
-		if (!parsed.success) return fail(400, { message: 'Confira os dados do orcamento.' });
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Check budget data.') });
 
 		await upsertBudget(context, parsed.data);
 		throw redirect(303, `/app/planning?periodMonth=${parsed.data.periodMonth}`);
@@ -70,7 +72,8 @@ export const actions: Actions = {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const id = idSchema.safeParse(formData.get('id'));
-		if (!id.success) return fail(400, { message: 'Orcamento invalido.' });
+		if (!id.success)
+			return fail(400, { message: translate(event.locals.locale, 'Invalid budget.') });
 
 		await deleteBudget(context, id.data);
 		throw redirect(303, planningPath(formData));
@@ -79,22 +82,31 @@ export const actions: Actions = {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, budgetAlertSchema);
-		if (!parsed.success) return fail(400, { message: 'Mes invalido para alertas.' });
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Invalid alert month.') });
 
 		const result = await sendBudgetAlerts(context, parsed.data.periodMonth);
 		return {
 			tone: 'success',
 			message:
 				result.alertCount > 0
-					? `${result.alertCount} alertas enviados para ${result.sentCount} destinatarios.`
-					: 'Nenhum alerta de orcamento para enviar.'
+					? translate(
+							event.locals.locale,
+							'{count} budget alerts sent to {sentCount} recipients.',
+							{
+								count: result.alertCount,
+								sentCount: result.sentCount
+							}
+						)
+					: translate(event.locals.locale, 'No budget alerts to send.')
 		};
 	},
 	createRecurring: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, recurringExpenseSchema);
-		if (!parsed.success) return fail(400, { message: 'Confira os dados da recorrencia.' });
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Check recurrence data.') });
 
 		await createRecurringExpense(context, parsed.data);
 		await materializeDueRecurringExpenses(context);
@@ -104,7 +116,8 @@ export const actions: Actions = {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, expenseCatalogSchema);
-		if (!parsed.success) return fail(400, { message: 'Confira o cadastro auxiliar.' });
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Check auxiliary catalog.') });
 
 		await createExpenseCatalogItem(context, parsed.data);
 		throw redirect(303, planningPath(formData));
@@ -113,7 +126,8 @@ export const actions: Actions = {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const id = idSchema.safeParse(formData.get('id'));
-		if (!id.success) return fail(400, { message: 'Recorrencia invalida.' });
+		if (!id.success)
+			return fail(400, { message: translate(event.locals.locale, 'Invalid recurrence.') });
 
 		await setRecurringExpenseStatus(context, id.data, 'paused');
 		throw redirect(303, planningPath(formData));
@@ -122,7 +136,8 @@ export const actions: Actions = {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const id = idSchema.safeParse(formData.get('id'));
-		if (!id.success) return fail(400, { message: 'Recorrencia invalida.' });
+		if (!id.success)
+			return fail(400, { message: translate(event.locals.locale, 'Invalid recurrence.') });
 
 		await setRecurringExpenseStatus(context, id.data, 'active');
 		await materializeDueRecurringExpenses(context);
@@ -135,8 +150,10 @@ export const actions: Actions = {
 			tone: 'success',
 			message:
 				result.createdCount > 0
-					? `${result.createdCount} despesas recorrentes geradas.`
-					: 'Nenhuma recorrencia vencida para gerar.'
+					? translate(event.locals.locale, '{count} due recurring expenses generated.', {
+							count: result.createdCount
+						})
+					: translate(event.locals.locale, 'No recurrence due to generate.')
 		};
 	},
 	importExpenses: async (event) => {
@@ -145,15 +162,17 @@ export const actions: Actions = {
 		const parsed = parseForm(formData, importExpenseSchema);
 		const file = formData.get('file');
 		if (!parsed.success || !(file instanceof File) || file.size === 0) {
-			return fail(400, { message: 'Confira arquivo e formato.' });
+			return fail(400, { message: translate(event.locals.locale, 'Check file and format.') });
 		}
 
 		const result = await importExpenses(context, { ...parsed.data, file });
 		return {
 			message:
 				result.importedCount > 0
-					? `${result.importedCount} despesas importadas.`
-					: 'Nenhuma despesa importada.',
+					? translate(event.locals.locale, '{count} expenses imported.', {
+							count: result.importedCount
+						})
+					: translate(event.locals.locale, 'No expenses imported.'),
 			importResult: result
 		};
 	}

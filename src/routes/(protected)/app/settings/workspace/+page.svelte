@@ -3,19 +3,24 @@
 	import type { ActionData } from './$types';
 	import type { LayoutData } from '../../$types';
 	import { ClipboardList, Monitor, Moon, ShieldCheck, Sun } from '@lucide/svelte';
+	import { commonCurrencyCodes, translate } from '$lib/i18n';
 
 	let { data, form } = $props<{ data: LayoutData; form: ActionData }>();
+
+	function t(key: string, params?: Record<string, string | number>) {
+		return translate(data.locale, key, params);
+	}
 </script>
 
 <svelte:head>
-	<title>Workspace | Expense Manager</title>
+	<title>{t('Workspace')} | Expense Manager</title>
 </svelte:head>
 
 <section class="page-section">
 	<div class="section-heading">
 		<div>
-			<span class="eyebrow">Configuracao</span>
-			<h2>Workspace</h2>
+			<span class="eyebrow">{t('Settings')}</span>
+			<h2>{t('Workspace')}</h2>
 		</div>
 	</div>
 
@@ -26,35 +31,47 @@
 	<div class="content-grid two">
 		<section class="panel">
 			<div class="panel-heading">
-				<h3>Atual</h3>
+				<h3>{t('Current')}</h3>
 			</div>
 			<form method="post" action="?/update" class="stack">
 				<label>
-					<span>Nome</span>
+					<span>{t('Name')}</span>
 					<input name="name" value={data.currentWorkspace?.workspaceName ?? ''} required />
 				</label>
 				<label>
-					<span>Timezone</span>
-					<input
-						name="timezone"
-						value={data.currentWorkspace?.timezone ?? 'America/Sao_Paulo'}
-						required
-					/>
-				</label>
-				<label>
-					<span>Inicio da semana</span>
+					<span>{t('Week starts on')}</span>
 					<select name="weekStartsOn">
-						<option value="1" selected={data.currentWorkspace?.weekStartsOn === 1}>Segunda</option>
-						<option value="0" selected={data.currentWorkspace?.weekStartsOn === 0}>Domingo</option>
+						<option value="1" selected={data.currentWorkspace?.weekStartsOn === 1}
+							>{t('Monday')}</option
+						>
+						<option value="0" selected={data.currentWorkspace?.weekStartsOn === 0}
+							>{t('Sunday')}</option
+						>
 					</select>
 				</label>
-				<button class="button primary" type="submit">Salvar</button>
+				<label>
+					<span>{t('Currency')}</span>
+					<input
+						name="currency"
+						list="currency-options"
+						maxlength="3"
+						pattern={'[A-Za-z]{3}'}
+						value={data.currentWorkspace?.currency ?? 'USD'}
+						required
+					/>
+					<datalist id="currency-options">
+						{#each commonCurrencyCodes as currency (currency)}
+							<option value={currency}></option>
+						{/each}
+					</datalist>
+				</label>
+				<button class="button primary" type="submit">{t('Save')}</button>
 			</form>
 		</section>
 
 		<section class="panel">
 			<div class="panel-heading">
-				<h3>Trocar</h3>
+				<h3>{t('Transfer')}</h3>
 			</div>
 			<form method="post" action="?/switchWorkspace" class="stack">
 				<label>
@@ -70,17 +87,17 @@
 						{/each}
 					</select>
 				</label>
-				<button class="button secondary" type="submit">Trocar</button>
+				<button class="button secondary" type="submit">{t('Transfer')}</button>
 			</form>
 		</section>
 
 		<section class="panel">
 			<div class="panel-heading">
-				<h3>Aparencia</h3>
+				<h3>{t('Appearance')}</h3>
 			</div>
 			<form method="post" action="?/updateTheme" class="stack">
 				<fieldset class="theme-fieldset">
-					<legend>Tema</legend>
+					<legend>{t('Theme')}</legend>
 					<div class="theme-options">
 						<label class="theme-option">
 							<input
@@ -91,7 +108,7 @@
 							/>
 							<span class="theme-option-content">
 								<Monitor size={18} />
-								<span>Sistema</span>
+								<span>{t('System')}</span>
 							</span>
 						</label>
 						<label class="theme-option">
@@ -103,7 +120,7 @@
 							/>
 							<span class="theme-option-content">
 								<Sun size={18} />
-								<span>Claro</span>
+								<span>{t('Light')}</span>
 							</span>
 						</label>
 						<label class="theme-option">
@@ -115,51 +132,79 @@
 							/>
 							<span class="theme-option-content">
 								<Moon size={18} />
-								<span>Escuro</span>
+								<span>{t('Dark')}</span>
 							</span>
 						</label>
 					</div>
 				</fieldset>
-				<button class="button primary" type="submit">Salvar tema</button>
+				<button class="button primary" type="submit">{t('Save theme')}</button>
+			</form>
+		</section>
+
+		<section class="panel">
+			<div class="panel-heading">
+				<h3>{t('Language')}</h3>
+			</div>
+			<form method="post" action="?/updateLocale" class="stack">
+				<label>
+					<span>{t('Language')}</span>
+					<select name="locale">
+						<option value="system" selected={data.localePreference === 'system'}
+							>{t('System')}</option
+						>
+						<option value="en" selected={data.localePreference === 'en'}>{t('English')}</option>
+						<option value="pt-BR" selected={data.localePreference === 'pt-BR'}>
+							{t('Portuguese (Brazil)')}
+						</option>
+					</select>
+				</label>
+				<button class="button primary" type="submit">{t('Save')}</button>
 			</form>
 		</section>
 
 		<section class="panel settings-shortcuts">
 			<div class="panel-heading">
-				<h3>Conta e auditoria</h3>
+				<h3>{t('Account and audit')}</h3>
 			</div>
 			<a class="shortcut-link" href={resolve('/app/settings/security')}>
 				<ShieldCheck size={18} />
-				<span>Seguranca</span>
+				<span>{t('Security')}</span>
 			</a>
 			<a class="shortcut-link" href={resolve('/app/settings/audit')}>
 				<ClipboardList size={18} />
-				<span>Auditoria</span>
+				<span>{t('Audit')}</span>
 			</a>
 		</section>
 	</div>
 
 	<section class="panel">
 		<div class="panel-heading">
-			<h3>Novo workspace</h3>
+			<h3>{t('New workspace')}</h3>
 		</div>
 		<form method="post" action="?/create" class="form-grid">
 			<label>
-				<span>Nome</span>
+				<span>{t('Name')}</span>
 				<input name="name" required />
 			</label>
 			<label>
-				<span>Timezone</span>
-				<input name="timezone" value="America/Sao_Paulo" required />
-			</label>
-			<label>
-				<span>Inicio da semana</span>
+				<span>{t('Week starts on')}</span>
 				<select name="weekStartsOn">
-					<option value="1">Segunda</option>
-					<option value="0">Domingo</option>
+					<option value="1">{t('Monday')}</option>
+					<option value="0">{t('Sunday')}</option>
 				</select>
 			</label>
-			<button class="button primary align-end" type="submit">Criar</button>
+			<label>
+				<span>{t('Currency')}</span>
+				<input
+					name="currency"
+					list="currency-options"
+					maxlength="3"
+					pattern={'[A-Za-z]{3}'}
+					value={data.locale === 'pt-BR' ? 'BRL' : 'USD'}
+					required
+				/>
+			</label>
+			<button class="button primary align-end" type="submit">{t('Create')}</button>
 		</form>
 	</section>
 </section>

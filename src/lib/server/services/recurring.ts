@@ -8,9 +8,9 @@ import {
 	paymentMethod,
 	recurringExpense
 } from '$lib/server/db/schema';
-import { canWriteExpenses } from '$lib/server/security/roles';
+import { canReviewExpenses, canWriteExpenses } from '$lib/server/security/roles';
 import { advanceDate, todayIso } from '$lib/server/utils/date';
-import { parseBrlToCents } from '$lib/server/utils/money';
+import { parseCurrencyToCents } from '$lib/server/utils/money';
 import { assertCategoryInWorkspace } from '$lib/server/utils/category';
 import type { WorkspaceContext } from './workspaces';
 import { resolveExpenseCatalogSelection } from './expense-catalogs';
@@ -60,11 +60,13 @@ export async function createRecurringExpense(
 	context: WorkspaceContext,
 	input: RecurringExpenseInput
 ) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canWriteExpenses(context.role)) throw error(403, 'Permission denied.');
 	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
 
-	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input);
-	const amountCents = parseBrlToCents(input.amount);
+	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
+		locale: context.locale
+	});
+	const amountCents = parseCurrencyToCents(input.amount);
 
 	return db.transaction(async (tx) => {
 		const [created] = await tx
@@ -75,6 +77,7 @@ export async function createRecurringExpense(
 				createdByUserId: context.userId,
 				description: input.description,
 				amountCents,
+				currency: context.currency,
 				frequency: input.frequency,
 				intervalCount: input.intervalCount,
 				startDate: input.startDate,
@@ -103,7 +106,7 @@ export async function setRecurringExpenseStatus(
 	id: number,
 	status: 'active' | 'paused'
 ) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canWriteExpenses(context.role)) throw error(403, 'Permission denied.');
 
 	const [updated] = await db
 		.update(recurringExpense)
@@ -111,7 +114,7 @@ export async function setRecurringExpenseStatus(
 		.where(and(eq(recurringExpense.id, id), eq(recurringExpense.workspaceId, context.workspaceId)))
 		.returning({ id: recurringExpense.id });
 
-	if (!updated) throw error(404, 'Recorrencia não encontrada.');
+	if (!updated) throw error(404, 'Recurring expense not found.');
 
 	await db.insert(auditEvent).values({
 		workspaceId: context.workspaceId,
@@ -124,9 +127,9 @@ export async function setRecurringExpenseStatus(
 
 export async function materializeDueRecurringExpenses(
 	context: WorkspaceContext,
-	asOf = todayIso(context.timezone)
+	asOf = todayIso()
 ) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canWriteExpenses(context.role)) throw error(403, 'Permission denied.');
 
 	const schedules = await db
 		.select()
@@ -148,6 +151,9 @@ export async function materializeDueRecurringExpenses(
 	if (schedules.length === 0) return { createdCount: 0 };
 
 	let createdCount = 0;
+	const reviewStatus = canReviewExpenses(context.role) ? 'approved' : 'pending';
+	const reviewedByUserId = reviewStatus === 'approved' ? context.userId : null;
+	const reviewedAt = reviewStatus === 'approved' ? new Date() : null;
 
 	await db.transaction(async (tx) => {
 		for (const schedule of schedules) {
@@ -174,11 +180,15 @@ export async function materializeDueRecurringExpenses(
 							createdByUserId: schedule.createdByUserId,
 							description: schedule.description,
 							amountCents: schedule.amountCents,
+							currency: schedule.currency,
 							expenseDate,
 							paymentMethodId: schedule.paymentMethodId,
 							paymentMethod: schedule.paymentMethod,
 							notes: schedule.notes,
-							sourceRecurringExpenseId: schedule.id
+							sourceRecurringExpenseId: schedule.id,
+							reviewStatus,
+							reviewedByUserId,
+							reviewedAt
 						}))
 					)
 					.onConflictDoNothing()
@@ -204,7 +214,7 @@ export async function materializeDueRecurringExpenses(
 				action: 'recurring_expense.materialized',
 				entityType: 'recurring_expense',
 				entityId: null,
-				metadata: { createdCount, asOf }
+				metadata: { createdCount, asOf, reviewStatus }
 			});
 		}
 	});

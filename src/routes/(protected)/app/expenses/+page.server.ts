@@ -30,13 +30,15 @@ import {
 	parseForm
 } from '$lib/server/validation';
 import { canReconcileExpenses, canReviewExpenses } from '$lib/server/security/roles';
+import { translate } from '$lib/i18n';
 
 export const load: PageServerLoad = async (event) => {
 	const context = await requireWorkspaceContext(event);
 	const parsedFilters = expenseFilterSchema.safeParse(
 		Object.fromEntries(event.url.searchParams.entries())
 	);
-	if (!parsedFilters.success) throw error(400, 'Filtros invalidos.');
+	if (!parsedFilters.success)
+		throw error(400, translate(event.locals.locale, 'Filters are invalid.'));
 
 	const [categories, catalogs, expenses, expenseSummary] = await Promise.all([
 		listCategories(context),
@@ -64,7 +66,8 @@ export const actions: Actions = {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, expenseSchema);
-		if (!parsed.success) return fail(400, { message: 'Confira os dados da despesa.' });
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Check expense data.') });
 
 		await createExpense(context, parsed.data);
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
@@ -73,7 +76,8 @@ export const actions: Actions = {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, expenseCatalogSchema);
-		if (!parsed.success) return fail(400, { message: 'Confira o cadastro auxiliar.' });
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Check auxiliary catalog.') });
 
 		await createExpenseCatalogItem(context, parsed.data);
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
@@ -82,7 +86,8 @@ export const actions: Actions = {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, expenseCatalogUpdateSchema);
-		if (!parsed.success) return fail(400, { message: 'Confira o cadastro auxiliar.' });
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Check auxiliary catalog.') });
 
 		try {
 			await updateExpenseCatalogItem(context, parsed.data);
@@ -98,7 +103,8 @@ export const actions: Actions = {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, expenseCatalogArchiveSchema);
-		if (!parsed.success) return fail(400, { message: 'Cadastro auxiliar invalido.' });
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Invalid auxiliary catalog.') });
 
 		try {
 			await removeExpenseCatalogItem(context, parsed.data);
@@ -116,7 +122,7 @@ export const actions: Actions = {
 		const id = idSchema.safeParse(formData.get('id'));
 		const parsed = parseForm(formData, expenseSchema);
 		if (!id.success || !parsed.success)
-			return fail(400, { message: 'Confira os dados da despesa.' });
+			return fail(400, { message: translate(event.locals.locale, 'Check expense data.') });
 
 		await updateExpense(context, id.data, parsed.data);
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
@@ -125,7 +131,8 @@ export const actions: Actions = {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const id = idSchema.safeParse(formData.get('id'));
-		if (!id.success) return fail(400, { message: 'Despesa invalida.' });
+		if (!id.success)
+			return fail(400, { message: translate(event.locals.locale, 'Invalid expense.') });
 
 		await deleteExpense(context, id.data);
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
@@ -134,7 +141,8 @@ export const actions: Actions = {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, expenseReviewSchema);
-		if (!parsed.success) return fail(400, { message: 'Confira os dados da revisao.' });
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Check review data.') });
 
 		await reviewExpense(context, parsed.data.id, parsed.data);
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
@@ -143,7 +151,8 @@ export const actions: Actions = {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, expensePaymentSchema);
-		if (!parsed.success) return fail(400, { message: 'Confira os dados do pagamento.' });
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Check payment data.') });
 
 		await updateExpensePaymentStatus(context, parsed.data.id, parsed.data);
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
@@ -154,7 +163,7 @@ export const actions: Actions = {
 		const id = idSchema.safeParse(formData.get('id'));
 		const file = formData.get('attachment');
 		if (!id.success || !(file instanceof File) || file.size === 0) {
-			return fail(400, { message: 'Anexo invalido.' });
+			return fail(400, { message: translate(event.locals.locale, 'Invalid attachment.') });
 		}
 
 		await saveExpenseAttachment(context, id.data, file);

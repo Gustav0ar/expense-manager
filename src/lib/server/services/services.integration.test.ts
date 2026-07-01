@@ -43,6 +43,7 @@ import { acceptInvitation, getPendingInvitation } from './invitations';
 import {
 	createExpense,
 	deleteExpense,
+	getAnalyticalExpenseReport,
 	getDashboard,
 	getExpenseListSummary,
 	getReport,
@@ -58,6 +59,7 @@ import {
 	updateExpenseCatalogItem
 } from './expense-catalogs';
 import { importExpenses, listImportBatches } from './imports';
+import { createRecurringExpense, materializeDueRecurringExpenses } from './recurring';
 import { inviteMember, type WorkspaceContext } from './workspaces';
 
 const workspaceIds: number[] = [];
@@ -79,7 +81,7 @@ describe('server service integration', () => {
 
 	it('persists failed-only imports with batch counters and failed row details', async () => {
 		const fixture = await createWorkspaceFixture();
-		const file = new File(['Data;Descricao;Valor\nbad;;abc\n'], 'falhas.csv', {
+		const file = new File(['Data;Descrição;Valor\nbad;;abc\n'], 'falhas.csv', {
 			type: 'text/csv'
 		});
 
@@ -87,7 +89,7 @@ describe('server service integration', () => {
 
 		expect(result.importBatchId).toBeGreaterThan(0);
 		expect(result).toMatchObject({ importedCount: 0, failedCount: 1 });
-		expect(result.failedRows[0]?.message).toContain('data, descrição ou valor');
+		expect(result.failedRows[0]?.message).toContain('date, description or amount');
 
 		const [batch] = await db
 			.select()
@@ -113,7 +115,7 @@ describe('server service integration', () => {
 	it('records valid import rows rejected by business validation', async () => {
 		const fixture = await createWorkspaceFixture();
 		const file = new File(
-			['Data;Descricao;Valor;Categoria\n26/06/2026;Compra;35,50;Inexistente\n'],
+			['Data;Descrição;Valor;Categoria\n26/06/2026;Compra;35,50;Inexistente\n'],
 			'sem-categoria.csv',
 			{
 				type: 'text/csv'
@@ -125,7 +127,7 @@ describe('server service integration', () => {
 		expect(result).toMatchObject({ importedCount: 0, failedCount: 1 });
 		expect(result.failedRows[0]).toMatchObject({
 			rowNumber: 2,
-			message: 'Categoria não encontrada e nenhuma categoria padrão foi selecionada.'
+			message: 'Category not found and no default category was selected.'
 		});
 	});
 
@@ -139,7 +141,7 @@ describe('server service integration', () => {
 			importExpenses(fixture.context, {
 				sourceType: 'csv',
 				defaultCategoryId: fixture.categoryId + 999_999,
-				file: new File(['Data;Descricao;Valor\n26/06/2026;Compra;35,50\n'], 'padrao.csv', {
+				file: new File(['Data;Descrição;Valor\n26/06/2026;Compra;35,50\n'], 'padrão.csv', {
 					type: 'text/csv'
 				})
 			})
@@ -149,7 +151,7 @@ describe('server service integration', () => {
 			importExpenses(fixture.context, {
 				sourceType: 'csv',
 				defaultCategoryId: fixture.categoryId,
-				file: new File([`Data;Descricao;Valor\n${rows}\n`], 'muitas.csv', { type: 'text/csv' })
+				file: new File([`Data;Descrição;Valor\n${rows}\n`], 'muitas.csv', { type: 'text/csv' })
 			})
 		).rejects.toMatchObject({ status: 400 });
 	});
@@ -157,7 +159,7 @@ describe('server service integration', () => {
 	it('imports valid rows while preserving failed row accounting', async () => {
 		const fixture = await createWorkspaceFixture();
 		const file = new File(
-			['Data;Descricao;Valor\n26/06/2026;Produto limpeza;35,50\nbad;;abc\n'],
+			['Data;Descrição;Valor\n26/06/2026;Produto limpeza;35,50\nbad;;abc\n'],
 			'parcial.csv',
 			{ type: 'text/csv' }
 		);
@@ -181,6 +183,34 @@ describe('server service integration', () => {
 			.from(expense)
 			.where(eq(expense.importBatchId, result.importBatchId));
 		expect(createdExpenses).toEqual([{ description: 'Produto limpeza', amountCents: 3550 }]);
+	});
+
+	it('does not import positive OFX credits as expenses', async () => {
+		const fixture = await createWorkspaceFixture();
+		const file = new File(
+			[
+				`<OFX><BANKTRANLIST>
+					<STMTTRN><DTPOSTED>20260625120000[-3:BRT]<TRNAMT>42.35<NAME>Estorno</STMTTRN>
+					<STMTTRN><DTPOSTED>20260626120000[-3:BRT]<TRNAMT>-21.10<NAME>Despesa OFX</STMTTRN>
+				</BANKTRANLIST></OFX>`
+			],
+			'extrato.ofx',
+			{ type: 'application/x-ofx' }
+		);
+
+		const result = await importExpenses(fixture.context, {
+			sourceType: 'ofx',
+			defaultCategoryId: fixture.categoryId,
+			file
+		});
+
+		expect(result).toMatchObject({ importedCount: 1, failedCount: 1 });
+		expect(result.failedRows[0]?.message).toContain('OFX transaction 1');
+		const createdExpenses = await db
+			.select({ description: expense.description, amountCents: expense.amountCents })
+			.from(expense)
+			.where(eq(expense.importBatchId, result.importBatchId));
+		expect(createdExpenses).toEqual([{ description: 'Despesa OFX', amountCents: 2110 }]);
 	});
 
 	it('applies automatic category rules during imports and archives them safely', async () => {
@@ -246,7 +276,7 @@ describe('server service integration', () => {
 		const memberContext = await createMemberContext(fixture, 'member');
 		await expect(
 			createCategoryRule(memberContext, {
-				name: 'Sem permissao',
+				name: 'Sem permissão',
 				categoryId: supplyCategory.id,
 				matchTarget: 'description',
 				pattern: 'teste',
@@ -268,7 +298,7 @@ describe('server service integration', () => {
 
 		const file = new File(
 			[
-				'Data;Descricao;Valor;Fornecedor;Centro de custo\n26/06/2026;Compra fiscal;35,50;ACME Ltda;Operacao\n'
+				'Data;Descrição;Valor;Fornecedor;Centro de custo\n26/06/2026;Compra fiscal;35,50;ACME Ltda;Operação\n'
 			],
 			'regras.csv',
 			{ type: 'text/csv' }
@@ -293,8 +323,30 @@ describe('server service integration', () => {
 			vendorId: expect.any(Number),
 			costCenterId: expect.any(Number),
 			vendor: 'ACME Ltda',
-			costCenter: 'Operacao',
+			costCenter: 'Operação',
 			reviewStatus: 'approved'
+		});
+
+		const fallbackFile = new File(
+			['Data;Descrição;Valor;Fornecedor\n27/06/2026;Compra com padrão;40,00;ACME Ltda\n'],
+			'regras-com-padrao.csv',
+			{ type: 'text/csv' }
+		);
+		const fallbackResult = await importExpenses(fixture.context, {
+			sourceType: 'csv',
+			defaultCategoryId: fixture.categoryId,
+			file: fallbackFile
+		});
+		const [fallbackExpense] = await db
+			.select({
+				categoryId: expense.categoryId,
+				description: expense.description
+			})
+			.from(expense)
+			.where(eq(expense.importBatchId, fallbackResult.importBatchId));
+		expect(fallbackExpense).toEqual({
+			categoryId: supplyCategory.id,
+			description: 'Compra com padrão'
 		});
 
 		await archiveCategoryRule(fixture.context, createdRule.id);
@@ -312,7 +364,7 @@ describe('server service integration', () => {
 		const initialCatalogs = await createExpenseCatalogs(fixture.context, {
 			paymentMethod: 'Boleto',
 			vendor: 'Fornecedor A',
-			costCenter: 'Operacao'
+			costCenter: 'Operação'
 		});
 		const updatedCatalogs = await createExpenseCatalogs(fixture.context, {
 			paymentMethod: 'Boleto',
@@ -340,7 +392,7 @@ describe('server service integration', () => {
 			costCenterId: initialCatalogs.costCenterId,
 			paymentMethod: 'Boleto',
 			vendor: 'Fornecedor A',
-			costCenter: 'Operacao',
+			costCenter: 'Operação',
 			competencyMonth: '2026-06-01'
 		});
 		await updateExpense(memberContext, expenseId, {
@@ -363,6 +415,73 @@ describe('server service integration', () => {
 			costCenter: 'Diretoria',
 			notes: 'Atualizada'
 		});
+		const pendingAnalytics = await getAnalyticalExpenseReport(
+			fixture.context,
+			{
+				from: '2026-06-01',
+				to: '2026-06-30',
+				reviewStatus: 'pending',
+				q: 'Diretoria'
+			},
+			{ limit: 10 }
+		);
+		expect(pendingAnalytics).toMatchObject({
+			summary: {
+				itemCount: 1,
+				totalCents: 13_000,
+				approvedCents: 0,
+				pendingCents: 13_000,
+				rejectedCents: 0,
+				unpaidCents: 13_000
+			},
+			truncated: false
+		});
+		expect(pendingAnalytics.items[0]).toMatchObject({
+			id: expenseId,
+			expenseDate: '2026-06-26',
+			competencyMonth: '2026-06-01',
+			description: 'Compra revisada',
+			categoryName: 'Limpeza',
+			categoryIcon: '🧼',
+			amountCents: 13_000,
+			paymentMethod: 'Boleto',
+			vendor: 'Fornecedor B',
+			costCenter: 'Diretoria',
+			reviewStatus: 'pending',
+			paymentStatus: 'unpaid',
+			notes: 'Atualizada',
+			attachmentCount: 0
+		});
+		await expect(
+			listExpenses(fixture.context, {
+				vendorId: updatedCatalogs.vendorId,
+				costCenterId: updatedCatalogs.costCenterId,
+				competencyMonth: '2026-06-01'
+			})
+		).resolves.toMatchObject({
+			items: [
+				expect.objectContaining({
+					id: expenseId,
+					vendorId: updatedCatalogs.vendorId,
+					costCenterId: updatedCatalogs.costCenterId,
+					competencyMonth: '2026-06-01'
+				})
+			],
+			nextCursor: null
+		});
+		await expect(
+			getExpenseListSummary(fixture.context, {
+				vendorId: updatedCatalogs.vendorId,
+				costCenterId: updatedCatalogs.costCenterId,
+				competencyMonth: '2026-06-01'
+			})
+		).resolves.toEqual({ itemCount: 1, totalCents: 13_000 });
+		await expect(
+			listExpenses(fixture.context, {
+				vendorId: initialCatalogs.vendorId,
+				competencyMonth: '2026-06-01'
+			})
+		).resolves.toMatchObject({ items: [] });
 		await expect(
 			updateExpensePaymentStatus(fixture.context, expenseId, {
 				paymentStatus: 'paid',
@@ -379,6 +498,44 @@ describe('server service integration', () => {
 		await reviewExpense(fixture.context, expenseId, { reviewStatus: 'approved' });
 		dashboard = await getDashboard(fixture.context, '2026-06-01', '2026-06-30');
 		expect(dashboard.totalCents).toBe(13_000);
+
+		await updateExpense(memberContext, expenseId, {
+			categoryId: fixture.categoryId,
+			description: 'Compra revisada',
+			amount: '130,00',
+			expenseDate: '2026-06-26',
+			...updatedCatalogs,
+			competencyMonth: '2026-06',
+			notes: 'Reenviada'
+		});
+		let [workflowRow] = await db
+			.select({
+				reviewStatus: expense.reviewStatus,
+				reviewedByUserId: expense.reviewedByUserId,
+				reviewedAt: expense.reviewedAt,
+				reviewRejectionReason: expense.reviewRejectionReason,
+				paymentStatus: expense.paymentStatus,
+				paidAt: expense.paidAt,
+				reconciledByUserId: expense.reconciledByUserId
+			})
+			.from(expense)
+			.where(eq(expense.id, expenseId));
+		expect(workflowRow).toEqual({
+			reviewStatus: 'pending',
+			reviewedByUserId: null,
+			reviewedAt: null,
+			reviewRejectionReason: null,
+			paymentStatus: 'unpaid',
+			paidAt: null,
+			reconciledByUserId: null
+		});
+		dashboard = await getDashboard(fixture.context, '2026-06-01', '2026-06-30');
+		expect(dashboard.totalCents).toBe(0);
+
+		await reviewExpense(fixture.context, expenseId, { reviewStatus: 'approved' });
+		await expect(deleteExpense(memberContext, expenseId)).rejects.toMatchObject({ status: 403 });
+		dashboard = await getDashboard(fixture.context, '2026-06-01', '2026-06-30');
+		expect(dashboard.totalCents).toBe(13_000);
 		await expect(
 			getReport(fixture.context, {
 				from: '2026-06-01',
@@ -393,14 +550,53 @@ describe('server service integration', () => {
 				totalCents: 13_000
 			}
 		]);
+		await expect(
+			getReport(fixture.context, {
+				from: '2026-06-01',
+				to: '2026-06-30',
+				groupBy: 'payment',
+				vendorId: updatedCatalogs.vendorId,
+				costCenterId: updatedCatalogs.costCenterId,
+				competencyMonth: '2026-06-01'
+			})
+		).resolves.toEqual([
+			{
+				key: 'Boleto',
+				label: 'Boleto',
+				color: '#2563eb',
+				totalCents: 13_000
+			}
+		]);
+		await expect(
+			getReport(fixture.context, {
+				from: '2026-06-01',
+				to: '2026-06-30',
+				groupBy: 'payment',
+				vendorId: initialCatalogs.vendorId,
+				competencyMonth: '2026-06-01'
+			})
+		).resolves.toEqual([]);
 
 		await updateExpensePaymentStatus(fixture.context, expenseId, {
 			paymentStatus: 'reconciled',
 			paidAt: '2026-06-27'
 		});
-		let [workflowRow] = await db
+		await expect(
+			updateExpense(memberContext, expenseId, {
+				categoryId: fixture.categoryId,
+				description: 'Compra paga alterada',
+				amount: '140,00',
+				expenseDate: '2026-06-26',
+				...updatedCatalogs,
+				competencyMonth: '2026-06'
+			})
+		).rejects.toMatchObject({ status: 403 });
+		[workflowRow] = await db
 			.select({
 				reviewStatus: expense.reviewStatus,
+				reviewedByUserId: expense.reviewedByUserId,
+				reviewedAt: expense.reviewedAt,
+				reviewRejectionReason: expense.reviewRejectionReason,
 				paymentStatus: expense.paymentStatus,
 				paidAt: expense.paidAt,
 				reconciledByUserId: expense.reconciledByUserId
@@ -409,9 +605,39 @@ describe('server service integration', () => {
 			.where(eq(expense.id, expenseId));
 		expect(workflowRow).toEqual({
 			reviewStatus: 'approved',
+			reviewedByUserId: fixture.context.userId,
+			reviewedAt: expect.any(Date),
+			reviewRejectionReason: null,
 			paymentStatus: 'reconciled',
 			paidAt: '2026-06-27',
 			reconciledByUserId: fixture.context.userId
+		});
+		await expect(
+			reviewExpense(fixture.context, expenseId, {
+				reviewStatus: 'rejected',
+				reason: ''
+			})
+		).rejects.toMatchObject({ status: 400 });
+		await expect(
+			getAnalyticalExpenseReport(fixture.context, {
+				from: '2026-06-01',
+				to: '2026-06-30',
+				paymentStatus: 'reconciled'
+			})
+		).resolves.toMatchObject({
+			summary: {
+				itemCount: 1,
+				totalCents: 13_000,
+				approvedCents: 13_000,
+				reconciledCents: 13_000
+			},
+			items: [
+				expect.objectContaining({
+					id: expenseId,
+					paidAt: '2026-06-27',
+					paymentStatus: 'reconciled'
+				})
+			]
 		});
 
 		await reviewExpense(fixture.context, expenseId, {
@@ -421,6 +647,9 @@ describe('server service integration', () => {
 		[workflowRow] = await db
 			.select({
 				reviewStatus: expense.reviewStatus,
+				reviewedByUserId: expense.reviewedByUserId,
+				reviewedAt: expense.reviewedAt,
+				reviewRejectionReason: expense.reviewRejectionReason,
 				paymentStatus: expense.paymentStatus,
 				paidAt: expense.paidAt,
 				reconciledByUserId: expense.reconciledByUserId
@@ -429,6 +658,9 @@ describe('server service integration', () => {
 			.where(eq(expense.id, expenseId));
 		expect(workflowRow).toEqual({
 			reviewStatus: 'rejected',
+			reviewedByUserId: fixture.context.userId,
+			reviewedAt: expect.any(Date),
+			reviewRejectionReason: 'Duplicada',
 			paymentStatus: 'unpaid',
 			paidAt: null,
 			reconciledByUserId: null
@@ -441,13 +673,54 @@ describe('server service integration', () => {
 		expect(afterDelete.items).toHaveLength(0);
 	});
 
+	it('keeps recurring expenses generated by members pending until approval', async () => {
+		const fixture = await createWorkspaceFixture();
+		const memberContext = await createMemberContext(fixture, 'member');
+
+		const schedule = await createRecurringExpense(memberContext, {
+			categoryId: fixture.categoryId,
+			description: 'Recorrência do membro',
+			amount: '60,00',
+			frequency: 'monthly',
+			intervalCount: 1,
+			startDate: '2026-06-01'
+		});
+		await expect(materializeDueRecurringExpenses(memberContext, '2026-06-30')).resolves.toEqual({
+			createdCount: 1
+		});
+
+		const [generated] = await db
+			.select({
+				id: expense.id,
+				reviewStatus: expense.reviewStatus,
+				reviewedByUserId: expense.reviewedByUserId,
+				reviewedAt: expense.reviewedAt,
+				sourceRecurringExpenseId: expense.sourceRecurringExpenseId
+			})
+			.from(expense)
+			.where(eq(expense.sourceRecurringExpenseId, schedule.id));
+		expect(generated).toEqual({
+			id: expect.any(Number),
+			reviewStatus: 'pending',
+			reviewedByUserId: null,
+			reviewedAt: null,
+			sourceRecurringExpenseId: schedule.id
+		});
+
+		let dashboard = await getDashboard(fixture.context, '2026-06-01', '2026-06-30');
+		expect(dashboard.totalCents).toBe(0);
+		await reviewExpense(fixture.context, generated.id, { reviewStatus: 'approved' });
+		dashboard = await getDashboard(fixture.context, '2026-06-01', '2026-06-30');
+		expect(dashboard.totalCents).toBe(6_000);
+	});
+
 	it('paginates installments and covers expense validation branches', async () => {
 		const fixture = await createWorkspaceFixture();
 		const viewerContext = await createMemberContext(fixture, 'viewer');
 		await expect(
 			createExpense(viewerContext, {
 				categoryId: fixture.categoryId,
-				description: 'Sem permissao',
+				description: 'Sem permissão',
 				amount: '10,00',
 				expenseDate: '2026-06-01'
 			})
@@ -462,6 +735,24 @@ describe('server service integration', () => {
 			installments: 2
 		});
 		expect(created.ids).toHaveLength(2);
+
+		const limitedAnalytics = await getAnalyticalExpenseReport(
+			fixture.context,
+			{
+				from: '2026-06-01',
+				to: '2026-07-31'
+			},
+			{ limit: 1 }
+		);
+		expect(limitedAnalytics).toMatchObject({
+			summary: {
+				itemCount: 2,
+				totalCents: 10_000
+			},
+			limit: 1,
+			truncated: true
+		});
+		expect(limitedAnalytics.items).toHaveLength(1);
 
 		const firstPage = await listExpenses(fixture.context, { limit: 1 });
 		expect(firstPage.items).toHaveLength(1);
@@ -511,7 +802,7 @@ describe('server service integration', () => {
 		await expect(
 			updateExpense(fixture.context, created.id, {
 				categoryId: fixture.categoryId + 999_999,
-				description: 'Categoria invalida',
+				description: 'Categoria inválida',
 				amount: '10,00',
 				expenseDate: '2026-06-01'
 			})
@@ -569,7 +860,7 @@ describe('server service integration', () => {
 			db,
 			fixture.context.workspaceId,
 			'vendor',
-			'ACME  Servicos'
+			'ACME  Serviços'
 		);
 		const duplicateSupplier = await getOrCreateCatalogItem(
 			db,
@@ -589,7 +880,7 @@ describe('server service integration', () => {
 		await expect(listExpenseCatalogs(fixture.context)).resolves.toMatchObject({
 			paymentMethods: [expect.objectContaining({ id: pix.id, name: 'PIX' })],
 			vendors: [
-				expect.objectContaining({ id: supplier.id, name: 'ACME Servicos', expenseCount: 0 }),
+				expect.objectContaining({ id: supplier.id, name: 'ACME Serviços', expenseCount: 0 }),
 				expect.objectContaining({ id: duplicateSupplier.id, name: 'Fornecedor B' })
 			],
 			costCenters: [expect.objectContaining({ id: department.id, name: 'Administrativo' })]
@@ -598,7 +889,7 @@ describe('server service integration', () => {
 			updateExpenseCatalogItem(fixture.context, {
 				kind: 'vendor',
 				id: duplicateSupplier.id,
-				name: 'acme servicos'
+				name: 'acme serviços'
 			})
 		).rejects.toMatchObject({ status: 400 });
 
@@ -624,7 +915,7 @@ describe('server service integration', () => {
 			db,
 			fixture.context.workspaceId,
 			'paymentMethod',
-			'Cartao recorrente'
+			'Cartão recorrente'
 		);
 		const [recurringOnlySchedule] = await db
 			.insert(recurringExpense)
@@ -666,7 +957,7 @@ describe('server service integration', () => {
 			.where(eq(recurringExpense.id, recurringOnlySchedule.id));
 		expect(recurringAfterCatalogDelete).toEqual({
 			paymentMethodId: null,
-			paymentMethod: 'Cartao recorrente'
+			paymentMethod: 'Cartão recorrente'
 		});
 
 		await expect(
@@ -816,7 +1107,7 @@ describe('server service integration', () => {
 				'[email:dev]',
 				expect.objectContaining({
 					to: expect.stringContaining('@example.com'),
-					text: expect.stringContaining(`${formatCents(9000)} de ${formatCents(10000)}`)
+					text: expect.stringContaining(`${formatCents(9000)} of ${formatCents(10000)}`)
 				})
 			);
 			expect(emailLog).not.toHaveBeenCalledWith(
@@ -1065,6 +1356,21 @@ describe('server service integration', () => {
 			const download = await getAttachmentForDownload(fixture.context, created!.id);
 			expect(download.contentLength).toBe(stored.sizeBytes);
 			await expect(new Response(download.stream).text()).resolves.toBe(content);
+			await expect(listExpenses(fixture.context, { q: 'Produto limpeza' })).resolves.toMatchObject({
+				items: [
+					expect.objectContaining({
+						id: expenseRow.id,
+						attachments: [
+							expect.objectContaining({
+								id: created!.id,
+								originalName: 'recibo-teste.txt',
+								contentType: 'text/plain',
+								sizeBytes: stored.sizeBytes
+							})
+						]
+					})
+				]
+			});
 
 			await db.update(expense).set({ deletedAt: new Date() }).where(eq(expense.id, expenseRow.id));
 
@@ -1104,7 +1410,7 @@ describe('server service integration', () => {
 				saveExpenseAttachment(
 					fixture.context,
 					expenseRow.id,
-					new File(['conteudo'], 'malware.exe', { type: 'application/x-msdownload' })
+					new File(['conteúdo'], 'malware.exe', { type: 'application/x-msdownload' })
 				)
 			).rejects.toMatchObject({ status: 400 });
 			await expect(
@@ -1133,9 +1439,15 @@ async function createWorkspaceFixture() {
 		.insert(workspace)
 		.values({
 			name: `Workspace ${randomUUID()}`,
-			createdByUserId: owner.id
+			createdByUserId: owner.id,
+			currency: 'USD'
 		})
-		.returning({ id: workspace.id, name: workspace.name, weekStartsOn: workspace.weekStartsOn });
+		.returning({
+			id: workspace.id,
+			name: workspace.name,
+			weekStartsOn: workspace.weekStartsOn,
+			currency: workspace.currency
+		});
 	workspaceIds.push(workspaceRow.id);
 
 	await db.insert(workspaceMember).values({
@@ -1159,8 +1471,9 @@ async function createWorkspaceFixture() {
 		userId: owner.id,
 		workspaceId: workspaceRow.id,
 		workspaceName: workspaceRow.name,
-		timezone: 'America/Sao_Paulo',
 		weekStartsOn: workspaceRow.weekStartsOn,
+		currency: workspaceRow.currency,
+		locale: 'en',
 		role: 'owner'
 	};
 

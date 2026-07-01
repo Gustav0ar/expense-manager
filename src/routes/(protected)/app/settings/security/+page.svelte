@@ -1,19 +1,24 @@
 <script lang="ts">
+	import { translate } from '$lib/i18n';
 	import { KeyRound, ShieldCheck, ShieldOff } from '@lucide/svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form } = $props<{ data: PageData; form: ActionData }>();
+
+	function t(key: string, params?: Record<string, string | number | null | undefined>) {
+		return translate(data.locale, key, params);
+	}
 </script>
 
 <svelte:head>
-	<title>Seguranca | Expense Manager</title>
+	<title>{t('Security')} | Expense Manager</title>
 </svelte:head>
 
 <section class="page-section">
 	<div class="section-heading">
 		<div>
-			<span class="eyebrow">Conta</span>
-			<h2>Seguranca</h2>
+			<span class="eyebrow">{t('Account')}</span>
+			<h2>{t('Security')}</h2>
 		</div>
 	</div>
 
@@ -37,8 +42,10 @@
 					<h3>MFA</h3>
 					<p>
 						{data.mfa.enabled
-							? `${data.mfa.recoveryCodesRemaining} recovery codes restantes`
-							: 'Proteja sua conta com um app autenticador.'}
+							? t('{count} recovery codes remaining', {
+									count: data.mfa.recoveryCodesRemaining
+								})
+							: t('Protect your account with an authenticator app.')}
 					</p>
 				</div>
 			</div>
@@ -47,7 +54,7 @@
 				<form method="post" action="?/beginSetup">
 					<button class="button primary" type="submit">
 						<KeyRound size={18} />
-						<span>Configurar MFA</span>
+						<span>{t('Configure MFA')}</span>
 					</button>
 				</form>
 			{/if}
@@ -55,10 +62,10 @@
 			{#if data.mfa.enabled}
 				<form method="post" action="?/disable" class="stack">
 					<label>
-						<span>Codigo atual</span>
+						<span>{t('Current code')}</span>
 						<input name="code" autocomplete="one-time-code" required />
 					</label>
-					<button class="button danger" type="submit">Desativar MFA</button>
+					<button class="button danger" type="submit">{t('Disable MFA')}</button>
 				</form>
 			{/if}
 		</section>
@@ -66,7 +73,7 @@
 		{#if form?.setup}
 			<section class="panel">
 				<div class="panel-heading">
-					<h3>Ativar MFA</h3>
+					<h3>{t('Enable MFA')}</h3>
 				</div>
 				<div class="setup-code">
 					<span>Secret</span>
@@ -79,10 +86,10 @@
 				<form method="post" action="?/enable" class="stack">
 					<input type="hidden" name="secret" value={form.setup.secret} />
 					<label>
-						<span>Codigo gerado no app</span>
+						<span>{t('Code generated in the app')}</span>
 						<input name="code" autocomplete="one-time-code" inputmode="numeric" required />
 					</label>
-					<button class="button primary" type="submit">Ativar</button>
+					<button class="button primary" type="submit">{t('Enable')}</button>
 				</form>
 			</section>
 		{/if}

@@ -1,19 +1,24 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { translate } from '$lib/i18n';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form } = $props<{ data: PageData; form: ActionData }>();
 	const token = $derived(form?.token ?? data.token);
+
+	function t(key: string) {
+		return translate(data.locale, key);
+	}
 </script>
 
 <svelte:head>
-	<title>Nova senha | Expense Manager</title>
+	<title>{t('New password')} | Expense Manager</title>
 </svelte:head>
 
 <main class="auth-page">
 	<section class="auth-panel">
 		<a class="brand" href={resolve('/')}>Expense Manager</a>
-		<h1>Nova senha</h1>
+		<h1>{t('New password')}</h1>
 
 		{#if form?.message}
 			<p class="notice danger">{form.message}</p>
@@ -23,7 +28,7 @@
 			<input type="hidden" name="token" value={token} />
 
 			<label>
-				<span>Senha</span>
+				<span>{t('Password')}</span>
 				<input
 					name="password"
 					type="password"
@@ -33,7 +38,7 @@
 				/>
 			</label>
 
-			<button class="button primary" type="submit">Salvar senha</button>
+			<button class="button primary" type="submit">{t('Save password')}</button>
 		</form>
 	</section>
 </main>

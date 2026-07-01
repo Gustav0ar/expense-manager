@@ -5,18 +5,20 @@ const isoDateFormatter = new Intl.DateTimeFormat('sv-SE', {
 	day: '2-digit'
 });
 
-export function todayIso(timeZone = 'UTC', date = new Date()) {
-	return formatDateInTimeZone(date, timeZone);
+export function todayIso(date = new Date()) {
+	return isoDateFormatter.format(date);
 }
 
-export function firstDayOfMonth(date = new Date(), timeZone = 'UTC') {
-	const { year, month } = getDatePartsInTimeZone(date, timeZone);
-	return isoDateFormatter.format(new Date(Date.UTC(year, month - 1, 1)));
+export function firstDayOfMonth(date = new Date()) {
+	const year = date.getUTCFullYear();
+	const month = date.getUTCMonth();
+	return isoDateFormatter.format(new Date(Date.UTC(year, month, 1)));
 }
 
-export function lastDayOfMonth(date = new Date(), timeZone = 'UTC') {
-	const { year, month } = getDatePartsInTimeZone(date, timeZone);
-	return isoDateFormatter.format(new Date(Date.UTC(year, month, 0)));
+export function lastDayOfMonth(date = new Date()) {
+	const year = date.getUTCFullYear();
+	const month = date.getUTCMonth();
+	return isoDateFormatter.format(new Date(Date.UTC(year, month + 1, 0)));
 }
 
 export function addDays(date: string, days: number) {
@@ -63,39 +65,4 @@ export function previousPeriod(from: string, to: string) {
 	const previousTo = addDays(from, -1);
 	const previousFrom = addDays(previousTo, -(days - 1));
 	return { from: previousFrom, to: previousTo };
-}
-
-function formatDateInTimeZone(date: Date, timeZone: string) {
-	const { year, month, day } = getDatePartsInTimeZone(date, timeZone);
-	return isoDateFormatter.format(new Date(Date.UTC(year, month - 1, day)));
-}
-
-function getDatePartsInTimeZone(date: Date, timeZone: string) {
-	const formatter = new Intl.DateTimeFormat('en-US', {
-		timeZone: validTimeZone(timeZone),
-		year: 'numeric',
-		month: '2-digit',
-		day: '2-digit'
-	});
-	const parts = Object.fromEntries(
-		formatter
-			.formatToParts(date)
-			.filter((part) => part.type !== 'literal')
-			.map((part) => [part.type, Number(part.value)])
-	);
-
-	return {
-		year: parts.year,
-		month: parts.month,
-		day: parts.day
-	};
-}
-
-function validTimeZone(timeZone: string) {
-	try {
-		new Intl.DateTimeFormat('en-US', { timeZone });
-		return timeZone;
-	} catch {
-		return 'UTC';
-	}
 }

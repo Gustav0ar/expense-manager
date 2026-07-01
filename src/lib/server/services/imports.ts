@@ -14,9 +14,10 @@ import {
 	type ExpenseImportSource,
 	type ImportedExpenseRow
 } from '$lib/server/utils/import';
-import { parseBrlToCents } from '$lib/server/utils/money';
+import { parseCurrencyToCents } from '$lib/server/utils/money';
 import type { WorkspaceContext } from './workspaces';
 import { getActiveRules, matchCategoryRuleFromRules } from './category-rules';
+import { translate } from '$lib/i18n';
 import {
 	assertCatalogName,
 	catalogKindLabel,
@@ -57,14 +58,20 @@ export async function listImportBatches(context: WorkspaceContext) {
 }
 
 export async function importExpenses(context: WorkspaceContext, input: ImportExpensesInput) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
-	if (!input.file || input.file.size === 0) throw error(400, 'Arquivo obrigatório.');
-	if (input.file.size > maxImportBytes) throw error(400, 'Arquivo acima de 1 MB.');
+	if (!canWriteExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
+	if (!input.file || input.file.size === 0)
+		throw error(400, translate(context.locale, 'File is required.'));
+	if (input.file.size > maxImportBytes)
+		throw error(400, translate(context.locale, 'File is larger than 1 MB.'));
 
 	const content = await input.file.text();
-	const parsed = parseExpenseImport(input.sourceType, content);
+	const parsed = parseExpenseImport(input.sourceType, content, context.locale);
 	if (parsed.rows.length > maxImportRows) {
-		throw error(400, `Importe no maximo ${maxImportRows} linhas por vez.`);
+		throw error(
+			400,
+			translate(context.locale, 'Import at most {count} rows at a time.', { count: maxImportRows })
+		);
 	}
 
 	const categories = await db
@@ -84,7 +91,8 @@ export async function importExpenses(context: WorkspaceContext, input: ImportExp
 		? activeCategories.find((item) => item.id === input.defaultCategoryId)
 		: null;
 
-	if (input.defaultCategoryId && !defaultCategory) throw error(400, 'Categoria padrão invalida.');
+	if (input.defaultCategoryId && !defaultCategory)
+		throw error(400, translate(context.locale, 'Default category is invalid.'));
 
 	const rules = await getActiveRules(context.workspaceId);
 	const failedRows: FailedImportRow[] = parsed.errors.map((message) => ({
@@ -98,25 +106,31 @@ export async function importExpenses(context: WorkspaceContext, input: ImportExp
 			(row.categoryName
 				? categoriesByName.get(normalizeCatalogName(row.categoryName).toLowerCase())
 				: undefined) ??
-			defaultCategory?.id ??
 			matchCategoryRuleFromRules(rules, {
 				description: row.description,
 				vendor: row.vendor,
 				paymentMethod: row.paymentMethod
-			});
+			}) ??
+			defaultCategory?.id;
 
 		if (!categoryId) {
 			failedRows.push({
 				rowNumber: row.rowNumber,
-				message: 'Categoria não encontrada e nenhuma categoria padrão foi selecionada.'
+				message: translate(
+					context.locale,
+					'Category not found and no default category was selected.'
+				)
 			});
 			continue;
 		}
 
 		try {
-			parseBrlToCents(row.amount);
+			parseCurrencyToCents(row.amount);
 		} catch {
-			failedRows.push({ rowNumber: row.rowNumber, message: 'Valor inválido.' });
+			failedRows.push({
+				rowNumber: row.rowNumber,
+				message: translate(context.locale, 'Amount is invalid.')
+			});
 			continue;
 		}
 
@@ -132,7 +146,9 @@ export async function importExpenses(context: WorkspaceContext, input: ImportExp
 			failedRows.push({
 				rowNumber: row.rowNumber,
 				message:
-					catalogError instanceof Error ? catalogError.message : 'Cadastro auxiliar inválido.'
+					catalogError instanceof Error
+						? translateCatalogError(context.locale, catalogError.message)
+						: translate(context.locale, 'Invalid auxiliary catalog.')
 			});
 		}
 	}
@@ -189,7 +205,8 @@ export async function importExpenses(context: WorkspaceContext, input: ImportExp
 						categoryId: row.categoryId,
 						createdByUserId: context.userId,
 						description: row.description,
-						amountCents: parseBrlToCents(row.amount),
+						amountCents: parseCurrencyToCents(row.amount),
+						currency: context.currency,
 						expenseDate: row.expenseDate,
 						paymentMethodId: importedPaymentMethod?.id ?? null,
 						paymentMethod: importedPaymentMethod?.name ?? null,
@@ -241,7 +258,7 @@ function normalizeOptionalImportedCatalogName(kind: ExpenseCatalogKind, value?: 
 	try {
 		assertCatalogName(kind, normalized);
 	} catch {
-		throw new Error(`${catalogKindLabel(kind)} inválido.`);
+		throw new Error(`${catalogKindLabel(kind)} is invalid.`);
 	}
 
 	return normalized;
@@ -266,4 +283,31 @@ async function buildCatalogLookup(
 
 function lookupCatalogItem(lookup: Map<string, ExpenseCatalogItem>, name: string | undefined) {
 	return name ? (lookup.get(catalogLookupKey(name)) ?? null) : null;
+}
+
+function translateCatalogError(locale: string, message: string) {
+	for (const kind of ['Payment method', 'Vendor', 'Cost center']) {
+		if (message === `${kind} is invalid.`) {
+			return translate(locale, '{kind} is invalid.', { kind: translate(locale, kind) });
+		}
+		if (message === `${kind} must be at least 2 characters.`) {
+			return translate(locale, '{kind} must be at least 2 characters.', {
+				kind: translate(locale, kind)
+			});
+		}
+		const maxMatch = new RegExp(`^${kind} must be at most (\\d+) characters\\.$`).exec(message);
+		if (maxMatch) {
+			return translate(locale, '{kind} must be at most {count} characters.', {
+				kind: translate(locale, kind),
+				count: maxMatch[1]
+			});
+		}
+		if (message === `${kind} contains invalid characters.`) {
+			return translate(locale, '{kind} contains invalid characters.', {
+				kind: translate(locale, kind)
+			});
+		}
+	}
+
+	return message;
 }

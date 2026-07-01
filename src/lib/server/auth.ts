@@ -7,6 +7,7 @@ import { building } from '$app/environment';
 import { db } from '$lib/server/db';
 import { sendPasswordResetEmail, sendVerificationEmail } from '$lib/server/email';
 import { buildTrustedOrigins } from '$lib/server/security/origin';
+import { defaultLocale } from '$lib/i18n';
 
 const buildTimeSecret = 'build-time-placeholder-build-time-placeholder';
 const developmentSecret = 'development-secret-development-secret-32';
@@ -32,19 +33,19 @@ export const auth = betterAuth({
 		requireEmailVerification,
 		minPasswordLength: 10,
 		sendResetPassword: async ({ user, url }) => {
-			await sendPasswordResetEmail(user.email, url);
+			await sendPasswordResetEmail(user.email, url, getCurrentLocale());
 		}
 	},
 	emailVerification: {
 		sendOnSignUp: requireEmailVerification,
 		sendVerificationEmail: async ({ user, url }) => {
-			await sendVerificationEmail(user.email, url);
+			await sendVerificationEmail(user.email, url, getCurrentLocale());
 		}
 	},
 	rateLimit: {
 		enabled: true,
 		window: 60,
-		max: 100
+		max: getBetterAuthRateLimitMax()
 	},
 	plugins: [
 		sveltekitCookies(getRequestEvent) // make sure this is the last plugin in the array
@@ -69,4 +70,17 @@ function getAuthSecret() {
 		throw new Error('BETTER_AUTH_SECRET must be a high-entropy production secret.');
 	}
 	return value;
+}
+
+function getBetterAuthRateLimitMax() {
+	const parsed = Number.parseInt(env.BETTER_AUTH_RATE_LIMIT_MAX || '100', 10);
+	return Number.isFinite(parsed) && parsed >= 1 ? parsed : 100;
+}
+
+function getCurrentLocale() {
+	try {
+		return getRequestEvent().locals.locale;
+	} catch {
+		return defaultLocale;
+	}
 }

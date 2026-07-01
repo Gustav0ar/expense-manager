@@ -50,9 +50,9 @@ export async function acceptInvitation(token: string, userId: string, userEmail:
 			)
 			.limit(1);
 
-		if (!invitation) throw error(404, 'Convite inválido ou expirado.');
+		if (!invitation) throw error(404, 'Invalid invite or expired.');
 		if (!safeEqual(invitation.email.toLowerCase(), userEmail.toLowerCase())) {
-			throw error(403, 'Este convite pertence a outro e-mail.');
+			throw error(403, 'This invite belongs to another email.');
 		}
 
 		const [accepted] = await tx
@@ -67,7 +67,7 @@ export async function acceptInvitation(token: string, userId: string, userEmail:
 			)
 			.returning({ id: workspaceInvitation.id });
 
-		if (!accepted) throw error(404, 'Convite inválido ou expirado.');
+		if (!accepted) throw error(404, 'Invalid invite or expired.');
 
 		await tx
 			.insert(workspaceMember)

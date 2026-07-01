@@ -72,6 +72,14 @@ describe('date format helpers', () => {
 		expect(getBrowserLocales()).toBe('pt-BR');
 	});
 
+	it('prefers the html lang when the app overrides the locale', () => {
+		vi.stubGlobal('window', {});
+		vi.stubGlobal('document', { documentElement: { lang: 'pt-BR' } });
+		vi.stubGlobal('navigator', { languages: ['en-US'], language: 'en-US' });
+
+		expect(getBrowserLocales()).toBe('pt-BR');
+	});
+
 	it('falls back when Intl formatRange is not available', () => {
 		const original = Intl.DateTimeFormat.prototype.formatRange;
 		Object.defineProperty(Intl.DateTimeFormat.prototype, 'formatRange', {

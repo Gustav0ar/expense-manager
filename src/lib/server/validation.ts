@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { categoryEmojiValues } from '$lib/category-emojis';
-import { parseBrlToCents } from '$lib/server/utils/money';
+import { defaultCurrency, isValidCurrencyCode } from '$lib/i18n';
+import { parseCurrencyToCents } from '$lib/server/utils/money';
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const maxRangeDays = 3660;
@@ -18,7 +19,7 @@ const normalizedCatalogName = z
 	.min(2)
 	.max(120)
 	.refine((value) => !hasControlCharacters(value), {
-		message: 'Nome não pode conter caracteres de controle.'
+		message: 'Name cannot contain control characters.'
 	})
 	.transform((value) => value.replace(/\s+/g, ' '));
 
@@ -43,11 +44,19 @@ export function isValidIsoDate(value: string) {
 export const isoDateSchema = z
 	.string()
 	.regex(datePattern)
-	.refine(isValidIsoDate, { message: 'Data inválida.' });
+	.refine(isValidIsoDate, { message: 'Invalid date.' });
 
 const optionalDateSchema = z.preprocess(
 	(value) => (value === '' ? undefined : value),
 	isoDateSchema.optional()
+);
+const optionalReviewStatusSchema = z.preprocess(
+	(value) => (value === '' ? undefined : value),
+	z.enum(['pending', 'approved', 'rejected']).optional()
+);
+const optionalPaymentStatusSchema = z.preprocess(
+	(value) => (value === '' ? undefined : value),
+	z.enum(['unpaid', 'paid', 'reconciled']).optional()
 );
 const monthSchema = z.preprocess((value) => {
 	if (typeof value === 'string' && /^\d{4}-\d{2}$/.test(value)) return `${value}-01`;
@@ -64,7 +73,7 @@ function validateDateRange(values: { from?: string; to?: string }, context: z.Re
 		context.addIssue({
 			code: 'custom',
 			path: ['to'],
-			message: 'Data final deve ser maior ou igual a data inicial.'
+			message: 'End date must be greater than or equal to start date.'
 		});
 	}
 
@@ -72,7 +81,7 @@ function validateDateRange(values: { from?: string; to?: string }, context: z.Re
 		context.addIssue({
 			code: 'custom',
 			path: ['to'],
-			message: 'Intervalo maximo permitido e de 10 anos.'
+			message: 'Maximum allowed range is 10 years.'
 		});
 	}
 }
@@ -91,10 +100,20 @@ export const themePreferenceSchema = z.object({
 	theme: z.enum(['system', 'light', 'dark'])
 });
 
+export const localePreferenceSchema = z.object({
+	locale: z.enum(['system', 'en', 'pt-BR'])
+});
+
+const currencySchema = z
+	.string()
+	.trim()
+	.toUpperCase()
+	.refine(isValidCurrencyCode, { message: 'Currency is invalid.' });
+
 export const workspaceSchema = z.object({
 	name: z.string().trim().min(2).max(80),
-	timezone: z.string().trim().min(2).max(80).default('America/Sao_Paulo'),
-	weekStartsOn: z.coerce.number().int().min(0).max(6).default(1)
+	weekStartsOn: z.coerce.number().int().min(0).max(6).default(1),
+	currency: currencySchema.default(defaultCurrency)
 });
 
 export const categorySchema = z.object({
@@ -117,7 +136,7 @@ export const expenseCatalogSchema = z
 			context.addIssue({
 				code: 'custom',
 				path: ['name'],
-				message: 'Pagamento deve ter no maximo 80 caracteres.'
+				message: 'Payment must be at most 80 characters.'
 			});
 		}
 	});
@@ -142,13 +161,13 @@ export const expenseSchema = z.object({
 		.refine(
 			(value) => {
 				try {
-					parseBrlToCents(value);
+					parseCurrencyToCents(value);
 					return true;
 				} catch {
 					return false;
 				}
 			},
-			{ message: 'Valor inválido.' }
+			{ message: 'Amount is invalid.' }
 		),
 	expenseDate: isoDateSchema,
 	paymentMethodId: optionalIdSchema,
@@ -164,8 +183,11 @@ export const expenseFilterSchema = z
 		from: optionalDateSchema,
 		to: optionalDateSchema,
 		categoryId: optionalIdSchema,
-		reviewStatus: z.enum(['pending', 'approved', 'rejected']).optional(),
-		paymentStatus: z.enum(['unpaid', 'paid', 'reconciled']).optional(),
+		vendorId: optionalIdSchema,
+		costCenterId: optionalIdSchema,
+		competencyMonth: optionalMonthSchema,
+		reviewStatus: optionalReviewStatusSchema,
+		paymentStatus: optionalPaymentStatusSchema,
 		q: z.string().trim().max(120).optional(),
 		cursor: z.string().trim().max(500).optional()
 	})
@@ -175,8 +197,16 @@ export const reportFilterSchema = z
 	.object({
 		from: isoDateSchema,
 		to: isoDateSchema,
-		groupBy: z.enum(['category', 'week', 'month', 'year', 'payment']).default('category'),
-		categoryId: optionalIdSchema
+		groupBy: z
+			.enum(['category', 'week', 'month', 'year', 'payment', 'expense'])
+			.default('category'),
+		categoryId: optionalIdSchema,
+		vendorId: optionalIdSchema,
+		costCenterId: optionalIdSchema,
+		competencyMonth: optionalMonthSchema,
+		reviewStatus: optionalReviewStatusSchema,
+		paymentStatus: optionalPaymentStatusSchema,
+		q: z.string().trim().max(120).optional()
 	})
 	.superRefine(validateDateRange);
 
@@ -202,13 +232,13 @@ export const budgetSchema = z.object({
 		.refine(
 			(value) => {
 				try {
-					parseBrlToCents(value);
+					parseCurrencyToCents(value);
 					return true;
 				} catch {
 					return false;
 				}
 			},
-			{ message: 'Valor inválido.' }
+			{ message: 'Amount is invalid.' }
 		),
 	warningThresholdPct: z.coerce.number().int().min(1).max(100).default(80)
 });
@@ -225,13 +255,13 @@ export const recurringExpenseSchema = z
 			.refine(
 				(value) => {
 					try {
-						parseBrlToCents(value);
+						parseCurrencyToCents(value);
 						return true;
 					} catch {
 						return false;
 					}
 				},
-				{ message: 'Valor inválido.' }
+				{ message: 'Amount is invalid.' }
 			),
 		frequency: z.enum(['weekly', 'monthly', 'yearly']).default('monthly'),
 		intervalCount: z.coerce.number().int().min(1).max(24).default(1),
@@ -245,7 +275,7 @@ export const recurringExpenseSchema = z
 			context.addIssue({
 				code: 'custom',
 				path: ['endDate'],
-				message: 'Data final deve ser maior ou igual a data inicial.'
+				message: 'End date must be greater than or equal to start date.'
 			});
 		}
 	});
@@ -266,11 +296,21 @@ export const categoryRuleSchema = z.object({
 	priority: z.coerce.number().int().min(1).max(1000).default(100)
 });
 
-export const expenseReviewSchema = z.object({
-	id: idSchema,
-	reviewStatus: z.enum(['approved', 'rejected']),
-	reason: optionalTrimmedText(500)
-});
+export const expenseReviewSchema = z
+	.object({
+		id: idSchema,
+		reviewStatus: z.enum(['approved', 'rejected']),
+		reason: optionalTrimmedText(500)
+	})
+	.superRefine((values, context) => {
+		if (values.reviewStatus === 'rejected' && !values.reason?.trim()) {
+			context.addIssue({
+				code: 'custom',
+				path: ['reason'],
+				message: 'Rejection reason is required.'
+			});
+		}
+	});
 
 export const expensePaymentSchema = z.object({
 	id: idSchema,

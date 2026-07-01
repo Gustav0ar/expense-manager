@@ -28,7 +28,7 @@ export function base32Decode(input: string) {
 
 	for (const char of normalized) {
 		const value = alphabet.indexOf(char);
-		if (value === -1) throw new Error('Secret TOTP inválido.');
+		if (value === -1) throw new Error('TOTP secret is invalid.');
 		bits += value.toString(2).padStart(5, '0');
 	}
 

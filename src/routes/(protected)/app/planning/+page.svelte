@@ -1,36 +1,53 @@
 <script lang="ts">
 	import LocalizedDate from '$lib/components/LocalizedDate.svelte';
 	import LocalizedDateTime from '$lib/components/LocalizedDateTime.svelte';
+	import { translate } from '$lib/i18n';
 	import { formatCents } from '$lib/utils/format';
 	import { Bell, FileUp, Pause, Play, RefreshCw, Target, Trash2 } from '@lucide/svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form } = $props<{ data: PageData; form: ActionData }>();
+	const currency = $derived(data.currentWorkspace?.currency ?? 'USD');
+	const amountPlaceholder = $derived(data.locale === 'pt-BR' ? '0,00' : '0.00');
 
 	function amountInputValue(cents: number | null) {
 		return cents == null ? '' : (cents / 100).toFixed(2).replace('.', ',');
 	}
 
 	function frequencyLabel(value: string, interval: number) {
-		const base = value === 'weekly' ? 'semana' : value === 'yearly' ? 'ano' : 'mes';
-		return interval === 1 ? `Todo ${base}` : `A cada ${interval} ${base}es`;
+		const unit = value === 'weekly' ? t('week') : value === 'yearly' ? t('year') : t('month');
+		const unitPlural =
+			value === 'weekly' ? t('weeks') : value === 'yearly' ? t('years') : t('months');
+		return interval === 1
+			? t('Every {unit}', { unit })
+			: t('Every {interval} {unitPlural}', { interval, unitPlural });
 	}
 
 	function importFailureSummary(batch: PageData['importBatches'][number]) {
 		if (batch.failedCount === 0) return '0';
-		return `${batch.failedCount} falha${batch.failedCount === 1 ? '' : 's'}`;
+		return batch.failedCount === 1
+			? t('{count} failure', { count: batch.failedCount })
+			: t('{count} failures', { count: batch.failedCount });
+	}
+
+	function t(key: string, params?: Record<string, string | number | null | undefined>) {
+		return translate(data.locale, key, params);
+	}
+
+	function money(cents: number) {
+		return formatCents(cents, currency, data.locale);
 	}
 </script>
 
 <svelte:head>
-	<title>Planejamento | Expense Manager</title>
+	<title>{t('Planning')} | Expense Manager</title>
 </svelte:head>
 
 <section class="page-section">
 	<div class="section-heading">
 		<div>
-			<span class="eyebrow">Controle</span>
-			<h2>Planejamento</h2>
+			<span class="eyebrow">{t('Control')}</span>
+			<h2>{t('Planning')}</h2>
 		</div>
 
 		<form method="get" class="inline-form">
@@ -38,9 +55,9 @@
 				type="month"
 				name="periodMonth"
 				value={data.periodMonth.slice(0, 7)}
-				aria-label="Mes do orcamento"
+				aria-label={t('Budget month')}
 			/>
-			<button class="button secondary" type="submit">Ver mes</button>
+			<button class="button secondary" type="submit">{t('View month')}</button>
 		</form>
 	</div>
 
@@ -57,14 +74,14 @@
 	<div class="content-grid two">
 		<section class="panel">
 			<div class="panel-heading">
-				<h3>Orcamento por categoria</h3>
+				<h3>{t('Budget by category')}</h3>
 				<div class="inline-actions">
 					<Target size={19} />
 					<form method="post" action="?/sendBudgetAlerts">
 						<input type="hidden" name="periodMonth" value={data.periodMonth} />
 						<button class="button secondary" type="submit">
 							<Bell size={16} />
-							<span>Enviar alertas</span>
+							<span>{t('Enable alerts')}</span>
 						</button>
 					</form>
 				</div>
@@ -72,7 +89,7 @@
 			<form method="post" action="?/upsertBudget" class="form-grid compact planning-form">
 				<input type="hidden" name="periodMonth" value={data.periodMonth} />
 				<label>
-					<span>Categoria</span>
+					<span>{t('Category')}</span>
 					<select name="categoryId" required>
 						{#each data.categories as category (category.id)}
 							<option value={category.id}>{category.icon ?? '💼'} {category.name}</option>
@@ -80,14 +97,14 @@
 					</select>
 				</label>
 				<label>
-					<span>Valor</span>
-					<input name="amount" inputmode="decimal" placeholder="0,00" required />
+					<span>{t('Value')}</span>
+					<input name="amount" inputmode="decimal" placeholder={amountPlaceholder} required />
 				</label>
 				<label>
-					<span>Alerta (%)</span>
+					<span>{t('Alert')} (%)</span>
 					<input name="warningThresholdPct" type="number" min="1" max="100" value="80" required />
 				</label>
-				<button class="button primary align-end" type="submit">Salvar</button>
+				<button class="button primary align-end" type="submit">{t('Save')}</button>
 			</form>
 
 			<div class="budget-list">
@@ -102,19 +119,19 @@
 								<form method="post" action="?/deleteBudget">
 									<input type="hidden" name="id" value={budget.budgetId} />
 									<input type="hidden" name="periodMonth" value={data.periodMonth} />
-									<button class="icon-button danger" type="submit" aria-label="Remover orcamento">
+									<button class="icon-button danger" type="submit" aria-label={t('Remove budget')}>
 										<Trash2 size={16} />
 									</button>
 								</form>
 							{/if}
 						</div>
 						<div class="budget-values">
-							<strong>{formatCents(budget.spentCents)}</strong>
+							<strong>{money(budget.spentCents)}</strong>
 							<span>
 								{#if budget.amountCents == null}
-									Sem meta
+									{t('No goal')}
 								{:else}
-									de {formatCents(budget.amountCents)}
+									{t('of')} {money(budget.amountCents)}
 								{/if}
 							</span>
 						</div>
@@ -132,7 +149,8 @@
 							<input
 								name="amount"
 								value={amountInputValue(budget.amountCents)}
-								placeholder="0,00"
+								placeholder={amountPlaceholder}
+								aria-label={t('Budget amount')}
 							/>
 							<input
 								name="warningThresholdPct"
@@ -140,9 +158,9 @@
 								min="1"
 								max="100"
 								value={budget.warningThresholdPct}
-								aria-label="Alerta"
+								aria-label={t('Alert')}
 							/>
-							<button class="button secondary" type="submit">Atualizar</button>
+							<button class="button secondary" type="submit">{t('Update')}</button>
 						</form>
 					</article>
 				{/each}
@@ -151,12 +169,12 @@
 
 		<section class="panel">
 			<div class="panel-heading">
-				<h3>Recorrencias</h3>
+				<h3>{t('Recurrences')}</h3>
 				<form method="post" action="?/syncRecurring" class="inline-form">
 					<input type="hidden" name="periodMonth" value={data.periodMonth} />
 					<button class="button secondary" type="submit">
 						<RefreshCw size={16} />
-						<span>Gerar vencidas</span>
+						<span>{t('Generate due')}</span>
 					</button>
 				</form>
 			</div>
@@ -164,24 +182,24 @@
 				<input type="hidden" name="periodMonth" value={data.periodMonth} />
 				<input type="hidden" name="kind" value="paymentMethod" />
 				<label>
-					<span>Novo pagamento</span>
+					<span>{t('New payment')}</span>
 					<input name="name" required minlength="2" maxlength="80" placeholder="Boleto" />
 				</label>
-				<button class="button secondary" type="submit">Criar</button>
+				<button class="button secondary" type="submit">{t('Create')}</button>
 			</form>
 			<form method="post" action="?/createRecurring" class="stack">
 				<input type="hidden" name="periodMonth" value={data.periodMonth} />
 				<label>
-					<span>Descricao</span>
+					<span>{t('Description')}</span>
 					<input name="description" required maxlength="160" />
 				</label>
 				<div class="form-grid compact planning-form recurring-fields">
 					<label>
-						<span>Valor</span>
-						<input name="amount" inputmode="decimal" placeholder="0,00" required />
+						<span>{t('Value')}</span>
+						<input name="amount" inputmode="decimal" placeholder={amountPlaceholder} required />
 					</label>
 					<label>
-						<span>Categoria</span>
+						<span>{t('Category')}</span>
 						<select name="categoryId" required>
 							{#each data.categories as category (category.id)}
 								<option value={category.id}>{category.icon ?? '💼'} {category.name}</option>
@@ -189,42 +207,42 @@
 						</select>
 					</label>
 					<label>
-						<span>Frequencia</span>
+						<span>{t('Frequency')}</span>
 						<select name="frequency">
-							<option value="monthly">Mensal</option>
-							<option value="weekly">Semanal</option>
-							<option value="yearly">Anual</option>
+							<option value="monthly">{t('Monthly')}</option>
+							<option value="weekly">{t('Weekly')}</option>
+							<option value="yearly">{t('Yearly')}</option>
 						</select>
 					</label>
 					<label>
-						<span>Intervalo</span>
+						<span>{t('Interval')}</span>
 						<input name="intervalCount" type="number" min="1" max="24" value="1" />
 					</label>
 				</div>
 				<div class="form-grid compact planning-form recurring-fields">
 					<label>
-						<span>Inicio</span>
+						<span>{t('Start')}</span>
 						<input name="startDate" type="date" required />
 					</label>
 					<label>
-						<span>Fim</span>
+						<span>{t('End')}</span>
 						<input name="endDate" type="date" />
 					</label>
 					<label>
-						<span>Pagamento</span>
+						<span>{t('Payment')}</span>
 						<select name="paymentMethodId">
-							<option value="">Selecione</option>
+							<option value="">{t('Select')}</option>
 							{#each data.catalogs.paymentMethods as paymentMethod (paymentMethod.id)}
 								<option value={paymentMethod.id}>{paymentMethod.name}</option>
 							{/each}
 						</select>
 					</label>
 					<label>
-						<span>Notas</span>
+						<span>{t('Notes')}</span>
 						<input name="notes" maxlength="1000" />
 					</label>
 				</div>
-				<button class="button primary" type="submit">Criar recorrencia</button>
+				<button class="button primary" type="submit">{t('Create recurrence')}</button>
 			</form>
 
 			<div class="recurring-list">
@@ -238,11 +256,11 @@
 							{/if}
 						</div>
 						<div>
-							<strong>{formatCents(item.amountCents)}</strong>
+							<strong>{money(item.amountCents)}</strong>
 							<span>{frequencyLabel(item.frequency, item.intervalCount)}</span>
 						</div>
 						<div>
-							<span>Proximo</span>
+							<span>{t('Next run')}</span>
 							<strong><LocalizedDate value={item.nextRunDate} /></strong>
 						</div>
 						<form
@@ -254,10 +272,10 @@
 							<button class="button secondary" type="submit">
 								{#if item.status === 'active'}
 									<Pause size={16} />
-									<span>Pausar</span>
+									<span>{t('Pause')}</span>
 								{:else}
 									<Play size={16} />
-									<span>Retomar</span>
+									<span>{t('Resume')}</span>
 								{/if}
 							</button>
 						</form>
@@ -269,7 +287,7 @@
 
 	<section class="panel">
 		<div class="panel-heading">
-			<h3>Importar despesas</h3>
+			<h3>{t('Import expenses')}</h3>
 			<FileUp size={19} />
 		</div>
 		<form
@@ -279,32 +297,37 @@
 			class="form-grid compact"
 		>
 			<label>
-				<span>Formato</span>
+				<span>{t('Format')}</span>
 				<select name="sourceType">
 					<option value="csv">CSV</option>
 					<option value="ofx">OFX</option>
 				</select>
 			</label>
 			<label>
-				<span>Categoria padrão</span>
+				<span>{t('Default category')}</span>
 				<select name="defaultCategoryId">
-					<option value="">Usar coluna categoria</option>
+					<option value="">{t('Use category column')}</option>
 					{#each data.categories as category (category.id)}
 						<option value={category.id}>{category.icon ?? '💼'} {category.name}</option>
 					{/each}
 				</select>
 			</label>
 			<label class="span-2">
-				<span>Arquivo</span>
+				<span>{t('File')}</span>
 				<input name="file" type="file" accept=".csv,.ofx,text/csv,application/x-ofx" required />
 			</label>
-			<button class="button primary align-end" type="submit">Importar</button>
+			<button class="button primary align-end" type="submit">{t('Import')}</button>
 		</form>
 
 		{#if form?.importResult?.failedRows?.length}
 			<div class="import-errors">
 				{#each form.importResult.failedRows.slice(0, 6) as row, index (`${row.rowNumber}-${index}`)}
-					<p>Linha {row.rowNumber || '-'}: {row.message}</p>
+					<p>
+						{t('Line {rowNumber}: {message}', {
+							rowNumber: row.rowNumber || '-',
+							message: row.message
+						})}
+					</p>
 				{/each}
 			</div>
 		{/if}
@@ -313,26 +336,31 @@
 			<table>
 				<thead>
 					<tr>
-						<th>Arquivo</th>
-						<th>Formato</th>
-						<th>Importadas</th>
-						<th>Falhas</th>
-						<th>Data</th>
+						<th>{t('File')}</th>
+						<th>{t('Format')}</th>
+						<th>{t('Imported')}</th>
+						<th>{t('Failures')}</th>
+						<th>{t('Date')}</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each data.importBatches as batch (batch.id)}
 						<tr>
-							<td data-label="Arquivo">{batch.fileName}</td>
-							<td data-label="Formato">{batch.sourceType}</td>
-							<td data-label="Importadas">{batch.importedCount}</td>
-							<td data-label="Falhas">
+							<td data-label={t('File')}>{batch.fileName}</td>
+							<td data-label={t('Format')}>{batch.sourceType}</td>
+							<td data-label={t('Imported')}>{batch.importedCount}</td>
+							<td data-label={t('Failures')}>
 								{#if batch.failedRows.length}
 									<details class="import-failure-details">
 										<summary>{importFailureSummary(batch)}</summary>
 										<div>
 											{#each batch.failedRows.slice(0, 4) as row, index (`${batch.id}-${row.rowNumber}-${index}`)}
-												<p>Linha {row.rowNumber || '-'}: {row.message}</p>
+												<p>
+													{t('Line {rowNumber}: {message}', {
+														rowNumber: row.rowNumber || '-',
+														message: row.message
+													})}
+												</p>
 											{/each}
 										</div>
 									</details>
@@ -340,7 +368,7 @@
 									{batch.failedCount}
 								{/if}
 							</td>
-							<td data-label="Data"
+							<td data-label={t('Date')}
 								><LocalizedDateTime value={batch.createdAt} width="compact" /></td
 							>
 						</tr>

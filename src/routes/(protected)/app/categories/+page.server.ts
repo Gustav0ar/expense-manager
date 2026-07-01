@@ -13,6 +13,7 @@ import {
 } from '$lib/server/services/category-rules';
 import { requireWorkspaceContext } from '$lib/server/services/workspaces';
 import { categoryRuleSchema, categorySchema, idSchema, parseForm } from '$lib/server/validation';
+import { translate } from '$lib/i18n';
 
 export const load: PageServerLoad = async (event) => {
 	const context = await requireWorkspaceContext(event);
@@ -30,7 +31,8 @@ export const actions: Actions = {
 	create: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const parsed = parseForm(await event.request.formData(), categorySchema);
-		if (!parsed.success) return fail(400, { message: 'Confira os dados da categoria.' });
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Check category data.') });
 
 		await createCategory(context, parsed.data);
 		throw redirect(303, '/app/categories');
@@ -41,7 +43,7 @@ export const actions: Actions = {
 		const id = idSchema.safeParse(formData.get('id'));
 		const parsed = parseForm(formData, categorySchema);
 		if (!id.success || !parsed.success)
-			return fail(400, { message: 'Confira os dados da categoria.' });
+			return fail(400, { message: translate(event.locals.locale, 'Check category data.') });
 
 		await updateCategory(context, id.data, parsed.data);
 		throw redirect(303, '/app/categories');
@@ -49,7 +51,8 @@ export const actions: Actions = {
 	archive: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const id = idSchema.safeParse((await event.request.formData()).get('id'));
-		if (!id.success) return fail(400, { message: 'Categoria invalida.' });
+		if (!id.success)
+			return fail(400, { message: translate(event.locals.locale, 'Invalid category.') });
 
 		await archiveCategory(context, id.data);
 		throw redirect(303, '/app/categories');
@@ -57,7 +60,8 @@ export const actions: Actions = {
 	createRule: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const parsed = parseForm(await event.request.formData(), categoryRuleSchema);
-		if (!parsed.success) return fail(400, { message: 'Confira os dados da regra.' });
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Check rule data.') });
 
 		await createCategoryRule(context, parsed.data);
 		throw redirect(303, '/app/categories');
@@ -65,7 +69,7 @@ export const actions: Actions = {
 	archiveRule: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const id = idSchema.safeParse((await event.request.formData()).get('id'));
-		if (!id.success) return fail(400, { message: 'Regra invalida.' });
+		if (!id.success) return fail(400, { message: translate(event.locals.locale, 'Invalid rule.') });
 
 		await archiveCategoryRule(context, id.data);
 		throw redirect(303, '/app/categories');

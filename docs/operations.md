@@ -1,8 +1,8 @@
-# Operacao
+# Operations
 
-## Observabilidade do Postgres
+## Postgres Observability
 
-O compose ja carrega `pg_stat_statements` e logs de queries lentas. Para uma passagem manual de diagnostico na VPS, rode:
+The compose setup loads `pg_stat_statements` and slow-query logs. For a manual diagnostic pass on the VPS, run:
 
 ```bash
 docker compose exec -T postgres psql \
@@ -11,30 +11,30 @@ docker compose exec -T postgres psql \
   < scripts/postgres-observability.sql
 ```
 
-O script e somente-leitura e cobre:
+The script is read-only and covers:
 
-- saude geral do banco, conexoes, cache hit, arquivos temporarios e deadlocks;
-- transacoes longas e lock waits com bloqueadores;
-- queries mais caras por tempo total e medio via `pg_stat_statements`;
-- tamanho de tabelas/indices, mistura de scans, tuplas mortas e frescor de vacuum/analyze;
-- candidatos a indices nao usados, indices duplicados e indices invalidos.
+- general database health, connections, cache hit rate, temporary files and deadlocks;
+- long transactions and lock waits with blockers;
+- most expensive queries by total and average time through `pg_stat_statements`;
+- table and index sizes, scan mix, dead tuples and vacuum/analyze freshness;
+- unused-index candidates, duplicate indexes and invalid indexes.
 
-Nao remova indices apenas porque aparecem como nao usados em um ambiente novo. Valide depois de trafego real, jobs de importacao, relatorios e fechamento de mes. Para uma decisao segura, compare:
+Do not remove indexes just because they appear unused in a new environment. Validate after real traffic, import jobs, reports and month-end usage. For a safer decision, compare:
 
 ```sql
 explain (analyze, buffers)
 select ...
 ```
 
-antes e depois em uma copia do banco ou em uma janela operacional.
+before and after in a database copy or an operational maintenance window.
 
-## Hardening do Compose
+## Compose Hardening
 
-O `docker-compose.yml` de producao roda o app como usuario nao-root, com filesystem somente-leitura, `/tmp` em `tmpfs`, capabilities removidas, `no-new-privileges`, limites basicos de CPU/memoria e healthcheck real em `/api/health`.
+The production `docker-compose.yml` runs the app as a non-root user, with a read-only filesystem, `/tmp` in `tmpfs`, dropped capabilities, `no-new-privileges`, basic CPU/memory limits and a real `/api/health` application healthcheck.
 
-O Caddy tambem usa filesystem somente-leitura e preserva apenas `NET_BIND_SERVICE`, necessario para publicar portas 80/443. O Postgres fica mais conservador porque o entrypoint oficial precisa preparar o volume de dados com permissoes corretas.
+Caddy also uses a read-only filesystem and only keeps `NET_BIND_SERVICE`, which is required for publishing ports 80 and 443. Postgres stays more conservative because the official entrypoint needs to prepare the data volume with correct permissions.
 
-Os limites podem ser ajustados por variaveis de ambiente sem editar o compose:
+Limits can be adjusted through environment variables without editing the compose file:
 
 ```bash
 APP_MEM_LIMIT=768m
@@ -45,7 +45,7 @@ CADDY_MEM_LIMIT=256m
 BACKUP_MEM_LIMIT=256m
 ```
 
-Depois de qualquer ajuste operacional, valide a configuracao:
+After any operational change, validate the configuration:
 
 ```bash
 docker compose config
@@ -54,11 +54,35 @@ docker compose ps
 curl -fsS "$ORIGIN/api/health"
 ```
 
-## Backups verificaveis
+## Post-Deploy Smoke Test
 
-O job de backup gera um dump custom do Postgres, valida o arquivo com `pg_restore --list`, cria `.sha256` e repete o processo para o pacote de comprovantes quando existem uploads. Configure `BACKUP_OFFSITE_DIR` apenas se esse caminho estiver montado em storage externo ou outro volume persistente.
+Run the read-only smoke test after publishing a new version:
 
-Para validar manualmente um backup antes de restaurar:
+```bash
+SMOKE_BASE_URL="$ORIGIN" pnpm test:smoke
+```
+
+The smoke suite checks `/api/health`, the login page and protected-route redirects. To also validate a real write path, use a disposable account or allow the suite to register one:
+
+```bash
+SMOKE_BASE_URL="$ORIGIN" SMOKE_WRITE_TESTS=true pnpm test:smoke
+```
+
+If the production environment requires pre-created credentials, provide them explicitly:
+
+```bash
+SMOKE_BASE_URL="$ORIGIN" \
+SMOKE_WRITE_TESTS=true \
+SMOKE_EMAIL="smoke@example.com" \
+SMOKE_PASSWORD="replace-with-private-password" \
+pnpm test:smoke
+```
+
+## Verifiable Backups
+
+The backup job creates a custom Postgres dump, validates it with `pg_restore --list`, writes a `.sha256` checksum and repeats the same process for the attachment package when uploads exist. Configure `BACKUP_OFFSITE_DIR` only when that path is mounted on external storage or another persistent volume.
+
+To manually validate a backup before restoring:
 
 ```bash
 sha256sum -c /backups/expense_manager_YYYYMMDDTHHMMSSZ.dump.sha256

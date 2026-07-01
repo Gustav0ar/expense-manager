@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { categoryEmojiLabels, categoryEmojiValues } from '$lib/category-emojis';
+	import { translate } from '$lib/i18n';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form } = $props<{ data: PageData; form: ActionData }>();
@@ -10,21 +11,29 @@
 	}
 
 	function ruleTargetLabel(value: string) {
-		if (value === 'vendor') return 'Fornecedor';
-		if (value === 'payment') return 'Pagamento';
-		return 'Descricao';
+		if (value === 'vendor') return t('Vendor');
+		if (value === 'payment') return t('Payment');
+		return t('Description');
+	}
+
+	function t(key: string, params?: Record<string, string | number | null | undefined>) {
+		return translate(data.locale, key, params);
+	}
+
+	function emojiLabel(emoji: (typeof categoryEmojiValues)[number]) {
+		return t(categoryEmojiLabels[emoji]);
 	}
 </script>
 
 <svelte:head>
-	<title>Categorias | Expense Manager</title>
+	<title>{t('Categories')} | Expense Manager</title>
 </svelte:head>
 
 <section class="page-section">
 	<div class="section-heading">
 		<div>
-			<span class="eyebrow">Organizacao</span>
-			<h2>Categorias</h2>
+			<span class="eyebrow">{t('Organization')}</span>
+			<h2>{t('Categories')}</h2>
 		</div>
 	</div>
 
@@ -35,32 +44,32 @@
 	<div class="content-grid two">
 		<section class="panel">
 			<div class="panel-heading">
-				<h3>Nova categoria</h3>
+				<h3>{t('New category')}</h3>
 			</div>
 			<form method="post" action="?/create" class="stack">
 				<label>
-					<span>Nome</span>
+					<span>{t('Name')}</span>
 					<input name="name" required maxlength="80" />
 				</label>
 				<label>
-					<span>Cor</span>
+					<span>{t('Color')}</span>
 					<input class="color-picker" name="color" type="color" value="#2563eb" required />
 				</label>
 				<label>
-					<span>Emoji</span>
+					<span>{t('Emoji')}</span>
 					<select name="icon" required>
 						{#each categoryEmojiValues as emoji (emoji)}
-							<option value={emoji}>{emoji} {categoryEmojiLabels[emoji]}</option>
+							<option value={emoji}>{emoji} {emojiLabel(emoji)}</option>
 						{/each}
 					</select>
 				</label>
-				<button class="button primary" type="submit">Criar</button>
+				<button class="button primary" type="submit">{t('Create')}</button>
 			</form>
 		</section>
 
 		<section class="panel">
 			<div class="panel-heading">
-				<h3>Lista</h3>
+				<h3>{t('List')}</h3>
 			</div>
 			<div class="category-list">
 				{#each data.categories as category (category.id)}
@@ -72,22 +81,22 @@
 								name="color"
 								type="color"
 								value={category.color}
-								aria-label="Cor"
+								aria-label={t('Color')}
 							/>
-							<input name="name" value={category.name} required />
-							<select name="icon" aria-label="Emoji">
+							<input name="name" value={category.name} aria-label={t('Category name')} required />
+							<select name="icon" aria-label={t('Emoji')}>
 								{#each categoryEmojiValues as emoji (emoji)}
 									<option value={emoji} selected={(category.icon ?? '💼') === emoji}
-										>{emoji} {categoryEmojiLabels[emoji]}</option
+										>{emoji} {emojiLabel(emoji)}</option
 									>
 								{/each}
 							</select>
-							<button class="button secondary" type="submit">Salvar</button>
+							<button class="button secondary" type="submit">{t('Save')}</button>
 						</form>
 						{#if !category.isArchived}
 							<form method="post" action="?/archive">
 								<input type="hidden" name="id" value={category.id} />
-								<button class="text-button danger" type="submit">Arquivar</button>
+								<button class="text-button danger" type="submit">{t('Archive')}</button>
 							</form>
 						{/if}
 					</article>
@@ -98,15 +107,15 @@
 
 	<section class="panel">
 		<div class="panel-heading">
-			<h3>Regras automaticas</h3>
+			<h3>{t('Automatic rules')}</h3>
 		</div>
 		<form method="post" action="?/createRule" class="form-grid compact">
 			<label>
-				<span>Nome</span>
+				<span>{t('Name')}</span>
 				<input name="name" required maxlength="80" />
 			</label>
 			<label>
-				<span>Categoria</span>
+				<span>{t('Category')}</span>
 				<select name="categoryId" required>
 					{#each activeCategories as category (category.id)}
 						<option value={category.id}>{category.icon ?? '💼'} {category.name}</option>
@@ -114,22 +123,22 @@
 				</select>
 			</label>
 			<label>
-				<span>Campo</span>
+				<span>{t('Field')}</span>
 				<select name="matchTarget">
-					<option value="description">Descricao</option>
-					<option value="vendor">Fornecedor</option>
-					<option value="payment">Pagamento</option>
+					<option value="description">{t('Description')}</option>
+					<option value="vendor">{t('Vendor')}</option>
+					<option value="payment">{t('Payment')}</option>
 				</select>
 			</label>
 			<label>
-				<span>Contem</span>
+				<span>{t('Contains')}</span>
 				<input name="pattern" required maxlength="120" />
 			</label>
 			<label>
-				<span>Prioridade</span>
+				<span>{t('Priority')}</span>
 				<input name="priority" type="number" min="1" max="1000" value="100" required />
 			</label>
-			<button class="button primary align-end" type="submit">Criar regra</button>
+			<button class="button primary align-end" type="submit">{t('Create rule')}</button>
 		</form>
 
 		<div class="category-list">
@@ -138,8 +147,8 @@
 					<div class="rule-summary">
 						<strong>{rule.name}</strong>
 						<span>
-							{ruleTargetLabel(rule.matchTarget)} contem "{rule.pattern}" -> {rule.categoryIcon ??
-								'💼'}
+							{ruleTargetLabel(rule.matchTarget)}
+							{t('contains')} "{rule.pattern}" -> {rule.categoryIcon ?? '💼'}
 							{rule.categoryName}
 						</span>
 					</div>
@@ -147,12 +156,12 @@
 					{#if rule.isActive}
 						<form method="post" action="?/archiveRule">
 							<input type="hidden" name="id" value={rule.id} />
-							<button class="text-button danger" type="submit">Arquivar</button>
+							<button class="text-button danger" type="submit">{t('Archive')}</button>
 						</form>
 					{/if}
 				</article>
 			{:else}
-				<p class="empty">Nenhuma regra criada.</p>
+				<p class="empty">{t('No rule created.')}</p>
 			{/each}
 		</div>
 	</section>

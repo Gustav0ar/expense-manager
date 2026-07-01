@@ -4,6 +4,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { auth } from '$lib/server/auth';
 import { parseForm, signInSchema } from '$lib/server/validation';
 import { assertRateLimit } from '$lib/server/security/rate-limit';
+import { translate } from '$lib/i18n';
 
 export const load: PageServerLoad = (event) => {
 	if (event.locals.user) throw redirect(303, '/app');
@@ -21,7 +22,10 @@ export const actions: Actions = {
 		const next = safeNext(formData.get('next')?.toString() || '/app');
 
 		if (!parsed.success) {
-			return fail(400, { message: 'Confira email e senha.', values: Object.fromEntries(formData) });
+			return fail(400, {
+				message: translate(event.locals.locale, 'Check email and password.'),
+				values: Object.fromEntries(formData)
+			});
 		}
 
 		await assertRateLimit(event, {
@@ -42,7 +46,7 @@ export const actions: Actions = {
 		} catch (err) {
 			if (err instanceof APIError) {
 				return fail(400, {
-					message: 'Credenciais invalidas.',
+					message: translate(event.locals.locale, 'Credentials are invalid.'),
 					values: { email: parsed.data.email, next }
 				});
 			}

@@ -6,6 +6,8 @@ import { auth } from '$lib/server/auth';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { error, redirect, type HandleServerError } from '@sveltejs/kit';
 import { getThemePreference } from '$lib/server/theme';
+import { resolveRequestLocale } from '$lib/server/i18n';
+import { translate } from '$lib/i18n';
 import { randomUUID } from 'node:crypto';
 import { isMfaEnabled, isMfaSessionVerified } from '$lib/server/services/mfa';
 import { isTrustedOrigin } from '$lib/server/security/origin';
@@ -32,11 +34,14 @@ const handleBetterAuth: Handle = async ({ event, resolve }) => {
 	const requestId = event.request.headers.get('x-request-id') || randomUUID();
 	event.locals.requestId = requestId;
 	const themePreference = getThemePreference(event.cookies);
+	const { locale, preference: localePreference } = resolveRequestLocale(event);
+	event.locals.locale = locale;
+	event.locals.localePreference = localePreference;
 	const themedResolve: typeof resolve = (resolveEvent, options) =>
 		resolve(resolveEvent, {
 			...options,
 			transformPageChunk: ({ html }) =>
-				html.replace('<html lang="pt-BR"', `<html lang="pt-BR" data-theme="${themePreference}"`)
+				html.replace('<html lang="en"', `<html lang="${locale}" data-theme="${themePreference}"`)
 		});
 
 	if (unsafeMethods.has(event.request.method)) {
@@ -50,7 +55,7 @@ const handleBetterAuth: Handle = async ({ event, resolve }) => {
 				dev
 			})
 		) {
-			throw error(403, 'Origem inválida.');
+			throw error(403, translate(locale, 'Origin is invalid.'));
 		}
 	}
 
@@ -111,7 +116,7 @@ export const handleError: HandleServerError = ({ error, event, status, message }
 	);
 
 	return {
-		message: status >= 500 ? 'Erro interno.' : message,
+		message: status >= 500 ? 'Internal error.' : message,
 		requestId
 	};
 };

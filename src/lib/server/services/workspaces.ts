@@ -14,12 +14,15 @@ import { randomToken, sha256 } from '$lib/server/utils/crypto';
 import { sendInvitationEmail } from '$lib/server/email';
 import { writeAuditEvent } from './audit';
 import { env } from '$env/dynamic/private';
+import type { SupportedLocale } from '$lib/i18n';
+import { translate } from '$lib/i18n';
 
 export type WorkspaceContext = {
 	userId: string;
 	workspaceId: number;
 	workspaceName: string;
-	timezone: string;
+	currency: string;
+	locale: SupportedLocale;
 	weekStartsOn: number;
 	role: Role;
 };
@@ -40,7 +43,6 @@ export async function getMemberships(userId: string) {
 			workspaceId: workspace.id,
 			workspaceName: workspace.name,
 			currency: workspace.currency,
-			timezone: workspace.timezone,
 			weekStartsOn: workspace.weekStartsOn,
 			role: workspaceMember.role,
 			status: workspaceMember.status
@@ -72,7 +74,8 @@ export async function resolveWorkspaceContext(
 		userId: currentUser.id,
 		workspaceId: selected.workspaceId,
 		workspaceName: selected.workspaceName,
-		timezone: selected.timezone,
+		currency: selected.currency,
+		locale: event.locals.locale,
 		weekStartsOn: selected.weekStartsOn,
 		role: selected.role as Role
 	};
@@ -99,15 +102,15 @@ export function setWorkspaceCookie(cookies: Cookies, workspaceId: number) {
 
 export async function createWorkspace(
 	userId: string,
-	input: { name: string; timezone: string; weekStartsOn: number }
+	input: { name: string; weekStartsOn: number; currency: string }
 ) {
 	const created = await db.transaction(async (tx) => {
 		const [workspaceRow] = await tx
 			.insert(workspace)
 			.values({
 				name: input.name,
-				timezone: input.timezone,
 				weekStartsOn: input.weekStartsOn,
+				currency: input.currency,
 				createdByUserId: userId
 			})
 			.returning({ id: workspace.id, name: workspace.name });
@@ -135,16 +138,17 @@ export async function createWorkspace(
 
 export async function updateWorkspace(
 	context: WorkspaceContext,
-	input: { name: string; timezone: string; weekStartsOn: number }
+	input: { name: string; weekStartsOn: number; currency: string }
 ) {
-	if (!canManageWorkspace(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canManageWorkspace(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const [updated] = await db
 		.update(workspace)
 		.set({
 			name: input.name,
-			timezone: input.timezone,
-			weekStartsOn: input.weekStartsOn
+			weekStartsOn: input.weekStartsOn,
+			currency: input.currency
 		})
 		.where(eq(workspace.id, context.workspaceId))
 		.returning({ id: workspace.id, name: workspace.name });
@@ -173,7 +177,12 @@ export async function listMembers(context: WorkspaceContext) {
 		})
 		.from(workspaceMember)
 		.innerJoin(authUser, eq(authUser.id, workspaceMember.userId))
-		.where(eq(workspaceMember.workspaceId, context.workspaceId))
+		.where(
+			and(
+				eq(workspaceMember.workspaceId, context.workspaceId),
+				eq(workspaceMember.status, 'active')
+			)
+		)
 		.orderBy(workspaceMember.createdAt);
 }
 
@@ -196,7 +205,8 @@ export async function inviteMember(
 	context: WorkspaceContext,
 	input: { email: string; role: 'admin' | 'member' | 'viewer' }
 ) {
-	if (!canManageMembers(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canManageMembers(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const email = input.email.trim().toLowerCase();
 	const token = randomToken();
@@ -240,7 +250,7 @@ export async function inviteMember(
 
 		const invitationId = Number(invitation.id);
 
-		await sendInvitationEmail(email, context.workspaceName, url);
+		await sendInvitationEmail(email, context.workspaceName, url, context.locale);
 
 		await tx.insert(auditEvent).values({
 			workspaceId: context.workspaceId,
@@ -262,7 +272,8 @@ export async function changeMemberRole(
 	memberId: number,
 	role: 'admin' | 'member' | 'viewer'
 ) {
-	if (!canManageMembers(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canManageMembers(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const [member] = await db
 		.update(workspaceMember)
@@ -276,7 +287,7 @@ export async function changeMemberRole(
 		)
 		.returning({ id: workspaceMember.id, userId: workspaceMember.userId });
 
-	if (!member) throw error(404, 'Membro não encontrado.');
+	if (!member) throw error(404, translate(context.locale, 'Member not found.'));
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,
@@ -289,7 +300,8 @@ export async function changeMemberRole(
 }
 
 export async function removeMember(context: WorkspaceContext, memberId: number) {
-	if (!canManageMembers(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canManageMembers(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const [member] = await db
 		.update(workspaceMember)
@@ -303,7 +315,7 @@ export async function removeMember(context: WorkspaceContext, memberId: number) 
 		)
 		.returning({ id: workspaceMember.id });
 
-	if (!member) throw error(404, 'Membro não encontrado.');
+	if (!member) throw error(404, translate(context.locale, 'Member not found.'));
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,

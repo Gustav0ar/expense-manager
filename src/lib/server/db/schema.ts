@@ -27,8 +27,7 @@ export const workspace = pgTable(
 	{
 		id: bigserial('id', { mode: 'number' }).primaryKey(),
 		name: text('name').notNull(),
-		currency: char('currency', { length: 3 }).notNull().default('BRL'),
-		timezone: text('timezone').notNull().default('America/Sao_Paulo'),
+		currency: char('currency', { length: 3 }).notNull().default('USD'),
 		weekStartsOn: integer('week_starts_on').notNull().default(1),
 		createdByUserId: text('created_by_user_id')
 			.notNull()
@@ -311,7 +310,7 @@ export const recurringExpense = pgTable(
 			.references(() => user.id, { onDelete: 'restrict' }),
 		description: text('description').notNull(),
 		amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
-		currency: char('currency', { length: 3 }).notNull().default('BRL'),
+		currency: char('currency', { length: 3 }).notNull().default('USD'),
 		frequency: text('frequency').notNull().default('monthly'),
 		intervalCount: integer('interval_count').notNull().default(1),
 		startDate: date('start_date', { mode: 'string' }).notNull(),
@@ -391,7 +390,7 @@ export const expense = pgTable(
 			.references(() => user.id, { onDelete: 'restrict' }),
 		description: text('description').notNull(),
 		amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
-		currency: char('currency', { length: 3 }).notNull().default('BRL'),
+		currency: char('currency', { length: 3 }).notNull().default('USD'),
 		expenseDate: date('expense_date', { mode: 'string' }).notNull(),
 		paymentMethod: text('payment_method'),
 		vendor: text('vendor'),

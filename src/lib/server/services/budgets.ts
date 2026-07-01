@@ -6,7 +6,7 @@ import { auditEvent, categoryBudget, workspaceMember } from '$lib/server/db/sche
 import { sendBudgetAlertEmail } from '$lib/server/email';
 import { canManageBudgets } from '$lib/server/security/roles';
 import { startOfMonth } from '$lib/server/utils/date';
-import { parseBrlToCents } from '$lib/server/utils/money';
+import { parseCurrencyToCents } from '$lib/server/utils/money';
 import { formatCents } from '$lib/utils/format';
 import { assertCategoryInWorkspace } from '$lib/server/utils/category';
 import type { WorkspaceContext } from './workspaces';
@@ -107,11 +107,11 @@ export async function getBudgetSummary(context: WorkspaceContext, periodMonth: s
 }
 
 export async function upsertBudget(context: WorkspaceContext, input: BudgetInput) {
-	if (!canManageBudgets(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canManageBudgets(context.role)) throw error(403, 'Permission denied.');
 	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
 
 	const periodMonth = startOfMonth(input.periodMonth);
-	const amountCents = parseBrlToCents(input.amount);
+	const amountCents = parseCurrencyToCents(input.amount);
 
 	return db.transaction(async (tx) => {
 		const [saved] = await tx
@@ -148,14 +148,14 @@ export async function upsertBudget(context: WorkspaceContext, input: BudgetInput
 }
 
 export async function deleteBudget(context: WorkspaceContext, id: number) {
-	if (!canManageBudgets(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canManageBudgets(context.role)) throw error(403, 'Permission denied.');
 
 	const [deleted] = await db
 		.delete(categoryBudget)
 		.where(and(eq(categoryBudget.id, id), eq(categoryBudget.workspaceId, context.workspaceId)))
 		.returning({ id: categoryBudget.id, categoryId: categoryBudget.categoryId });
 
-	if (!deleted) throw error(404, 'Orcamento não encontrado.');
+	if (!deleted) throw error(404, 'Budget not found.');
 
 	await db.insert(auditEvent).values({
 		workspaceId: context.workspaceId,
@@ -168,7 +168,7 @@ export async function deleteBudget(context: WorkspaceContext, id: number) {
 }
 
 export async function sendBudgetAlerts(context: WorkspaceContext, periodMonth: string) {
-	if (!canManageBudgets(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canManageBudgets(context.role)) throw error(403, 'Permission denied.');
 
 	const month = startOfMonth(periodMonth);
 	const summary = await getBudgetSummary(context, month);
@@ -192,13 +192,19 @@ export async function sendBudgetAlerts(context: WorkspaceContext, periodMonth: s
 	const emailItems = alertItems.map((item) => ({
 		categoryName: item.categoryName,
 		usagePct: item.usagePct,
-		spentLabel: formatCents(item.spentCents),
-		budgetLabel: formatCents(item.amountCents ?? 0),
+		spentLabel: formatCents(item.spentCents, context.currency, context.locale),
+		budgetLabel: formatCents(item.amountCents ?? 0, context.currency, context.locale),
 		status: item.status
 	}));
 
 	for (const recipient of recipients) {
-		await sendBudgetAlertEmail(recipient.email, context.workspaceName, month, emailItems);
+		await sendBudgetAlertEmail(
+			recipient.email,
+			context.workspaceName,
+			month,
+			emailItems,
+			context.locale
+		);
 	}
 
 	await db.insert(auditEvent).values({

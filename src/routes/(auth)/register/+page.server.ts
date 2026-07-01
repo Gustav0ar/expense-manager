@@ -4,6 +4,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { auth } from '$lib/server/auth';
 import { parseForm, signUpSchema } from '$lib/server/validation';
 import { assertRateLimit } from '$lib/server/security/rate-limit';
+import { translate } from '$lib/i18n';
 
 export const load: PageServerLoad = (event) => {
 	if (event.locals.user) throw redirect(303, '/app');
@@ -18,7 +19,7 @@ export const actions: Actions = {
 
 		if (!parsed.success) {
 			return fail(400, {
-				message: 'Confira nome, email e senha.',
+				message: translate(event.locals.locale, 'Check name, email and password.'),
 				values: Object.fromEntries(formData)
 			});
 		}
@@ -42,7 +43,7 @@ export const actions: Actions = {
 		} catch (err) {
 			if (err instanceof APIError) {
 				return fail(400, {
-					message: err.message || 'Nao foi possivel criar a conta.',
+					message: err.message || translate(event.locals.locale, 'Could not create the account.'),
 					values: { name: parsed.data.name, email: parsed.data.email }
 				});
 			}

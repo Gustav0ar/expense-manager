@@ -41,9 +41,10 @@ describe('validation schemas', () => {
 	it('validates workspace data and applies defaults', () => {
 		expect(workspaceSchema.parse({ name: '  Financeiro  ' })).toEqual({
 			name: 'Financeiro',
-			timezone: 'America/Sao_Paulo',
-			weekStartsOn: 1
+			weekStartsOn: 1,
+			currency: 'USD'
 		});
+		expect(workspaceSchema.parse({ name: 'Financeiro', currency: 'brl' }).currency).toBe('BRL');
 		expect(workspaceSchema.safeParse({ name: 'A', weekStartsOn: 8 }).success).toBe(false);
 	});
 
@@ -92,6 +93,9 @@ describe('validation schemas', () => {
 				from: '2026-06-01',
 				to: '2026-06-30',
 				categoryId: '2',
+				vendorId: '3',
+				costCenterId: '4',
+				competencyMonth: '2026-06',
 				reviewStatus: 'pending',
 				paymentStatus: 'unpaid',
 				q: 'mercado',
@@ -101,6 +105,9 @@ describe('validation schemas', () => {
 			from: '2026-06-01',
 			to: '2026-06-30',
 			categoryId: 2,
+			vendorId: 3,
+			costCenterId: 4,
+			competencyMonth: '2026-06-01',
 			reviewStatus: 'pending',
 			paymentStatus: 'unpaid',
 			q: 'mercado',
@@ -108,12 +115,24 @@ describe('validation schemas', () => {
 		});
 		expect(expenseFilterSchema.safeParse({ reviewStatus: 'waiting' }).success).toBe(false);
 		expect(expenseFilterSchema.safeParse({ paymentStatus: 'late' }).success).toBe(false);
+		expect(expenseFilterSchema.safeParse({ vendorId: 'abc' }).success).toBe(false);
+		expect(expenseFilterSchema.safeParse({ costCenterId: '-1' }).success).toBe(false);
+		expect(expenseFilterSchema.safeParse({ competencyMonth: '2026-13' }).success).toBe(false);
 		expect(expenseFilterSchema.safeParse({ from: '01/06/2026' }).success).toBe(false);
 		expect(expenseFilterSchema.safeParse({ from: '2026-06-31' }).success).toBe(false);
 		expect(expenseFilterSchema.safeParse({ from: '2026-07-01', to: '2026-06-01' }).success).toBe(
 			false
 		);
 		expect(expenseFilterSchema.parse({ categoryId: '' }).categoryId).toBeUndefined();
+		expect(
+			expenseFilterSchema.parse({
+				vendorId: '',
+				costCenterId: '',
+				competencyMonth: '',
+				reviewStatus: '',
+				paymentStatus: ''
+			})
+		).toEqual({});
 		expect(reportFilterSchema.parse({ from: '2026-01-01', to: '2026-12-31' }).groupBy).toBe(
 			'category'
 		);
@@ -125,10 +144,53 @@ describe('validation schemas', () => {
 			}).groupBy
 		).toBe('payment');
 		expect(
+			reportFilterSchema.parse({
+				from: '2026-01-01',
+				to: '2026-12-31',
+				groupBy: 'expense',
+				vendorId: '10',
+				costCenterId: '11',
+				competencyMonth: '2026-06',
+				reviewStatus: 'approved',
+				paymentStatus: 'reconciled',
+				q: ' fornecedor '
+			})
+		).toMatchObject({
+			groupBy: 'expense',
+			vendorId: 10,
+			costCenterId: 11,
+			competencyMonth: '2026-06-01',
+			reviewStatus: 'approved',
+			paymentStatus: 'reconciled',
+			q: 'fornecedor'
+		});
+		expect(
 			reportFilterSchema.safeParse({
 				from: '2026-01-01',
 				to: '2026-12-31',
 				groupBy: 'day'
+			}).success
+		).toBe(false);
+		expect(
+			reportFilterSchema.safeParse({
+				from: '2026-01-01',
+				to: '2026-12-31',
+				groupBy: 'expense',
+				paymentStatus: 'late'
+			}).success
+		).toBe(false);
+		expect(
+			reportFilterSchema.safeParse({
+				from: '2026-01-01',
+				to: '2026-12-31',
+				vendorId: 'abc'
+			}).success
+		).toBe(false);
+		expect(
+			reportFilterSchema.safeParse({
+				from: '2026-01-01',
+				to: '2026-12-31',
+				competencyMonth: '2026-13'
 			}).success
 		).toBe(false);
 		expect(dashboardFilterSchema.safeParse({ from: '2026-02-01', to: '2026-02-31' }).success).toBe(
@@ -197,9 +259,9 @@ describe('validation schemas', () => {
 				endDate: ''
 			})
 		).toMatchObject({ paymentMethodId: 4, endDate: undefined });
-		expect(expenseCatalogSchema.parse({ kind: 'vendor', name: ' ACME   Servicos ' })).toEqual({
+		expect(expenseCatalogSchema.parse({ kind: 'vendor', name: ' ACME   Serviços ' })).toEqual({
 			kind: 'vendor',
-			name: 'ACME Servicos'
+			name: 'ACME Serviços'
 		});
 		expect(
 			expenseCatalogSchema.safeParse({ kind: 'paymentMethod', name: 'x'.repeat(81) }).success
@@ -239,11 +301,16 @@ describe('validation schemas', () => {
 		expect(categoryRuleSchema.safeParse({ name: 'x', categoryId: '3', pattern: 'a' }).success).toBe(
 			false
 		);
-		expect(expenseReviewSchema.parse({ id: '4', reviewStatus: 'rejected', reason: '' })).toEqual({
+		expect(
+			expenseReviewSchema.parse({ id: '4', reviewStatus: 'rejected', reason: 'Duplicada' })
+		).toEqual({
 			id: 4,
 			reviewStatus: 'rejected',
-			reason: ''
+			reason: 'Duplicada'
 		});
+		expect(
+			expenseReviewSchema.safeParse({ id: '4', reviewStatus: 'rejected', reason: '' }).success
+		).toBe(false);
 		expect(expenseReviewSchema.safeParse({ id: '4', reviewStatus: 'pending' }).success).toBe(false);
 		expect(expensePaymentSchema.parse({ id: '4', paymentStatus: 'paid', paidAt: '' })).toEqual({
 			id: 4,
@@ -264,7 +331,6 @@ describe('validation schemas', () => {
 	it('parses FormData through the provided schema', () => {
 		const formData = new FormData();
 		formData.set('name', '  Novo workspace  ');
-		formData.set('timezone', 'America/Sao_Paulo');
 		formData.set('weekStartsOn', '0');
 
 		const parsed = parseForm(formData, workspaceSchema);
@@ -272,8 +338,8 @@ describe('validation schemas', () => {
 		expect(parsed.success).toBe(true);
 		if (parsed.success) {
 			expect(parsed.data).toEqual({
+				currency: 'USD',
 				name: 'Novo workspace',
-				timezone: 'America/Sao_Paulo',
 				weekStartsOn: 0
 			});
 		}

@@ -63,6 +63,13 @@ describe('email helpers', () => {
 						spentLabel: 'R$ 850,00',
 						budgetLabel: 'R$ 1.000,00',
 						status: 'warning'
+					},
+					{
+						categoryName: 'Sem percentual',
+						usagePct: null,
+						spentLabel: 'R$ 0,00',
+						budgetLabel: 'R$ 0,00',
+						status: 'warning'
 					}
 				]
 			);
@@ -71,8 +78,14 @@ describe('email helpers', () => {
 				'[email:dev]',
 				expect.objectContaining({
 					to: 'admin@example.com',
-					subject: 'Alertas de orçamento - Empresa Bcc: bad@example.com',
+					subject: 'Budget alerts - Empresa Bcc: bad@example.com',
 					text: expect.stringContaining('Limpeza <script>: 85%')
+				})
+			);
+			expect(log).toHaveBeenCalledWith(
+				'[email:dev]',
+				expect.objectContaining({
+					text: expect.stringContaining('Sem percentual: 0%')
 				})
 			);
 		} finally {
@@ -135,7 +148,7 @@ describe('email helpers', () => {
 				expect.objectContaining({
 					from: 'no-reply@example.com',
 					to: 'new@example.com',
-					subject: 'Convite para Empresa &lt;Financeiro&gt;'
+					subject: 'Invite to Empresa <Financeiro>'
 				})
 			);
 
@@ -154,6 +167,37 @@ describe('email helpers', () => {
 			});
 		} finally {
 			restoreEmailEnv(previous);
+		}
+	});
+
+	it('localizes transactional email copy when pt-BR is requested', async () => {
+		const previousDeliveryMode = privateEnv.EMAIL_DELIVERY;
+		privateEnv.EMAIL_DELIVERY = 'log';
+		const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+		try {
+			await sendInvitationEmail(
+				'new@example.com',
+				'Empresa Financeira',
+				'https://app.example/invite/abc',
+				'pt-BR'
+			);
+
+			expect(log).toHaveBeenCalledWith(
+				'[email:dev]',
+				expect.objectContaining({
+					to: 'new@example.com',
+					subject: 'Convite para Empresa Financeira',
+					text: expect.stringContaining('Você recebeu um convite')
+				})
+			);
+		} finally {
+			if (previousDeliveryMode === undefined) {
+				delete privateEnv.EMAIL_DELIVERY;
+			} else {
+				privateEnv.EMAIL_DELIVERY = previousDeliveryMode;
+			}
+			log.mockRestore();
 		}
 	});
 });

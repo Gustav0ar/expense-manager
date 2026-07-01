@@ -12,6 +12,6 @@ describe('csv helpers', () => {
 			`"'=IMPORTXML(""https://example.com"")"`
 		);
 		expect(csvCell('  -10+20')).toBe(`"'  -10+20"`);
-		expect(csvCell('@usuario')).toBe(`"'@usuario"`);
+		expect(csvCell('@usuário')).toBe(`"'@usuário"`);
 	});
 });

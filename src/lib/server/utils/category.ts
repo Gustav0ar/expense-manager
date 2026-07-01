@@ -16,5 +16,5 @@ export async function assertCategoryInWorkspace(workspaceId: number, categoryId:
 		)
 		.limit(1);
 
-	if (!row) throw error(400, 'Categoria inválida.');
+	if (!row) throw error(400, 'Category is invalid.');
 }

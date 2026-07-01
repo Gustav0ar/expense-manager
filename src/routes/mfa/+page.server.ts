@@ -3,6 +3,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { assertRateLimit } from '$lib/server/security/rate-limit';
 import { isMfaEnabled, isMfaSessionVerified, verifyMfaChallenge } from '$lib/server/services/mfa';
 import { mfaCodeSchema, parseForm } from '$lib/server/validation';
+import { translate } from '$lib/i18n';
 
 export const load: PageServerLoad = async (event) => {
 	if (!event.locals.user || !event.locals.session?.id) {
@@ -27,7 +28,8 @@ export const actions: Actions = {
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, mfaCodeSchema);
 		const next = safeNext(formData.get('next')?.toString() || '/app');
-		if (!parsed.success) return fail(400, { message: 'Informe o codigo MFA.' });
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Provide the MFA code.') });
 
 		await assertRateLimit(event, {
 			scope: 'auth:mfa',
@@ -42,7 +44,8 @@ export const actions: Actions = {
 			code: parsed.data.code
 		});
 
-		if (!verified) return fail(400, { message: 'Codigo MFA invalido.', next });
+		if (!verified)
+			return fail(400, { message: translate(event.locals.locale, 'Invalid MFA code.'), next });
 		throw redirect(303, next);
 	}
 };

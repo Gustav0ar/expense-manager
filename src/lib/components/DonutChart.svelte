@@ -10,11 +10,17 @@
 	let {
 		items,
 		label,
-		empty = 'Sem dados'
+		empty = 'No data',
+		currency = 'USD',
+		locale,
+		totalLabel = 'Total'
 	}: {
 		items: Item[];
 		label: string;
 		empty?: string;
+		currency?: string;
+		locale?: string;
+		totalLabel?: string;
 	} = $props();
 
 	const radius = 42;
@@ -57,9 +63,9 @@
 					stroke-dashoffset={segment.dashoffset}
 				></circle>
 			{/each}
-			<text class="donut-total-label" x="60" y="55" text-anchor="middle">Total</text>
+			<text class="donut-total-label" x="60" y="55" text-anchor="middle">{totalLabel}</text>
 			<text class="donut-total-value" x="60" y="70" text-anchor="middle">
-				{formatCents(total)}
+				{formatCents(total, currency, locale)}
 			</text>
 		</svg>
 
@@ -68,7 +74,12 @@
 				<div class="chart-legend-item">
 					<span class="legend-dot" style={`--legend-color:${segment.color}`}></span>
 					<span>{segment.label}</span>
-					<strong>{segment.percent.toFixed(1)}%</strong>
+					<strong
+						>{new Intl.NumberFormat(locale, {
+							minimumFractionDigits: 1,
+							maximumFractionDigits: 1
+						}).format(segment.percent)}%</strong
+					>
 				</div>
 			{/each}
 		</div>

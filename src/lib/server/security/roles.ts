@@ -41,6 +41,6 @@ export function canManageBudgets(role: Role) {
 
 export function assertRole(role: Role, allowed: (role: Role) => boolean) {
 	if (!allowed(role)) {
-		throw new Error('Permissao insuficiente.');
+		throw new Error('Permission denied.');
 	}
 }

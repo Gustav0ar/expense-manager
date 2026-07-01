@@ -29,7 +29,7 @@ import {
 	canReviewExpenses,
 	canWriteExpenses
 } from '$lib/server/security/roles';
-import { parseBrlToCents } from '$lib/server/utils/money';
+import { parseCurrencyToCents } from '$lib/server/utils/money';
 import { assertCategoryInWorkspace } from '$lib/server/utils/category';
 import { decodeExpenseCursor, encodeExpenseCursor } from '$lib/server/utils/cursor';
 import {
@@ -43,6 +43,7 @@ import { writeAuditEvent } from './audit';
 import { getBudgetSummary } from './budgets';
 import { randomToken } from '$lib/server/utils/crypto';
 import { resolveExpenseCatalogSelection } from './expense-catalogs';
+import { translate } from '$lib/i18n';
 
 export type ExpenseInput = {
 	categoryId: number;
@@ -61,12 +62,70 @@ export type ExpenseFilters = {
 	from?: string;
 	to?: string;
 	categoryId?: number;
+	vendorId?: number;
+	costCenterId?: number;
+	competencyMonth?: string;
 	reviewStatus?: 'pending' | 'approved' | 'rejected';
 	paymentStatus?: 'unpaid' | 'paid' | 'reconciled';
 	q?: string;
 	cursor?: string;
 	limit?: number;
 };
+
+export type GroupedReportGroupBy = 'category' | 'week' | 'month' | 'year' | 'payment';
+export type ReportGroupBy = GroupedReportGroupBy | 'expense';
+
+export type AnalyticalExpenseReportFilters = Omit<ExpenseFilters, 'cursor' | 'limit'> & {
+	from: string;
+	to: string;
+};
+
+type GroupedReportFilters = Pick<
+	AnalyticalExpenseReportFilters,
+	'from' | 'to' | 'categoryId' | 'vendorId' | 'costCenterId' | 'competencyMonth'
+>;
+
+export type AnalyticalExpenseReportRow = {
+	id: number;
+	expenseDate: string;
+	competencyMonth: string | null;
+	description: string;
+	categoryName: string;
+	categoryColor: string;
+	categoryIcon: string | null;
+	amountCents: number;
+	currency: string;
+	paymentMethod: string | null;
+	vendor: string | null;
+	costCenter: string | null;
+	reviewStatus: 'pending' | 'approved' | 'rejected';
+	paymentStatus: 'unpaid' | 'paid' | 'reconciled';
+	paidAt: string | null;
+	installmentNumber: number | null;
+	installmentsTotal: number | null;
+	notes: string | null;
+	attachmentCount: number;
+	createdAt: Date;
+};
+
+export type AnalyticalExpenseReport = {
+	items: AnalyticalExpenseReportRow[];
+	summary: {
+		itemCount: number;
+		totalCents: number;
+		approvedCents: number;
+		pendingCents: number;
+		rejectedCents: number;
+		paidCents: number;
+		unpaidCents: number;
+		reconciledCents: number;
+	};
+	limit: number;
+	truncated: boolean;
+};
+
+export const analyticalReportUiLimit = 500;
+export const analyticalReportExportLimit = 50_000;
 
 export async function listExpenses(context: WorkspaceContext, filters: ExpenseFilters = {}) {
 	const limit = Math.min(Math.max(filters.limit ?? 25, 1), 100);
@@ -183,6 +242,10 @@ function buildExpenseConditions(
 	if (filters.from) conditions.push(gte(expense.expenseDate, filters.from));
 	if (filters.to) conditions.push(lte(expense.expenseDate, filters.to));
 	if (filters.categoryId) conditions.push(eq(expense.categoryId, filters.categoryId));
+	if (filters.vendorId) conditions.push(eq(expense.vendorId, filters.vendorId));
+	if (filters.costCenterId) conditions.push(eq(expense.costCenterId, filters.costCenterId));
+	if (filters.competencyMonth)
+		conditions.push(eq(expense.competencyMonth, filters.competencyMonth));
 	if (filters.reviewStatus) conditions.push(eq(expense.reviewStatus, filters.reviewStatus));
 	if (filters.paymentStatus) conditions.push(eq(expense.paymentStatus, filters.paymentStatus));
 	if (filters.q) {
@@ -214,10 +277,12 @@ function buildExpenseConditions(
 }
 
 export async function createExpense(context: WorkspaceContext, input: ExpenseInput) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canWriteExpenses(context.role)) throw error(403, 'Permission denied.');
 	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
-	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input);
-	const amountCents = parseBrlToCents(input.amount);
+	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
+		locale: context.locale
+	});
+	const amountCents = parseCurrencyToCents(input.amount);
 	const installments = input.installments ?? 1;
 	const installmentGroupId = installments > 1 ? randomToken(12) : null;
 	const reviewStatus = canReviewExpenses(context.role) ? 'approved' : 'pending';
@@ -235,6 +300,7 @@ export async function createExpense(context: WorkspaceContext, input: ExpenseInp
 					createdByUserId: context.userId,
 					description: input.description,
 					amountCents,
+					currency: context.currency,
 					expenseDate: addMonths(input.expenseDate, index),
 					paymentMethodId: catalogSelection.paymentMethodId,
 					paymentMethod: catalogSelection.paymentMethodName,
@@ -270,13 +336,15 @@ export async function createExpense(context: WorkspaceContext, input: ExpenseInp
 }
 
 export async function updateExpense(context: WorkspaceContext, id: number, input: ExpenseInput) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canWriteExpenses(context.role)) throw error(403, 'Permission denied.');
 	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
 	const [current] = await db
 		.select({
 			paymentMethodId: expense.paymentMethodId,
 			vendorId: expense.vendorId,
-			costCenterId: expense.costCenterId
+			costCenterId: expense.costCenterId,
+			reviewStatus: expense.reviewStatus,
+			paymentStatus: expense.paymentStatus
 		})
 		.from(expense)
 		.where(
@@ -287,17 +355,24 @@ export async function updateExpense(context: WorkspaceContext, id: number, input
 			)
 		)
 		.limit(1);
-	if (!current) throw error(404, 'Despesa não encontrada.');
+	if (!current) throw error(404, 'Expense not found.');
+	if (current.paymentStatus !== 'unpaid' && !canReconcileExpenses(context.role)) {
+		throw error(403, translate(context.locale, 'Permission denied.'));
+	}
+
 	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
-		allowedArchivedIds: current
+		allowedArchivedIds: current,
+		locale: context.locale
 	});
+	const shouldResetReview = !canReviewExpenses(context.role);
 
 	const [updated] = await db
 		.update(expense)
 		.set({
 			categoryId: input.categoryId,
 			description: input.description,
-			amountCents: parseBrlToCents(input.amount),
+			amountCents: parseCurrencyToCents(input.amount),
+			currency: context.currency,
 			expenseDate: input.expenseDate,
 			paymentMethodId: catalogSelection.paymentMethodId,
 			paymentMethod: catalogSelection.paymentMethodName,
@@ -306,7 +381,19 @@ export async function updateExpense(context: WorkspaceContext, id: number, input
 			costCenterId: catalogSelection.costCenterId,
 			costCenter: catalogSelection.costCenterName,
 			competencyMonth: input.competencyMonth ? startOfMonth(input.competencyMonth) : null,
-			notes: input.notes || null
+			notes: input.notes || null,
+			...(shouldResetReview
+				? {
+						reviewStatus: 'pending' as const,
+						reviewedByUserId: null,
+						reviewedAt: null,
+						reviewRejectionReason: null,
+						paymentStatus: 'unpaid' as const,
+						paidAt: null,
+						reconciledAt: null,
+						reconciledByUserId: null
+					}
+				: {})
 		})
 		.where(
 			and(
@@ -317,14 +404,15 @@ export async function updateExpense(context: WorkspaceContext, id: number, input
 		)
 		.returning({ id: expense.id });
 
-	if (!updated) throw error(404, 'Despesa não encontrada.');
+	if (!updated) throw error(404, 'Expense not found.');
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,
 		actorUserId: context.userId,
 		action: 'expense.updated',
 		entityType: 'expense',
-		entityId: id
+		entityId: id,
+		metadata: shouldResetReview ? { reviewStatus: 'pending' } : undefined
 	});
 }
 
@@ -333,7 +421,11 @@ export async function reviewExpense(
 	id: number,
 	input: { reviewStatus: 'approved' | 'rejected'; reason?: string | null }
 ) {
-	if (!canReviewExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canReviewExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
+	if (input.reviewStatus === 'rejected' && !input.reason?.trim()) {
+		throw error(400, translate(context.locale, 'Check review data.'));
+	}
 
 	const reviewedAt = new Date();
 	const reviewUpdate =
@@ -367,7 +459,7 @@ export async function reviewExpense(
 		)
 		.returning({ id: expense.id });
 
-	if (!updated) throw error(404, 'Despesa não encontrada.');
+	if (!updated) throw error(404, translate(context.locale, 'Expense not found.'));
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,
@@ -384,7 +476,8 @@ export async function updateExpensePaymentStatus(
 	id: number,
 	input: { paymentStatus: 'unpaid' | 'paid' | 'reconciled'; paidAt?: string | null }
 ) {
-	if (!canReconcileExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canReconcileExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const paidAt = input.paymentStatus === 'unpaid' ? null : (input.paidAt ?? todayIsoDate());
 	const [updated] = await db
@@ -405,7 +498,7 @@ export async function updateExpensePaymentStatus(
 		)
 		.returning({ id: expense.id });
 
-	if (!updated) throw error(404, 'Despesa aprovada não encontrada.');
+	if (!updated) throw error(404, translate(context.locale, 'Approved expense not found.'));
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,
@@ -418,9 +511,33 @@ export async function updateExpensePaymentStatus(
 }
 
 export async function deleteExpense(context: WorkspaceContext, id: number) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canWriteExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
-	const [deleted] = await db
+	const [current] = await db
+		.select({
+			reviewStatus: expense.reviewStatus,
+			paymentStatus: expense.paymentStatus
+		})
+		.from(expense)
+		.where(
+			and(
+				eq(expense.id, id),
+				eq(expense.workspaceId, context.workspaceId),
+				isNull(expense.deletedAt)
+			)
+		)
+		.limit(1);
+
+	if (!current) throw error(404, translate(context.locale, 'Expense not found.'));
+	if (current.reviewStatus !== 'pending' && !canReviewExpenses(context.role)) {
+		throw error(403, translate(context.locale, 'Permission denied.'));
+	}
+	if (current.paymentStatus !== 'unpaid' && !canReconcileExpenses(context.role)) {
+		throw error(403, translate(context.locale, 'Permission denied.'));
+	}
+
+	await db
 		.update(expense)
 		.set({ deletedAt: new Date() })
 		.where(
@@ -429,10 +546,7 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 				eq(expense.workspaceId, context.workspaceId),
 				isNull(expense.deletedAt)
 			)
-		)
-		.returning({ id: expense.id });
-
-	if (!deleted) throw error(404, 'Despesa não encontrada.');
+		);
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,
@@ -445,8 +559,8 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 
 export async function getDashboard(context: WorkspaceContext, from?: string, to?: string) {
 	const today = new Date();
-	from ??= firstDayOfMonth(today, context.timezone);
-	to ??= lastDayOfMonth(today, context.timezone);
+	from ??= firstDayOfMonth(today);
+	to ??= lastDayOfMonth(today);
 	const previous = previousPeriod(from, to);
 	const [currentTotal, previousTotal] = await Promise.all([
 		getTotal(context.workspaceId, from, to),
@@ -454,12 +568,13 @@ export async function getDashboard(context: WorkspaceContext, from?: string, to?
 	]);
 	const deltaPct =
 		previousTotal > 0 ? ((currentTotal - previousTotal) / previousTotal) * 100 : null;
+	const currentFilters = { from, to };
 
 	const [byCategory, byWeek, byMonth, byPaymentMethod, budgetSummary] = await Promise.all([
-		getTotalsByCategory(context.workspaceId, from, to),
-		getTotalsByPeriod(context.workspaceId, from, to, 'week', undefined, context.weekStartsOn),
-		getTotalsByPeriod(context.workspaceId, from, to, 'month', undefined, context.weekStartsOn),
-		getTotalsByPaymentMethod(context.workspaceId, from, to),
+		getTotalsByCategory(context.workspaceId, currentFilters),
+		getTotalsByPeriod(context.workspaceId, currentFilters, 'week', context.weekStartsOn),
+		getTotalsByPeriod(context.workspaceId, currentFilters, 'month', context.weekStartsOn),
+		getTotalsByPaymentMethod(context.workspaceId, currentFilters),
 		getBudgetSummary(context, startOfMonth(from))
 	]);
 
@@ -486,42 +601,127 @@ export async function getDashboard(context: WorkspaceContext, from?: string, to?
 
 export async function getReport(
 	context: WorkspaceContext,
-	input: {
-		from: string;
-		to: string;
-		groupBy: 'category' | 'week' | 'month' | 'year' | 'payment';
-		categoryId?: number;
-	}
+	input: GroupedReportFilters & { groupBy: GroupedReportGroupBy }
 ) {
 	if (input.groupBy === 'category') {
-		return getTotalsByCategory(context.workspaceId, input.from, input.to, input.categoryId);
+		return getTotalsByCategory(context.workspaceId, input);
 	}
 
 	if (input.groupBy === 'payment') {
-		return getTotalsByPaymentMethod(context.workspaceId, input.from, input.to, input.categoryId);
+		return getTotalsByPaymentMethod(context.workspaceId, input);
 	}
 
-	return getTotalsByPeriod(
-		context.workspaceId,
-		input.from,
-		input.to,
-		input.groupBy,
-		input.categoryId,
-		context.weekStartsOn
-	);
+	return getTotalsByPeriod(context.workspaceId, input, input.groupBy, context.weekStartsOn);
 }
 
-async function getTotalsByPaymentMethod(
-	workspaceId: number,
-	from: string,
-	to: string,
-	categoryId?: number
-) {
+export async function getAnalyticalExpenseReport(
+	context: WorkspaceContext,
+	input: AnalyticalExpenseReportFilters,
+	options: { limit?: number } = {}
+): Promise<AnalyticalExpenseReport> {
+	const limit = Math.min(Math.max(options.limit ?? analyticalReportUiLimit, 1), 100_000);
+	const baseConditions = [
+		...buildExpenseConditions(context.workspaceId, input, false),
+		eq(expense.status, 'posted')
+	];
+
+	const [rows, summaryRows] = await Promise.all([
+		db
+			.select({
+				id: expense.id,
+				expenseDate: expense.expenseDate,
+				competencyMonth: expense.competencyMonth,
+				description: expense.description,
+				categoryName: category.name,
+				categoryColor: category.color,
+				categoryIcon: category.icon,
+				amountCents: expense.amountCents,
+				currency: expense.currency,
+				paymentMethod: sql<
+					string | null
+				>`coalesce(${paymentMethod.name}, ${expense.paymentMethod})`,
+				vendor: sql<string | null>`coalesce(${vendor.name}, ${expense.vendor})`,
+				costCenter: sql<string | null>`coalesce(${costCenter.name}, ${expense.costCenter})`,
+				reviewStatus: expense.reviewStatus,
+				paymentStatus: expense.paymentStatus,
+				paidAt: expense.paidAt,
+				installmentNumber: expense.installmentNumber,
+				installmentsTotal: expense.installmentsTotal,
+				notes: expense.notes,
+				attachmentCount: sql<number>`(
+					select count(*)::int
+					from expense_attachment ea
+					where ea.expense_id = ${expense.id}
+						and ea.workspace_id = ${expense.workspaceId}
+				)`,
+				createdAt: expense.createdAt
+			})
+			.from(expense)
+			.innerJoin(category, eq(category.id, expense.categoryId))
+			.leftJoin(paymentMethod, eq(paymentMethod.id, expense.paymentMethodId))
+			.leftJoin(vendor, eq(vendor.id, expense.vendorId))
+			.leftJoin(costCenter, eq(costCenter.id, expense.costCenterId))
+			.where(and(...baseConditions))
+			.orderBy(desc(expense.expenseDate), desc(expense.id))
+			.limit(limit + 1),
+		db
+			.select({
+				itemCount: sql<number>`count(*)::int`,
+				totalCents: sql<number>`coalesce(sum(${expense.amountCents}), 0)::bigint`,
+				approvedCents: sql<number>`coalesce(sum(case when ${expense.reviewStatus} = 'approved' then ${expense.amountCents} else 0 end), 0)::bigint`,
+				pendingCents: sql<number>`coalesce(sum(case when ${expense.reviewStatus} = 'pending' then ${expense.amountCents} else 0 end), 0)::bigint`,
+				rejectedCents: sql<number>`coalesce(sum(case when ${expense.reviewStatus} = 'rejected' then ${expense.amountCents} else 0 end), 0)::bigint`,
+				paidCents: sql<number>`coalesce(sum(case when ${expense.paymentStatus} = 'paid' then ${expense.amountCents} else 0 end), 0)::bigint`,
+				unpaidCents: sql<number>`coalesce(sum(case when ${expense.paymentStatus} = 'unpaid' then ${expense.amountCents} else 0 end), 0)::bigint`,
+				reconciledCents: sql<number>`coalesce(sum(case when ${expense.paymentStatus} = 'reconciled' then ${expense.amountCents} else 0 end), 0)::bigint`
+			})
+			.from(expense)
+			.leftJoin(paymentMethod, eq(paymentMethod.id, expense.paymentMethodId))
+			.leftJoin(vendor, eq(vendor.id, expense.vendorId))
+			.leftJoin(costCenter, eq(costCenter.id, expense.costCenterId))
+			.where(and(...baseConditions))
+	]);
+
+	const summary = summaryRows[0]!;
+	const items = rows.slice(0, limit).map((row) => ({
+		...row,
+		amountCents: Number(row.amountCents),
+		attachmentCount: Number(row.attachmentCount),
+		reviewStatus: toAnalyticalReviewStatus(row.reviewStatus),
+		paymentStatus: toAnalyticalPaymentStatus(row.paymentStatus)
+	}));
+
+	return {
+		items,
+		summary: {
+			itemCount: Number(summary.itemCount),
+			totalCents: Number(summary.totalCents),
+			approvedCents: Number(summary.approvedCents),
+			pendingCents: Number(summary.pendingCents),
+			rejectedCents: Number(summary.rejectedCents),
+			paidCents: Number(summary.paidCents),
+			unpaidCents: Number(summary.unpaidCents),
+			reconciledCents: Number(summary.reconciledCents)
+		},
+		limit,
+		truncated: rows.length > limit
+	};
+}
+
+function toAnalyticalReviewStatus(value: string): AnalyticalExpenseReportRow['reviewStatus'] {
+	return value as AnalyticalExpenseReportRow['reviewStatus'];
+}
+
+function toAnalyticalPaymentStatus(value: string): AnalyticalExpenseReportRow['paymentStatus'] {
+	return value as AnalyticalExpenseReportRow['paymentStatus'];
+}
+
+async function getTotalsByPaymentMethod(workspaceId: number, filters: GroupedReportFilters) {
 	const result = await db.execute<{
 		label: string;
 		total_cents: string | number;
 	}>(sql`
-		select coalesce(nullif(trim(pm.name), ''), nullif(trim(e.payment_method), ''), 'Nao informado') as label,
+		select coalesce(nullif(trim(pm.name), ''), nullif(trim(e.payment_method), ''), 'Unspecified') as label,
 			coalesce(sum(e.amount_cents), 0)::bigint as total_cents
 		from expense e
 		left join payment_method pm on pm.id = e.payment_method_id and pm.workspace_id = e.workspace_id
@@ -529,9 +729,9 @@ async function getTotalsByPaymentMethod(
 			and e.deleted_at is null
 			and e.status = 'posted'
 			and e.review_status = 'approved'
-			and e.expense_date >= ${from}
-			and e.expense_date <= ${to}
-			${categoryId ? sql`and e.category_id = ${categoryId}` : sql``}
+			and e.expense_date >= ${filters.from}
+			and e.expense_date <= ${filters.to}
+			${groupedReportFilterSql(filters)}
 		group by label
 		order by total_cents desc, label asc
 	`);
@@ -559,12 +759,7 @@ async function getTotal(workspaceId: number, from: string, to: string) {
 	return Number(result[0]?.total_cents ?? 0);
 }
 
-async function getTotalsByCategory(
-	workspaceId: number,
-	from: string,
-	to: string,
-	categoryId?: number
-) {
+async function getTotalsByCategory(workspaceId: number, filters: GroupedReportFilters) {
 	const result = await db.execute<{
 		category_id: number;
 		name: string;
@@ -578,9 +773,9 @@ async function getTotalsByCategory(
 			and e.deleted_at is null
 			and e.status = 'posted'
 			and e.review_status = 'approved'
-			and e.expense_date >= ${from}
-			and e.expense_date <= ${to}
-			${categoryId ? sql`and e.category_id = ${categoryId}` : sql``}
+			and e.expense_date >= ${filters.from}
+			and e.expense_date <= ${filters.to}
+			${groupedReportFilterSql(filters)}
 		group by c.id, c.name, c.color
 		order by total_cents desc, c.name asc
 	`);
@@ -595,10 +790,8 @@ async function getTotalsByCategory(
 
 async function getTotalsByPeriod(
 	workspaceId: number,
-	from: string,
-	to: string,
+	filters: GroupedReportFilters,
 	groupBy: 'week' | 'month' | 'year',
-	categoryId?: number,
 	weekStartsOn = 1
 ) {
 	const bucket =
@@ -613,9 +806,9 @@ async function getTotalsByPeriod(
 			and e.deleted_at is null
 			and e.status = 'posted'
 			and e.review_status = 'approved'
-			and e.expense_date >= ${from}
-			and e.expense_date <= ${to}
-			${categoryId ? sql`and e.category_id = ${categoryId}` : sql``}
+			and e.expense_date >= ${filters.from}
+			and e.expense_date <= ${filters.to}
+			${groupedReportFilterSql(filters)}
 		group by bucket
 		order by bucket asc
 	`);
@@ -625,6 +818,15 @@ async function getTotalsByPeriod(
 		label: String(row.bucket),
 		totalCents: Number(row.total_cents)
 	}));
+}
+
+function groupedReportFilterSql(filters: GroupedReportFilters) {
+	return sql`
+		${filters.categoryId ? sql`and e.category_id = ${filters.categoryId}` : sql``}
+		${filters.vendorId ? sql`and e.vendor_id = ${filters.vendorId}` : sql``}
+		${filters.costCenterId ? sql`and e.cost_center_id = ${filters.costCenterId}` : sql``}
+		${filters.competencyMonth ? sql`and e.competency_month = ${filters.competencyMonth}` : sql``}
+	`;
 }
 
 function todayIsoDate() {

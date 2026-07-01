@@ -1,18 +1,23 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import type { ActionData } from './$types';
+	import { commonCurrencyCodes, translate } from '$lib/i18n';
+	import type { ActionData, PageData } from './$types';
 
-	let { form } = $props<{ form: ActionData }>();
+	let { data, form } = $props<{ data: PageData; form: ActionData }>();
+
+	function t(key: string) {
+		return translate(data.locale, key);
+	}
 </script>
 
 <svelte:head>
-	<title>Novo workspace | Expense Manager</title>
+	<title>{t('New workspace')} | Expense Manager</title>
 </svelte:head>
 
 <main class="auth-page">
 	<section class="auth-panel wide">
 		<a class="brand" href={resolve('/app')}>Expense Manager</a>
-		<h1>Novo workspace</h1>
+		<h1>{t('New workspace')}</h1>
 
 		{#if form?.message}
 			<p class="notice danger">{form.message}</p>
@@ -20,24 +25,36 @@
 
 		<form method="post" class="stack">
 			<label>
-				<span>Nome</span>
-				<input name="name" required minlength="2" maxlength="80" value="Minhas despesas" />
+				<span>{t('Name')}</span>
+				<input name="name" required minlength="2" maxlength="80" value="My expenses" />
 			</label>
 
 			<label>
-				<span>Timezone</span>
-				<input name="timezone" required value="America/Sao_Paulo" />
-			</label>
-
-			<label>
-				<span>Inicio da semana</span>
+				<span>{t('Week starts on')}</span>
 				<select name="weekStartsOn">
-					<option value="1">Segunda</option>
-					<option value="0">Domingo</option>
+					<option value="1">{t('Monday')}</option>
+					<option value="0">{t('Sunday')}</option>
 				</select>
 			</label>
 
-			<button class="button primary" type="submit">Criar workspace</button>
+			<label>
+				<span>{t('Currency')}</span>
+				<input
+					name="currency"
+					list="currency-options"
+					maxlength="3"
+					pattern={'[A-Za-z]{3}'}
+					value={data.locale === 'pt-BR' ? 'BRL' : 'USD'}
+					required
+				/>
+				<datalist id="currency-options">
+					{#each commonCurrencyCodes as currency (currency)}
+						<option value={currency}></option>
+					{/each}
+				</datalist>
+			</label>
+
+			<button class="button primary" type="submit">{t('Create workspace')}</button>
 		</form>
 	</section>
 </main>

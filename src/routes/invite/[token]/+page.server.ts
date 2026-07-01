@@ -2,6 +2,7 @@ import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { acceptInvitation, getPendingInvitation } from '$lib/server/services/invitations';
 import { setWorkspaceCookie } from '$lib/server/services/workspaces';
+import { translate } from '$lib/i18n';
 
 export const load: PageServerLoad = async (event) => {
 	const token = event.params.token;
@@ -29,7 +30,8 @@ export const actions: Actions = {
 		}
 
 		const invitation = await getPendingInvitation(event.params.token);
-		if (!invitation) return fail(404, { message: 'Convite invalido ou expirado.' });
+		if (!invitation)
+			return fail(404, { message: translate(event.locals.locale, 'Invalid invite or expired.') });
 
 		const workspaceId = await acceptInvitation(
 			event.params.token,
