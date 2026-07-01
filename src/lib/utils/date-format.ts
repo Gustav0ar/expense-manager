@@ -5,7 +5,17 @@ const isoDatePattern = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 export function getBrowserLocales(): Intl.LocalesArgument {
 	if (typeof window === 'undefined' || typeof navigator === 'undefined') return undefined;
+	if (typeof document !== 'undefined') {
+		const documentLocale = document.documentElement.lang;
+		if (documentLocale) return documentLocale;
+	}
 	return navigator.languages?.length ? navigator.languages : navigator.language;
+}
+
+function rangeSeparator(locales: Intl.LocalesArgument = undefined) {
+	const locale = Array.isArray(locales) ? locales[0] : locales;
+	const normalized = String(locale ?? '').toLowerCase();
+	return normalized.startsWith('pt') ? ' a ' : ' - ';
 }
 
 export function parseIsoDate(value: string) {
@@ -88,7 +98,7 @@ export function formatDateRangeLabel(
 ) {
 	const fromDate = parseIsoDate(from);
 	const toDate = parseIsoDate(to);
-	if (!fromDate || !toDate) return `${from} a ${to}`;
+	if (!fromDate || !toDate) return `${from}${rangeSeparator(locales)}${to}`;
 
 	const formatter = new Intl.DateTimeFormat(locales, {
 		timeZone: 'UTC',
@@ -101,7 +111,7 @@ export function formatDateRangeLabel(
 		return formatter.formatRange(fromDate, toDate);
 	}
 
-	return `${formatter.format(fromDate)} a ${formatter.format(toDate)}`;
+	return `${formatter.format(fromDate)}${rangeSeparator(locales)}${formatter.format(toDate)}`;
 }
 
 export function formatDateTimeLabel(

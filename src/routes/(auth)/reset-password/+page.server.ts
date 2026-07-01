@@ -4,6 +4,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { auth } from '$lib/server/auth';
 import { parseForm, resetPasswordSchema } from '$lib/server/validation';
 import { assertRateLimit } from '$lib/server/security/rate-limit';
+import { translate } from '$lib/i18n';
 
 export const load: PageServerLoad = (event) => {
 	const token = event.url.searchParams.get('token') || '';
@@ -17,7 +18,7 @@ export const actions: Actions = {
 
 		if (!parsed.success) {
 			return fail(400, {
-				message: 'Token ou senha invalidos.',
+				message: translate(event.locals.locale, 'Invalid token or password.'),
 				token: formData.get('token')?.toString() ?? ''
 			});
 		}
@@ -38,7 +39,10 @@ export const actions: Actions = {
 			});
 		} catch (err) {
 			if (err instanceof APIError) {
-				return fail(400, { message: 'Token invalido ou expirado.', token: parsed.data.token });
+				return fail(400, {
+					message: translate(event.locals.locale, 'Invalid token or expired.'),
+					token: parsed.data.token
+				});
 			}
 			throw err;
 		}

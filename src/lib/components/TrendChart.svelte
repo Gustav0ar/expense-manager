@@ -16,13 +16,19 @@
 	let {
 		items,
 		label,
-		empty = 'Sem dados',
-		period = 'date'
+		empty = 'No data',
+		period = 'date',
+		currency = 'USD',
+		locale,
+		totalLabel = 'Total in period'
 	}: {
 		items: Item[];
 		label: string;
 		empty?: string;
 		period?: DatePeriod;
+		currency?: string;
+		locale?: string;
+		totalLabel?: string;
 	} = $props();
 
 	let locales = $state<Intl.LocalesArgument>(undefined);
@@ -57,8 +63,9 @@
 	const last = $derived(points.at(-1));
 
 	function formatLabel(value: string, width: DateLabelWidth = 'full') {
-		if (!locales) return value;
-		return formatPeriodLabel(value, period, locales, width);
+		const resolvedLocales = locale ?? locales;
+		if (!resolvedLocales) return value;
+		return formatPeriodLabel(value, period, resolvedLocales, width);
 	}
 
 	function updateLocales() {
@@ -77,10 +84,16 @@
 {:else}
 	<div class="trend-chart">
 		<div class="trend-summary">
-			<span>Total no periodo</span>
-			<strong>{formatCents(total)}</strong>
+			<span>{totalLabel}</span>
+			<strong>{formatCents(total, currency, locale ?? locales)}</strong>
 			{#if last}
-				<small>{formatLabel(last.label)}: {formatCents(last.totalCents)}</small>
+				<small
+					>{formatLabel(last.label)}: {formatCents(
+						last.totalCents,
+						currency,
+						locale ?? locales
+					)}</small
+				>
 			{/if}
 		</div>
 
@@ -99,7 +112,13 @@
 			{#each points as point (point.label)}
 				<g>
 					<circle class="trend-point" cx={point.x} cy={point.y} r="4"></circle>
-					<title>{formatLabel(point.label)}: {formatCents(point.totalCents)}</title>
+					<title
+						>{formatLabel(point.label)}: {formatCents(
+							point.totalCents,
+							currency,
+							locale ?? locales
+						)}</title
+					>
 				</g>
 			{/each}
 			{#each points as point, index (point.label)}

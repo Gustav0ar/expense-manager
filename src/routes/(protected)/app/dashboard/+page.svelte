@@ -4,12 +4,22 @@
 	import LocalizedDateRange from '$lib/components/LocalizedDateRange.svelte';
 	import MetricCard from '$lib/components/MetricCard.svelte';
 	import TrendChart from '$lib/components/TrendChart.svelte';
+	import { translate } from '$lib/i18n';
 	import { formatCents, formatPercent } from '$lib/utils/format';
 	import type { PageData } from './$types';
 
 	let { data } = $props<{ data: PageData }>();
 	const dashboard = $derived(data.dashboard);
 	const budgetUsage = $derived(dashboard.budgetSummary.usagePct);
+	const currency = $derived(data.currentWorkspace?.currency ?? 'USD');
+
+	function t(key: string, params?: Record<string, string | number>) {
+		return translate(data.locale, key, params);
+	}
+
+	function money(cents: number) {
+		return formatCents(cents, currency, data.locale);
+	}
 </script>
 
 <svelte:head>
@@ -19,87 +29,122 @@
 <section class="page-section">
 	<div class="section-heading">
 		<div>
-			<span class="eyebrow">Visao geral</span>
-			<h2>Dashboard</h2>
+			<span class="eyebrow">{t('Overview')}</span>
+			<h2>{t('Dashboard')}</h2>
 		</div>
 
 		<form method="get" class="inline-form">
-			<input type="date" name="from" value={dashboard.from} aria-label="Data inicial" />
-			<input type="date" name="to" value={dashboard.to} aria-label="Data final" />
-			<button class="button secondary" type="submit">Filtrar</button>
+			<input type="date" name="from" value={dashboard.from} aria-label={t('Start date')} />
+			<input type="date" name="to" value={dashboard.to} aria-label={t('End date')} />
+			<button class="button secondary" type="submit">{t('Filter')}</button>
 		</form>
 	</div>
 
 	<div class="metric-grid">
-		<MetricCard label="Total" value={formatCents(dashboard.totalCents)}>
+		<MetricCard label={t('Total')} value={money(dashboard.totalCents)}>
 			<LocalizedDateRange from={dashboard.from} to={dashboard.to} />
 		</MetricCard>
-		<MetricCard label="Media semanal" value={formatCents(dashboard.weeklyAverageCents)} />
-		<MetricCard label="Variacao" value={formatPercent(dashboard.previousPeriodDeltaPct)} />
+		<MetricCard label={t('Weekly average')} value={money(dashboard.weeklyAverageCents)} />
 		<MetricCard
-			label="Maior categoria"
-			value={dashboard.topCategory ? formatCents(dashboard.topCategory.totalCents) : 'Sem dados'}
+			label={t('Variation')}
+			value={formatPercent(dashboard.previousPeriodDeltaPct, data.locale, t('No baseline'))}
+		/>
+		<MetricCard
+			label={t('Top category')}
+			value={dashboard.topCategory ? money(dashboard.topCategory.totalCents) : t('No data')}
 			footnote={dashboard.topCategory?.label ?? ''}
 		/>
 		<MetricCard
-			label="Orcamento"
+			label={t('Budget')}
 			value={dashboard.budgetSummary.totalBudgetCents > 0
-				? `${budgetUsage ?? 0}% usado`
-				: 'Sem metas'}
+				? t('{percent}% used', { percent: budgetUsage ?? 0 })
+				: t('No goals')}
 			footnote={dashboard.budgetSummary.totalBudgetCents > 0
-				? `${formatCents(dashboard.budgetSummary.spentCents)} de ${formatCents(dashboard.budgetSummary.totalBudgetCents)}`
+				? t('{spent} of {budget}', {
+						spent: money(dashboard.budgetSummary.spentCents),
+						budget: money(dashboard.budgetSummary.totalBudgetCents)
+					})
 				: ''}
 		/>
 		<MetricCard
-			label="Alertas"
+			label={t('Alerts')}
 			value={`${dashboard.budgetSummary.overBudgetCount + dashboard.budgetSummary.warningCount}`}
-			footnote="Categorias perto ou acima da meta"
+			footnote={t('Categories near or above the goal')}
 		/>
 	</div>
 
 	<div class="dashboard-chart-grid">
 		<section class="panel chart-panel">
 			<div class="panel-heading">
-				<h3>Distribuicao por categoria</h3>
+				<h3>{t('Distribution by category')}</h3>
 			</div>
-			<DonutChart items={dashboard.byCategory} label="Despesas por categoria" />
+			<DonutChart
+				items={dashboard.byCategory}
+				label={t('Expenses by category')}
+				empty={t('No data')}
+				{currency}
+				locale={data.locale}
+				totalLabel={t('Total')}
+			/>
 		</section>
 
 		<section class="panel chart-panel chart-panel-wide">
 			<div class="panel-heading">
-				<h3>Evolucao mensal</h3>
+				<h3>{t('Monthly evolution')}</h3>
 			</div>
-			<TrendChart items={dashboard.byMonth} label="Despesas por mes" period="month" />
+			<TrendChart
+				items={dashboard.byMonth}
+				label={t('Expenses by month')}
+				period="month"
+				empty={t('No data')}
+				{currency}
+				locale={data.locale}
+				totalLabel={t('Total in period')}
+			/>
 		</section>
 
 		<section class="panel chart-panel chart-panel-full">
 			<div class="panel-heading">
-				<h3>Evolucao semanal</h3>
+				<h3>{t('Weekly evolution')}</h3>
 			</div>
-			<TrendChart items={dashboard.byWeek} label="Despesas por semana" period="week" />
+			<TrendChart
+				items={dashboard.byWeek}
+				label={t('Expenses by week')}
+				period="week"
+				empty={t('No data')}
+				{currency}
+				locale={data.locale}
+				totalLabel={t('Total in period')}
+			/>
 		</section>
 	</div>
 
 	<div class="content-grid two">
 		<section class="panel">
 			<div class="panel-heading">
-				<h3>Ranking por categoria</h3>
+				<h3>{t('Ranking by category')}</h3>
 			</div>
-			<BarList items={dashboard.byCategory} />
+			<BarList items={dashboard.byCategory} empty={t('No data')} {currency} locale={data.locale} />
 		</section>
 
 		<section class="panel">
 			<div class="panel-heading">
-				<h3>Ranking por semana</h3>
+				<h3>{t('Ranking by week')}</h3>
 			</div>
-			<BarList items={dashboard.byWeek} period="week" />
+			<BarList
+				items={dashboard.byWeek}
+				period="week"
+				empty={t('No data')}
+				{currency}
+				locale={data.locale}
+			/>
 		</section>
 	</div>
 
 	<div class="content-grid two">
 		<section class="panel">
 			<div class="panel-heading">
-				<h3>Orcamento do mes</h3>
+				<h3>{t('Monthly budget')}</h3>
 			</div>
 			<div class="budget-list compact-budget-list">
 				{#each dashboard.budgetSummary.items.slice(0, 6) as budget (budget.categoryId)}
@@ -112,8 +157,8 @@
 							<strong>{budget.usagePct}%</strong>
 						</div>
 						<div class="budget-values">
-							<strong>{formatCents(budget.spentCents)}</strong>
-							<span>de {formatCents(budget.amountCents ?? 0)}</span>
+							<strong>{money(budget.spentCents)}</strong>
+							<span>{t('of')} {money(budget.amountCents ?? 0)}</span>
 						</div>
 						<div class="bar-track">
 							<span
@@ -125,16 +170,21 @@
 						</div>
 					</article>
 				{:else}
-					<p class="empty">Nenhum orcamento definido.</p>
+					<p class="empty">{t('No budget defined.')}</p>
 				{/each}
 			</div>
 		</section>
 
 		<section class="panel">
 			<div class="panel-heading">
-				<h3>Ranking por pagamento</h3>
+				<h3>{t('Ranking by payment')}</h3>
 			</div>
-			<BarList items={dashboard.byPaymentMethod} />
+			<BarList
+				items={dashboard.byPaymentMethod}
+				empty={t('No data')}
+				{currency}
+				locale={data.locale}
+			/>
 		</section>
 	</div>
 </section>

@@ -9,6 +9,7 @@ import {
 	requireWorkspaceContext
 } from '$lib/server/services/workspaces';
 import { assignableRoleSchema, idSchema, inviteSchema, parseForm } from '$lib/server/validation';
+import { translate } from '$lib/i18n';
 
 export const load: PageServerLoad = async (event) => {
 	const context = await requireWorkspaceContext(event);
@@ -22,7 +23,8 @@ export const actions: Actions = {
 	invite: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const parsed = parseForm(await event.request.formData(), inviteSchema);
-		if (!parsed.success) return fail(400, { message: 'Confira email e papel.' });
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Check email and role.') });
 
 		const result = await inviteMember(context, parsed.data);
 		return { inviteUrl: result.url };
@@ -32,7 +34,8 @@ export const actions: Actions = {
 		const formData = await event.request.formData();
 		const id = idSchema.safeParse(formData.get('id'));
 		const role = assignableRoleSchema.safeParse(formData.get('role'));
-		if (!id.success || !role.success) return fail(400, { message: 'Confira membro e papel.' });
+		if (!id.success || !role.success)
+			return fail(400, { message: translate(event.locals.locale, 'Check member and role.') });
 
 		await changeMemberRole(context, id.data, role.data);
 		throw redirect(303, '/app/settings/users');
@@ -40,7 +43,8 @@ export const actions: Actions = {
 	remove: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const id = idSchema.safeParse((await event.request.formData()).get('id'));
-		if (!id.success) return fail(400, { message: 'Membro invalido.' });
+		if (!id.success)
+			return fail(400, { message: translate(event.locals.locale, 'Invalid member.') });
 
 		await removeMember(context, id.data);
 		throw redirect(303, '/app/settings/users');

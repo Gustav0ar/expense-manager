@@ -48,7 +48,7 @@ export async function enableMfa(input: {
 	code: string;
 	sessionId?: string;
 }) {
-	if (!verifyTotpCode(input.secret, input.code)) throw error(400, 'Codigo MFA inválido.');
+	if (!verifyTotpCode(input.secret, input.code)) throw error(400, 'Invalid MFA code.');
 
 	const recoveryCodes = generateRecoveryCodes();
 	const recoveryCodeHashes = recoveryCodes.map(hashRecoveryCode);
@@ -87,7 +87,7 @@ export async function enableMfa(input: {
 
 export async function disableMfa(input: { userId: string; code: string }) {
 	const verified = await verifyMfaCodeForUser(input.userId, input.code);
-	if (!verified) throw error(400, 'Codigo MFA inválido.');
+	if (!verified) throw error(400, 'Invalid MFA code.');
 
 	await db.transaction(async (tx) => {
 		await tx.delete(userMfaConfig).where(eq(userMfaConfig.userId, input.userId));
@@ -212,7 +212,7 @@ function encryptSecret(secret: string) {
 function decryptSecret(payload: string) {
 	const [version, ivValue, tagValue, encryptedValue] = payload.split(':');
 	if (version !== 'v1' || !ivValue || !tagValue || !encryptedValue) {
-		throw error(500, 'Configuração MFA invalida.');
+		throw error(500, 'MFA configuration is invalid.');
 	}
 
 	const decipher = createDecipheriv(
@@ -228,7 +228,7 @@ function decryptSecret(payload: string) {
 }
 
 function encryptionKey() {
-	if (!env.BETTER_AUTH_SECRET) throw error(500, 'BETTER_AUTH_SECRET não configurado.');
+	if (!env.BETTER_AUTH_SECRET) throw error(500, 'BETTER_AUTH_SECRET is not configured.');
 	return createHash('sha256').update(env.BETTER_AUTH_SECRET).digest();
 }
 

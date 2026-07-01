@@ -1,15 +1,32 @@
 import { formatDateLabel } from './date-format';
+import {
+	defaultCurrency,
+	defaultLocale,
+	formatCurrency,
+	formatPercentage,
+	translate,
+	type MessageKey
+} from '$lib/i18n';
 
-export function formatCents(cents: number, currency = 'BRL') {
-	return new Intl.NumberFormat('pt-BR', {
-		style: 'currency',
-		currency
-	}).format(cents / 100);
+export function formatCents(
+	cents: number,
+	currency = defaultCurrency,
+	locales: Intl.LocalesArgument = defaultLocale
+) {
+	return formatCurrency(cents, locales, currency);
 }
 
-export function formatPercent(value: number | null) {
-	if (value == null) return 'Sem base';
-	return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+export function formatPercent(
+	value: number | null,
+	locales: Intl.LocalesArgument = defaultLocale,
+	empty: MessageKey = 'No baseline'
+) {
+	const locale = Array.isArray(locales)
+		? locales[0]
+		: typeof locales === 'string'
+			? locales
+			: defaultLocale;
+	return formatPercentage(value, locales, () => translate(locale, empty));
 }
 
 export function formatDate(date: string, locales: Intl.LocalesArgument = undefined) {

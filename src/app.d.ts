@@ -8,6 +8,8 @@ declare global {
 			user?: User;
 			session?: Session;
 			requestId?: string;
+			locale: import('$lib/i18n').SupportedLocale;
+			localePreference: import('$lib/i18n').LocalePreference;
 			workspaceContext?: import('$lib/server/services/workspaces').WorkspaceContext | null;
 			workspaceMemberships?: import('$lib/server/services/workspaces').WorkspaceMembership[];
 		}
@@ -15,7 +17,10 @@ declare global {
 		interface Error {
 			requestId?: string;
 		}
-		// interface PageData {}
+		interface PageData {
+			locale: import('$lib/i18n').SupportedLocale;
+			localePreference: import('$lib/i18n').LocalePreference;
+		}
 		// interface PageState {}
 		// interface Platform {}
 	}

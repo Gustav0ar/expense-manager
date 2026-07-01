@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import { canWriteExpenses } from '$lib/server/security/roles';
 import type { WorkspaceContext } from './workspaces';
 import { writeAuditEvent } from './audit';
+import { translate } from '$lib/i18n';
 
 export type ExpenseCatalogKind = 'paymentMethod' | 'vendor' | 'costCenter';
 
@@ -31,6 +32,7 @@ type CatalogRow = {
 
 type CatalogSelectionOptions = {
 	allowArchived?: boolean;
+	locale?: string;
 	allowedArchivedIds?: {
 		paymentMethodId?: number | null;
 		vendorId?: number | null;
@@ -52,7 +54,8 @@ export async function createExpenseCatalogItem(
 	context: WorkspaceContext,
 	input: { kind: ExpenseCatalogKind; name: string }
 ) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canWriteExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const item = await getOrCreateCatalogItem(db, context.workspaceId, input.kind, input.name);
 
@@ -72,7 +75,8 @@ export async function updateExpenseCatalogItem(
 	context: WorkspaceContext,
 	input: { kind: ExpenseCatalogKind; id: number; name: string }
 ) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canWriteExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const normalized = normalizeCatalogName(input.name);
 	assertCatalogName(input.kind, normalized);
@@ -84,13 +88,24 @@ export async function updateExpenseCatalogItem(
 				updateCatalogSql(input.kind, context.workspaceId, input.id, normalized)
 			);
 			const updated = toCatalogItem(rows[0]);
-			if (!updated) throw error(404, `${catalogKindLabel(input.kind)} não encontrado.`);
+			if (!updated)
+				throw error(
+					404,
+					translate(context.locale, '{kind} not found.', {
+						kind: translate(context.locale, catalogKindLabel(input.kind))
+					})
+				);
 
 			await tx.execute(syncCatalogNameSql(input.kind, context.workspaceId, input.id, normalized));
 			return updated;
 		} catch (catalogError) {
 			if (isUniqueViolation(catalogError)) {
-				throw error(400, `${catalogKindLabel(input.kind)} ja existe.`);
+				throw error(
+					400,
+					translate(context.locale, '{kind} already exists.', {
+						kind: translate(context.locale, catalogKindLabel(input.kind))
+					})
+				);
 			}
 			throw catalogError;
 		}
@@ -112,14 +127,21 @@ export async function removeExpenseCatalogItem(
 	context: WorkspaceContext,
 	input: { kind: ExpenseCatalogKind; id: number }
 ) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canWriteExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const removed = await db.transaction(async (tx) => {
 		const [usage] = await executeCatalogRows(
 			tx,
 			selectCatalogUsageSql(input.kind, context.workspaceId, input.id)
 		);
-		if (!usage) throw error(404, `${catalogKindLabel(input.kind)} não encontrado.`);
+		if (!usage)
+			throw error(
+				404,
+				translate(context.locale, '{kind} not found.', {
+					kind: translate(context.locale, catalogKindLabel(input.kind))
+				})
+			);
 
 		const expenseCount = Number(usage.expense_count ?? 0);
 		const recurringCount = Number(usage.recurring_count ?? 0);
@@ -130,7 +152,13 @@ export async function removeExpenseCatalogItem(
 				: deleteCatalogSql(input.kind, context.workspaceId, input.id)
 		);
 		const item = toCatalogItem(rows[0]);
-		if (!item) throw error(404, `${catalogKindLabel(input.kind)} não encontrado.`);
+		if (!item)
+			throw error(
+				404,
+				translate(context.locale, '{kind} not found.', {
+					kind: translate(context.locale, catalogKindLabel(input.kind))
+				})
+			);
 
 		return {
 			item: {
@@ -174,7 +202,8 @@ export async function resolveExpenseCatalogSelection(
 			'paymentMethod',
 			input.paymentMethodId,
 			canUseArchivedCatalog(input.paymentMethodId, options.allowedArchivedIds?.paymentMethodId) ||
-				options.allowArchived
+				options.allowArchived,
+			options.locale
 		),
 		requireActiveCatalogItem(
 			db,
@@ -182,7 +211,8 @@ export async function resolveExpenseCatalogSelection(
 			'vendor',
 			input.vendorId,
 			canUseArchivedCatalog(input.vendorId, options.allowedArchivedIds?.vendorId) ||
-				options.allowArchived
+				options.allowArchived,
+			options.locale
 		),
 		requireActiveCatalogItem(
 			db,
@@ -190,7 +220,8 @@ export async function resolveExpenseCatalogSelection(
 			'costCenter',
 			input.costCenterId,
 			canUseArchivedCatalog(input.costCenterId, options.allowedArchivedIds?.costCenterId) ||
-				options.allowArchived
+				options.allowArchived,
+			options.locale
 		)
 	]);
 
@@ -209,14 +240,18 @@ export async function requireActiveCatalogItem(
 	workspaceId: number,
 	kind: ExpenseCatalogKind,
 	id?: number | null,
-	allowArchived = false
+	allowArchived = false,
+	locale = 'en'
 ) {
 	if (!id) return null;
 
 	const rows = await executeCatalogRows(executor, selectCatalogByIdSql(kind, workspaceId, id));
 	const item = toCatalogItem(rows[0]);
 	if (!item || (!allowArchived && item.isArchived))
-		throw error(400, `${catalogKindLabel(kind)} inválido.`);
+		throw error(
+			400,
+			translate(locale, '{kind} is invalid.', { kind: translate(locale, catalogKindLabel(kind)) })
+		);
 
 	return item;
 }
@@ -232,7 +267,7 @@ export async function getOrCreateCatalogItem(
 
 	const rows = await executeCatalogRows(executor, upsertCatalogSql(kind, workspaceId, normalized));
 	const item = toCatalogItem(rows[0]);
-	if (!item) throw error(500, 'Nao foi possivel salvar o cadastro.');
+	if (!item) throw error(500, 'Could not save the catalog.');
 
 	return item;
 }
@@ -242,27 +277,26 @@ export function normalizeCatalogName(name: string) {
 }
 
 export function catalogLookupKey(name: string) {
-	return normalizeCatalogName(name).toLocaleLowerCase('pt-BR');
+	return normalizeCatalogName(name).toLowerCase();
 }
 
 export function assertCatalogName(kind: ExpenseCatalogKind, name: string) {
-	if (name.length < 2)
-		throw error(400, `${catalogKindLabel(kind)} deve ter pelo menos 2 caracteres.`);
+	if (name.length < 2) throw error(400, `${catalogKindLabel(kind)} must be at least 2 characters.`);
 	if (name.length > catalogNameMax(kind)) {
 		throw error(
 			400,
-			`${catalogKindLabel(kind)} deve ter no maximo ${catalogNameMax(kind)} caracteres.`
+			`${catalogKindLabel(kind)} must be at most ${catalogNameMax(kind)} characters.`
 		);
 	}
 	if (hasControlCharacters(name)) {
-		throw error(400, `${catalogKindLabel(kind)} contém caracteres inválidos.`);
+		throw error(400, `${catalogKindLabel(kind)} contains invalid characters.`);
 	}
 }
 
 export function catalogKindLabel(kind: ExpenseCatalogKind) {
-	if (kind === 'paymentMethod') return 'Pagamento';
-	if (kind === 'vendor') return 'Fornecedor';
-	return 'Centro de custo';
+	if (kind === 'paymentMethod') return 'Payment method';
+	if (kind === 'vendor') return 'Vendor';
+	return 'Cost center';
 }
 
 function catalogNameMax(kind: ExpenseCatalogKind) {

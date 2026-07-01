@@ -1,21 +1,26 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import type { ActionData } from './$types';
+	import { translate } from '$lib/i18n';
+	import type { ActionData, PageData } from './$types';
 
-	let { form } = $props<{ form: ActionData }>();
+	let { data, form } = $props<{ data: PageData; form: ActionData }>();
+
+	function t(key: string) {
+		return translate(data.locale, key);
+	}
 </script>
 
 <svelte:head>
-	<title>Recuperar senha | Expense Manager</title>
+	<title>{t('Recover password')} | Expense Manager</title>
 </svelte:head>
 
 <main class="auth-page">
 	<section class="auth-panel">
 		<a class="brand" href={resolve('/')}>Expense Manager</a>
-		<h1>Recuperar senha</h1>
+		<h1>{t('Recover password')}</h1>
 
 		{#if form?.sent}
-			<p class="notice success">Se o email existir, voce recebera as instrucoes.</p>
+			<p class="notice success">{t('If the email exists, you will receive the instructions.')}</p>
 		{:else}
 			{#if form?.message}
 				<p class="notice danger">{form.message}</p>
@@ -27,12 +32,12 @@
 					<input name="email" type="email" autocomplete="email" required />
 				</label>
 
-				<button class="button primary" type="submit">Enviar</button>
+				<button class="button primary" type="submit">{t('Send')}</button>
 			</form>
 		{/if}
 
 		<div class="auth-links">
-			<a href={resolve('/login')}>Voltar</a>
+			<a href={resolve('/login')}>{t('Back')}</a>
 		</div>
 	</section>
 </main>

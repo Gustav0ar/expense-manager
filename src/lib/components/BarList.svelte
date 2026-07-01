@@ -11,16 +11,25 @@
 
 	let {
 		items,
-		empty = 'Sem dados',
-		period
-	}: { items: Item[]; empty?: string; period?: DatePeriod } = $props();
+		empty = 'No data',
+		period,
+		currency = 'USD',
+		locale
+	}: {
+		items: Item[];
+		empty?: string;
+		period?: DatePeriod;
+		currency?: string;
+		locale?: string;
+	} = $props();
 
 	let locales = $state<Intl.LocalesArgument>(undefined);
 	const max = $derived(Math.max(...items.map((item) => item.totalCents), 0));
 
 	function formatLabel(label: string) {
-		if (!period || !locales) return label;
-		return formatPeriodLabel(label, period, locales);
+		const resolvedLocales = locale ?? locales;
+		if (!period || !resolvedLocales) return label;
+		return formatPeriodLabel(label, period, resolvedLocales);
 	}
 
 	function updateLocales() {
@@ -42,7 +51,7 @@
 			<div class="bar-row">
 				<div class="bar-label">
 					<span>{formatLabel(item.label)}</span>
-					<strong>{formatCents(item.totalCents)}</strong>
+					<strong>{formatCents(item.totalCents, currency, locale ?? locales)}</strong>
 				</div>
 				<div class="bar-track" aria-hidden="true">
 					<div

@@ -12,6 +12,7 @@ import { auditEvent, expense, expenseAttachment } from '$lib/server/db/schema';
 import { canWriteExpenses } from '$lib/server/security/roles';
 import { randomToken } from '$lib/server/utils/crypto';
 import type { WorkspaceContext } from './workspaces';
+import { translate } from '$lib/i18n';
 
 export const maxAttachmentBytes = 5 * 1024 * 1024;
 
@@ -37,7 +38,7 @@ export function sanitizeFileName(name: string) {
 		.replace(/\s+/g, '-')
 		.slice(0, 120);
 
-	return sanitized || 'comprovante';
+	return sanitized || 'receipt';
 }
 
 export async function saveExpenseAttachment(
@@ -45,12 +46,15 @@ export async function saveExpenseAttachment(
 	expenseId: number,
 	file: File
 ) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canWriteExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 	await assertExpenseInWorkspace(context.workspaceId, expenseId);
 
 	if (!file || file.size === 0) return null;
-	if (file.size > maxAttachmentBytes) throw error(400, 'Anexo acima de 5 MB.');
-	if (!isAllowedAttachmentType(file.type)) throw error(400, 'Tipo de anexo nao permitido.');
+	if (file.size > maxAttachmentBytes)
+		throw error(400, translate(context.locale, 'Attachment is larger than 5 MB.'));
+	if (!isAllowedAttachmentType(file.type))
+		throw error(400, translate(context.locale, 'Attachment type is not allowed.'));
 
 	const originalName = sanitizeFileName(file.name);
 	const storageKey = `${context.workspaceId}/${expenseId}/${randomToken(16)}-${originalName}`;
@@ -124,14 +128,15 @@ export async function getAttachmentForDownload(context: WorkspaceContext, id: nu
 		)
 		.limit(1);
 
-	if (!attachment) throw error(404, 'Anexo não encontrado.');
+	if (!attachment) throw error(404, translate(context.locale, 'Attachment not found.'));
 
 	const filePath = safeStoragePath(getUploadDir(), attachment.storageKey);
 	const fileStats = await stat(filePath).catch(() => {
-		throw error(404, 'Arquivo do anexo não encontrado.');
+		throw error(404, translate(context.locale, 'Attachment file not found.'));
 	});
 
-	if (!fileStats.isFile()) throw error(404, 'Arquivo do anexo não encontrado.');
+	if (!fileStats.isFile())
+		throw error(404, translate(context.locale, 'Attachment file not found.'));
 
 	return {
 		...attachment,
@@ -153,7 +158,7 @@ function safeStoragePath(root: string, storageKey: string) {
 	const resolvedRoot = path.resolve(root);
 	const resolvedPath = path.resolve(resolvedRoot, storageKey);
 	if (!resolvedPath.startsWith(`${resolvedRoot}${path.sep}`)) {
-		throw error(400, 'Caminho de anexo inválido.');
+		throw error(400, 'Attachment path is invalid.');
 	}
 	return resolvedPath;
 }
@@ -184,11 +189,11 @@ async function streamAttachmentToFile(file: File, filePath: string) {
 	try {
 		await pipeline(chunks(), createWriteStream(filePath, { flags: 'wx' }));
 	} catch (err) {
-		if (err instanceof AttachmentTooLargeError) throw error(400, 'Anexo acima de 5 MB.');
+		if (err instanceof AttachmentTooLargeError) throw error(400, 'Attachment is larger than 5 MB.');
 		throw err;
 	}
 
-	if (sizeBytes === 0) throw error(400, 'Anexo vazio.');
+	if (sizeBytes === 0) throw error(400, 'Attachment is empty.');
 
 	return {
 		sizeBytes,
@@ -204,7 +209,7 @@ async function assertStoragePathAvailable(filePath: string) {
 		throw err;
 	}
 
-	throw error(409, 'Arquivo de anexo ja existe.');
+	throw error(409, 'Attachment file already exists.');
 }
 
 async function assertExpenseInWorkspace(workspaceId: number, expenseId: number) {
@@ -220,5 +225,5 @@ async function assertExpenseInWorkspace(workspaceId: number, expenseId: number) 
 		)
 		.limit(1);
 
-	if (!row) throw error(404, 'Despesa não encontrada.');
+	if (!row) throw error(404, 'Expense not found.');
 }

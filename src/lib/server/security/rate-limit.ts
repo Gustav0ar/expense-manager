@@ -3,6 +3,7 @@ import { lte, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { rateLimitBucket } from '$lib/server/db/schema';
 import { sha256 } from '$lib/server/utils/crypto';
+import { translate } from '$lib/i18n';
 import { getClientIp } from './client-ip';
 
 type RateLimitOptions = {
@@ -38,9 +39,12 @@ export async function assertRateLimit(event: RequestEvent, options: RateLimitOpt
 		.returning({ count: rateLimitBucket.count, resetAt: rateLimitBucket.resetAt });
 
 	if (bucket.count > options.max) {
+		const time = new Intl.DateTimeFormat(event.locals.locale, { timeStyle: 'medium' }).format(
+			bucket.resetAt
+		);
 		throw error(
 			429,
-			`Muitas tentativas. Tente novamente apos ${bucket.resetAt.toLocaleTimeString('pt-BR')}.`
+			translate(event.locals.locale, 'Too many attempts. Try again after {time}.', { time })
 		);
 	}
 }

@@ -5,6 +5,7 @@ import { category } from '$lib/server/db/schema';
 import type { WorkspaceContext } from './workspaces';
 import { canManageCategories } from '$lib/server/security/roles';
 import { writeAuditEvent } from './audit';
+import { translate } from '$lib/i18n';
 
 export async function listCategories(context: WorkspaceContext, includeArchived = false) {
 	const conditions = [eq(category.workspaceId, context.workspaceId)];
@@ -28,7 +29,8 @@ export async function createCategory(
 	context: WorkspaceContext,
 	input: { name: string; color: string; icon?: string | null }
 ) {
-	if (!canManageCategories(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canManageCategories(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const [created] = await db
 		.insert(category)
@@ -56,7 +58,8 @@ export async function updateCategory(
 	id: number,
 	input: { name: string; color: string; icon?: string | null }
 ) {
-	if (!canManageCategories(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canManageCategories(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const [updated] = await db
 		.update(category)
@@ -64,7 +67,7 @@ export async function updateCategory(
 		.where(and(eq(category.id, id), eq(category.workspaceId, context.workspaceId)))
 		.returning({ id: category.id });
 
-	if (!updated) throw error(404, 'Categoria não encontrada.');
+	if (!updated) throw error(404, translate(context.locale, 'Category not found.'));
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,
@@ -76,7 +79,8 @@ export async function updateCategory(
 }
 
 export async function archiveCategory(context: WorkspaceContext, id: number) {
-	if (!canManageCategories(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canManageCategories(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const [updated] = await db
 		.update(category)
@@ -84,7 +88,7 @@ export async function archiveCategory(context: WorkspaceContext, id: number) {
 		.where(and(eq(category.id, id), eq(category.workspaceId, context.workspaceId)))
 		.returning({ id: category.id });
 
-	if (!updated) throw error(404, 'Categoria não encontrada.');
+	if (!updated) throw error(404, translate(context.locale, 'Category not found.'));
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,

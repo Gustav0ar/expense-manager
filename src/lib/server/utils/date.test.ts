@@ -29,12 +29,11 @@ describe('date helpers', () => {
 		expect(lastDayOfMonth(leapFebruary)).toBe('2024-02-29');
 	});
 
-	it('calculates month bounds with the workspace timezone', () => {
+	it('calculates month bounds from UTC instants only', () => {
 		const utcStartOfJuly = new Date('2026-07-01T01:00:00.000Z');
-		expect(firstDayOfMonth(utcStartOfJuly, 'America/Sao_Paulo')).toBe('2026-06-01');
-		expect(lastDayOfMonth(utcStartOfJuly, 'America/Sao_Paulo')).toBe('2026-06-30');
-		expect(firstDayOfMonth(utcStartOfJuly, 'UTC')).toBe('2026-07-01');
-		expect(todayIso('America/Sao_Paulo', utcStartOfJuly)).toBe('2026-06-30');
+		expect(firstDayOfMonth(utcStartOfJuly)).toBe('2026-07-01');
+		expect(lastDayOfMonth(utcStartOfJuly)).toBe('2026-07-31');
+		expect(todayIso(utcStartOfJuly)).toBe('2026-07-01');
 	});
 
 	it('advances dates for monthly installments and recurrence', () => {

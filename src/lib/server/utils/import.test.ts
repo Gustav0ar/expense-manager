@@ -4,7 +4,7 @@ import { parseCsvImport, parseExpenseImport, parseOfxImport } from './import';
 describe('expense import parser', () => {
 	it('parses Portuguese CSV with semicolon delimiter', () => {
 		const result = parseCsvImport(
-			'Data;Descricao;Valor;Categoria;Pagamento;Fornecedor;Centro de custo\n25/06/2026;Limpeza;R$ 125,40;Limpeza;Pix;Fornecedor A;Operacao\n'
+			'Data;Descrição;Valor;Categoria;Pagamento;Fornecedor;Centro de custo\n25/06/2026;Limpeza;R$ 125,40;Limpeza;Pix;Fornecedor A;Operação\n'
 		);
 
 		expect(result.errors).toEqual([]);
@@ -17,7 +17,7 @@ describe('expense import parser', () => {
 				categoryName: 'Limpeza',
 				paymentMethod: 'Pix',
 				vendor: 'Fornecedor A',
-				costCenter: 'Operacao',
+				costCenter: 'Operação',
 				notes: undefined
 			}
 		]);
@@ -30,8 +30,8 @@ describe('expense import parser', () => {
 
 		expect(result.rows).toHaveLength(1);
 		expect(result.errors).toEqual([
-			'Linha 3: data, descrição ou valor inválido.',
-			'Linha 4: data, descrição ou valor inválido.'
+			'Line 3: date, description or amount is invalid.',
+			'Line 4: date, description or amount is invalid.'
 		]);
 	});
 
@@ -49,10 +49,44 @@ describe('expense import parser', () => {
 		});
 	});
 
+	it('rejects explicit positive credits instead of converting them to expenses', () => {
+		const csvResult = parseCsvImport(
+			'date,description,amount\n2026-01-05,Crédito,+12.30\n2026-01-06,Despesa,12.30\n'
+		);
+		expect(csvResult.rows).toEqual([
+			expect.objectContaining({
+				description: 'Despesa',
+				amount: '12,30'
+			})
+		]);
+		expect(csvResult.errors).toEqual(['Line 2: date, description or amount is invalid.']);
+
+		const ofxResult = parseOfxImport(`
+			<OFX><BANKTRANLIST>
+				<STMTTRN><DTPOSTED>20260625120000[-3:BRT]<TRNAMT>42.35<NAME>Estorno</STMTTRN>
+				<STMTTRN><DTPOSTED>20260626120000[-3:BRT]<TRNAMT>-21.10<NAME>Despesa</STMTTRN>
+			</BANKTRANLIST></OFX>
+		`);
+		expect(ofxResult.rows).toEqual([
+			expect.objectContaining({
+				description: 'Despesa',
+				amount: '21,10'
+			})
+		]);
+		expect(ofxResult.errors).toEqual(['OFX transaction 1: date or amount is invalid.']);
+	});
+
 	it('returns explicit errors for empty CSV and invalid OFX transaction rows', () => {
-		expect(parseCsvImport('').errors).toEqual(['Arquivo CSV vazio.']);
+		expect(parseCsvImport('').errors).toEqual(['CSV file is empty.']);
 		expect(parseOfxImport('<STMTTRN><DTPOSTED>bad<TRNAMT>0<NAME>Bad</STMTTRN>').errors).toEqual([
-			'Lançamento OFX 1: data ou valor inválido.'
+			'OFX transaction 1: date or amount is invalid.'
+		]);
+	});
+
+	it('translates parser errors when a locale is provided', () => {
+		expect(parseCsvImport('', 'pt-BR').errors).toEqual(['Arquivo CSV vazio.']);
+		expect(parseCsvImport('date,description,amount\nbad,,abc\n', 'pt-BR').errors).toEqual([
+			'Linha 2: data, descrição ou valor inválido.'
 		]);
 	});
 
@@ -60,7 +94,7 @@ describe('expense import parser', () => {
 		const result = parseCsvImport('foo,bar\n1,2\n');
 
 		expect(result.rows).toEqual([]);
-		expect(result.errors[0]).toContain('data, descricao e valor');
+		expect(result.errors[0]).toContain('date, description and amount');
 	});
 
 	it('parses OFX statement transactions', () => {
@@ -85,8 +119,6 @@ describe('expense import parser', () => {
 		expect(
 			parseExpenseImport('csv', 'date,description,amount\n2026-01-01,A,1\n').rows
 		).toHaveLength(1);
-		expect(parseExpenseImport('ofx', 'empty').errors).toEqual([
-			'Nenhum lançamento OFX encontrado.'
-		]);
+		expect(parseExpenseImport('ofx', 'empty').errors).toEqual(['No OFX transaction found.']);
 	});
 });

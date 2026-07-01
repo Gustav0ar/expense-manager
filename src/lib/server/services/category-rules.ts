@@ -5,6 +5,7 @@ import { auditEvent, category, categoryRule } from '$lib/server/db/schema';
 import { canManageCategories } from '$lib/server/security/roles';
 import { assertCategoryInWorkspace } from '$lib/server/utils/category';
 import type { WorkspaceContext } from './workspaces';
+import { translate } from '$lib/i18n';
 
 export type CategoryRuleInput = {
 	name: string;
@@ -41,7 +42,8 @@ export async function listCategoryRules(context: WorkspaceContext) {
 }
 
 export async function createCategoryRule(context: WorkspaceContext, input: CategoryRuleInput) {
-	if (!canManageCategories(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canManageCategories(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
 
 	const [created] = await db
@@ -70,7 +72,8 @@ export async function createCategoryRule(context: WorkspaceContext, input: Categ
 }
 
 export async function archiveCategoryRule(context: WorkspaceContext, id: number) {
-	if (!canManageCategories(context.role)) throw error(403, 'Permissao insuficiente.');
+	if (!canManageCategories(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const [updated] = await db
 		.update(categoryRule)
@@ -78,7 +81,7 @@ export async function archiveCategoryRule(context: WorkspaceContext, id: number)
 		.where(and(eq(categoryRule.id, id), eq(categoryRule.workspaceId, context.workspaceId)))
 		.returning({ id: categoryRule.id });
 
-	if (!updated) throw error(404, 'Regra não encontrada.');
+	if (!updated) throw error(404, translate(context.locale, 'Rule not found.'));
 
 	await db.insert(auditEvent).values({
 		workspaceId: context.workspaceId,

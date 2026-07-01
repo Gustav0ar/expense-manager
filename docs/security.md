@@ -1,55 +1,55 @@
-# Seguranca
+# Security
 
-## Controles implementados
+## Implemented Controls
 
-- Autenticacao com Better Auth
-- Verificacao de email obrigatoria em producao por padrao
-- Cookies seguros configurados pela biblioteca de auth
-- Rate limit persistente para login, cadastro e reset de senha
-- Rate limit usa IP real do proxy apenas quando `TRUST_PROXY_HEADERS=true`
-- Isolamento por `workspace_id` em todos os servicos de dominio
-- RBAC por workspace
-- Valores financeiros em centavos
-- Convites com token hashado
-- MFA/TOTP opcional por usuario, com segredo criptografado, recovery codes hashados e gate global para sessoes autenticadas
-- Anexos com limite de tamanho, allowlist de MIME type, download autenticado e bloqueio quando a despesa foi removida
-- Anexos gravados e baixados por streaming para evitar buffers grandes no processo Node
-- Soft delete de despesas
-- Auditoria de acoes principais com filtros por acao e entidade
-- Request ID e `Server-Timing` em respostas HTTP
-- Headers de seguranca no hook global e no Caddy
-- CSP em producao
-- Compose de producao com app em filesystem somente-leitura, `tmpfs` para temporarios, capabilities removidas, `no-new-privileges`, limites de recursos e healthcheck de aplicacao
+- Authentication with Better Auth
+- Email verification required by default in production
+- Secure cookies configured by the auth library
+- Persistent rate limiting for login, registration and password reset
+- Rate limiting uses the real proxy IP only when `TRUST_PROXY_HEADERS=true`
+- Isolation by `workspace_id` in all domain services
+- Workspace-scoped RBAC
+- Financial values stored in cents
+- Invitations with hashed tokens
+- Optional per-user MFA/TOTP with encrypted secret, hashed recovery codes and a global gate for authenticated sessions
+- Attachments with size limit, MIME allowlist, authenticated download and blocking when the expense was removed
+- Attachment upload and download through streaming to avoid large buffers in the Node process
+- Soft delete for expenses
+- Audit trail for main actions with filters by action and entity
+- Request ID and `Server-Timing` in HTTP responses
+- Security headers in the global hook and Caddy
+- CSP in production
+- Production compose with the app on a read-only filesystem, `tmpfs` for temporary files, dropped capabilities, `no-new-privileges`, resource limits and application healthcheck
 
-## Checklist antes de producao
+## Pre-Production Checklist
 
-- `BETTER_AUTH_SECRET` gerado com alta entropia
-- SMTP testado
-- `REQUIRE_EMAIL_VERIFICATION=true` em producao, salvo decisao operacional documentada
-- HTTPS ativo
-- `TRUST_PROXY_HEADERS=true` apenas se o app estiver isolado atras de proxy reverso confiavel
-- Backups copiados para fora da VPS
-- Restore testado
-- Backup do volume `uploads` conferido e copiado para fora da VPS se comprovantes forem usados
-- `pnpm audit --prod` revisado
-- `pnpm verify` passando
-- `docker compose config` valido para o `.env` de producao
-- Diagnostico em `scripts/postgres-observability.sql` revisado quando houver trafego real
-- Acesso SSH da VPS limitado por chave
-- Firewall permitindo apenas SSH, 80 e 443
+- `BETTER_AUTH_SECRET` generated with high entropy
+- SMTP tested
+- `REQUIRE_EMAIL_VERIFICATION=true` in production unless an operational exception is documented
+- HTTPS active
+- `TRUST_PROXY_HEADERS=true` only if the app is isolated behind a trusted reverse proxy
+- Backups copied outside the VPS
+- Restore tested
+- `uploads` volume backup checked and copied outside the VPS when receipts are used
+- `pnpm audit --prod` reviewed
+- `pnpm verify` passing
+- `docker compose config` valid for the production `.env`
+- `scripts/postgres-observability.sql` diagnostics reviewed after real traffic exists
+- VPS SSH access limited to keys
+- Firewall allowing only SSH, 80 and 443
 
-## Audit exceptions
+## Audit Exceptions
 
-O `pnpm-workspace.yaml` ignora dois advisories conhecidos no audit de producao:
+`pnpm-workspace.yaml` ignores two known production audit advisories:
 
-- `GHSA-67mh-4wv8-2f99`: `esbuild` abaixo de `0.24.3` aparece via peer/tooling de `drizzle-kit`, usado para migrations/build, nao pelo servidor Node final.
-- `GHSA-pxg6-pf52-xh8x`: `cookie@0.6.0` aparece via peer de `@sveltejs/kit`. O risco reportado e baixo e deve ser removido quando SvelteKit atualizar a dependencia.
+- `GHSA-67mh-4wv8-2f99`: `esbuild` below `0.24.3` appears through peer/tooling dependencies of `drizzle-kit`, used for migrations/build and not by the final Node server.
+- `GHSA-pxg6-pf52-xh8x`: `cookie@0.6.0` appears through `@sveltejs/kit`. The reported risk is low and should disappear when SvelteKit updates the dependency.
 
-Essas excecoes devem ser reavaliadas a cada atualizacao de dependencias.
+Reevaluate these exceptions after each dependency update.
 
-## Modelo de permissoes
+## Permission Model
 
-- `owner`: gerencia workspace, usuarios, categorias e despesas
-- `admin`: gerencia usuarios, categorias e despesas
-- `member`: cria e edita despesas
-- `viewer`: apenas visualiza
+- `owner`: manages workspace, users, categories and expenses
+- `admin`: manages users, categories and expenses
+- `member`: creates and edits expenses
+- `viewer`: read-only access

@@ -1,3 +1,5 @@
+import { defaultLocale, translate } from '$lib/i18n';
+
 export type ExpenseImportSource = 'csv' | 'ofx';
 
 export type ImportedExpenseRow = {
@@ -30,16 +32,17 @@ const headerAliases = {
 
 export function parseExpenseImport(
 	sourceType: ExpenseImportSource,
-	content: string
+	content: string,
+	locale = defaultLocale
 ): ExpenseImportParseResult {
-	if (sourceType === 'csv') return parseCsvImport(content);
-	return parseOfxImport(content);
+	if (sourceType === 'csv') return parseCsvImport(content, locale);
+	return parseOfxImport(content, locale);
 }
 
-export function parseCsvImport(content: string): ExpenseImportParseResult {
+export function parseCsvImport(content: string, locale = defaultLocale): ExpenseImportParseResult {
 	const rows = parseCsvRows(content);
 	const errors: string[] = [];
-	if (rows.length === 0) return { rows: [], errors: ['Arquivo CSV vazio.'] };
+	if (rows.length === 0) return { rows: [], errors: [translate(locale, 'CSV file is empty.')] };
 
 	const headers = rows[0].map((header) => normalizeHeader(header));
 	const indexes = {
@@ -56,7 +59,7 @@ export function parseCsvImport(content: string): ExpenseImportParseResult {
 	if (indexes.date === -1 || indexes.description === -1 || indexes.amount === -1) {
 		return {
 			rows: [],
-			errors: ['CSV precisa conter colunas de data, descricao e valor.']
+			errors: [translate(locale, 'CSV must contain date, description and amount columns.')]
 		};
 	}
 
@@ -71,7 +74,11 @@ export function parseCsvImport(content: string): ExpenseImportParseResult {
 		const amount = normalizeAmount(row[indexes.amount]);
 
 		if (!expenseDate || !description || !amount) {
-			errors.push(`Linha ${rowNumber}: data, descrição ou valor inválido.`);
+			errors.push(
+				translate(locale, 'Line {rowNumber}: date, description or amount is invalid.', {
+					rowNumber
+				})
+			);
 			continue;
 		}
 
@@ -91,26 +98,35 @@ export function parseCsvImport(content: string): ExpenseImportParseResult {
 	return { rows: importedRows, errors };
 }
 
-export function parseOfxImport(content: string): ExpenseImportParseResult {
+export function parseOfxImport(content: string, locale = defaultLocale): ExpenseImportParseResult {
 	const transactions = [
 		...content.matchAll(/<STMTTRN>([\s\S]*?)(?=<STMTTRN>|<\/BANKTRANLIST>|$)/gi)
 	];
 	const errors: string[] = [];
 	const rows: ImportedExpenseRow[] = [];
 
-	if (transactions.length === 0) return { rows: [], errors: ['Nenhum lançamento OFX encontrado.'] };
+	if (transactions.length === 0)
+		return { rows: [], errors: [translate(locale, 'No OFX transaction found.')] };
 
 	for (const [index, match] of transactions.entries()) {
 		const block = match[1];
 		const rowNumber = index + 1;
 		const expenseDate = normalizeDate(readOfxTag(block, 'DTPOSTED') ?? '');
 		const description =
-			readOfxTag(block, 'NAME')?.trim() || readOfxTag(block, 'MEMO')?.trim() || 'Lançamento OFX';
-		const amount = normalizeAmount(readOfxTag(block, 'TRNAMT') ?? '');
+			readOfxTag(block, 'NAME')?.trim() ||
+			readOfxTag(block, 'MEMO')?.trim() ||
+			translate(locale, 'OFX transaction');
+		const amount = normalizeAmount(readOfxTag(block, 'TRNAMT') ?? '', {
+			positiveMeansCredit: true
+		});
 		const memo = readOfxTag(block, 'MEMO')?.trim();
 
 		if (!expenseDate || !amount) {
-			errors.push(`Lançamento OFX ${rowNumber}: data ou valor inválido.`);
+			errors.push(
+				translate(locale, 'OFX transaction {rowNumber}: date or amount is invalid.', {
+					rowNumber
+				})
+			);
 			continue;
 		}
 
@@ -224,15 +240,18 @@ function validIsoOrNull(value: string) {
 		: null;
 }
 
-function normalizeAmount(input: string) {
+function normalizeAmount(input: string, options: { positiveMeansCredit?: boolean } = {}) {
 	const value = input.trim();
 	if (!value) return null;
-	const numeric = value
-		.replace(/[^\d,.-]/g, '')
+	const signedValue = value.replace(/[^\d,.\-+]/g, '');
+	if (signedValue.startsWith('+')) return null;
+	const numeric = signedValue
+		.replace(/\+/g, '')
 		.replace(/\.(?=\d{3}(,|$))/g, '')
 		.replace(',', '.');
 	const parsed = Number(numeric);
 	if (!Number.isFinite(parsed) || parsed === 0) return null;
+	if (options.positiveMeansCredit && parsed > 0) return null;
 	return Math.abs(parsed).toFixed(2).replace('.', ',');
 }
 

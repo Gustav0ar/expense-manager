@@ -43,6 +43,20 @@
       "when": 1782694871230,
       "tag": "0005_luxuriant_the_renegades",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1782780768067,
+      "tag": "0006_slow_smasher",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1782864000000,
+      "tag": "0007_default_currency_usd",
+      "breakpoints": true
     }
   ]
 }

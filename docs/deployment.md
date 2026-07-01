@@ -1,16 +1,16 @@
-# Deploy em VPS
+# VPS Deployment
 
-## Requisitos
+## Requirements
 
-- Docker Engine com Docker Compose
-- pnpm nao precisa ser instalado na VPS; a imagem Docker instala dependencias durante o build
-- Dominio apontado para a VPS
-- Portas 80 e 443 liberadas
-- SMTP configurado para reset de senha e convites
-- Storage externo para copiar backups
-- Espaco persistente para o volume `uploads`, usado pelos comprovantes anexados
+- Docker Engine with Docker Compose
+- `pnpm` does not need to be installed on the VPS; the Docker image installs dependencies during the build
+- Domain pointed to the VPS
+- Ports 80 and 443 open
+- SMTP configured for password reset and invitations
+- External storage for backup copies
+- Persistent space for the `uploads` volume, used by receipt attachments
 
-## Variaveis obrigatorias
+## Required Variables
 
 - `APP_DOMAIN`
 - `ORIGIN`
@@ -19,16 +19,16 @@
 - `POSTGRES_USER`
 - `POSTGRES_PASSWORD`
 
-## Variaveis recomendadas
+## Recommended Variables
 
-- `UPLOAD_DIR`: caminho dos anexos dentro do container. O compose usa `/app/uploads` por padrao.
-- `DB_POOL_MAX`: tamanho maximo do pool de conexoes da aplicacao.
-- `TRUST_PROXY_HEADERS`: use `true` somente quando o app nao estiver exposto diretamente e receber trafego apenas por proxy confiavel. No `docker-compose.yml` padrao fica `true` porque o Caddy e o unico servico publicado.
-- `TRUSTED_ORIGINS`: origens extras separadas por virgula para acessos por URL alternativa, VPN ou Tailscale. Use origens completas como `https://financeiro.example.com` ou `http://100.x.y.z:5173`.
-- `BACKUP_OFFSITE_DIR`: diretorio opcional dentro do container de backup para copiar dumps e checksums ja validados. Monte esse caminho em storage externo pela sua politica operacional.
-- `APP_MEM_LIMIT`, `APP_CPUS`, `POSTGRES_MEM_LIMIT`, `POSTGRES_CPUS`, `CADDY_MEM_LIMIT`, `BACKUP_MEM_LIMIT`: limites operacionais opcionais para ajustar consumo na VPS.
+- `UPLOAD_DIR`: attachment path inside the container. The compose file uses `/app/uploads` by default.
+- `DB_POOL_MAX`: maximum application connection pool size.
+- `TRUST_PROXY_HEADERS`: use `true` only when the app is not directly exposed and only receives traffic through a trusted reverse proxy. The default `docker-compose.yml` sets it to `true` because Caddy is the only published service.
+- `TRUSTED_ORIGINS`: comma-separated extra origins for alternate URLs, VPN or Tailscale access. Use complete origins such as `https://finance.example.com` or `http://100.x.y.z:5173`.
+- `BACKUP_OFFSITE_DIR`: optional path inside the backup container for copying already validated dumps and checksums. Mount this path to external storage according to your operating policy.
+- `APP_MEM_LIMIT`, `APP_CPUS`, `POSTGRES_MEM_LIMIT`, `POSTGRES_CPUS`, `CADDY_MEM_LIMIT`, `BACKUP_MEM_LIMIT`: optional operational limits for tuning VPS resource usage.
 
-## Primeira publicacao
+## First Release
 
 ```bash
 cp .env.example .env
@@ -37,11 +37,11 @@ docker compose --profile tools run --rm migrate
 docker compose up -d app caddy backup
 ```
 
-O servico `backup` grava dumps do Postgres, arquivos `uploads_*.tar.gz` com comprovantes anexados e checksums `.sha256`. O dump e validado com `pg_restore --list` e o pacote de uploads e validado com `tar -tzf` antes da copia opcional para `BACKUP_OFFSITE_DIR`.
+The `backup` service writes Postgres dumps, `uploads_*.tar.gz` files for attachments and `.sha256` checksums. The dump is validated with `pg_restore --list`, and the uploads package is validated with `tar -tzf` before the optional copy to `BACKUP_OFFSITE_DIR`.
 
 ## Restore
 
-Restaure o Postgres primeiro:
+Restore Postgres first:
 
 ```bash
 docker compose exec -T postgres pg_restore \
@@ -52,7 +52,7 @@ docker compose exec -T postgres pg_restore \
   /path/to/backup.dump
 ```
 
-Depois restaure os anexos correspondentes ao mesmo timestamp do dump:
+Then restore the attachments matching the same dump timestamp:
 
 ```bash
 docker compose stop app
@@ -62,9 +62,9 @@ docker compose run --rm --no-deps \
 docker compose up -d app
 ```
 
-Valide o restore em uma base separada antes de depender dele em producao.
+Validate restores in a separate database before relying on them in production.
 
-## Atualizacao
+## Update
 
 ```bash
 git pull
@@ -74,9 +74,9 @@ docker compose up -d app
 docker compose exec app wget -qO- http://localhost:3000/api/health
 ```
 
-## Diagnostico operacional
+## Operational Diagnostics
 
-Para revisar queries lentas, lock waits, tamanho de indices, tuplas mortas e candidatos a indices nao usados:
+To review slow queries, lock waits, index size, dead tuples and unused-index candidates:
 
 ```bash
 docker compose exec -T postgres psql \
@@ -85,16 +85,16 @@ docker compose exec -T postgres psql \
   < scripts/postgres-observability.sql
 ```
 
-Detalhes e criterios de acao ficam em `docs/operations.md`.
+Details and action criteria are in `docs/operations.md`.
 
 ## Rollback
 
-Mantenha tags de release no GitHub. Para voltar:
+Keep release tags in GitHub. To roll back:
 
 ```bash
-git checkout <tag-anterior>
+git checkout <previous-tag>
 docker compose build app
 docker compose up -d app
 ```
 
-Migrations destrutivas exigem plano especifico de rollback de banco.
+Destructive migrations require a database-specific rollback plan.

@@ -36,7 +36,7 @@ describe('role permissions', () => {
 	});
 
 	it('throws when a role is not allowed', () => {
-		expect(() => assertRole('member', canManageCategories)).toThrow('Permissao insuficiente.');
+		expect(() => assertRole('member', canManageCategories)).toThrow('Permission denied.');
 		expect(() => assertRole('owner', canManageCategories)).not.toThrow();
 	});
 });

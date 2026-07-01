@@ -1,5 +1,6 @@
 import { dev } from '$app/environment';
 import { env } from '$env/dynamic/private';
+import { defaultLocale, translate, type SupportedLocale } from '$lib/i18n';
 import nodemailer from 'nodemailer';
 
 type MailInput = {
@@ -49,37 +50,61 @@ export async function sendMail(input: MailInput) {
 	});
 }
 
-export async function sendPasswordResetEmail(to: string, url: string) {
+export async function sendPasswordResetEmail(
+	to: string,
+	url: string,
+	locale: SupportedLocale = defaultLocale
+) {
 	const textUrl = sanitizeEmailText(url);
 	const safeUrl = escapeHtml(textUrl);
 	await sendMail({
 		to,
-		subject: 'Redefinição de senha',
-		text: `Acesse o link para redefinir sua senha: ${textUrl}`,
-		html: `<p>Acesse o link para redefinir sua senha:</p><p><a href="${safeUrl}">${safeUrl}</a></p>`
+		subject: translate(locale, 'Password reset'),
+		text: translate(locale, 'Access the link to reset your password: {url}', { url: textUrl }),
+		html: `<p>${escapeHtml(translate(locale, 'Access the link to reset your password: {url}', { url: '' }).trim())}</p><p><a href="${safeUrl}">${safeUrl}</a></p>`
 	});
 }
 
-export async function sendVerificationEmail(to: string, url: string) {
+export async function sendVerificationEmail(
+	to: string,
+	url: string,
+	locale: SupportedLocale = defaultLocale
+) {
 	const textUrl = sanitizeEmailText(url);
 	const safeUrl = escapeHtml(textUrl);
 	await sendMail({
 		to,
-		subject: 'Verifique seu email',
-		text: `Acesse o link para verificar seu email: ${textUrl}`,
-		html: `<p>Acesse o link para verificar seu email:</p><p><a href="${safeUrl}">${safeUrl}</a></p>`
+		subject: translate(locale, 'Verify your email'),
+		text: translate(locale, 'Access the link to verify your email: {url}', { url: textUrl }),
+		html: `<p>${escapeHtml(translate(locale, 'Access the link to verify your email: {url}', { url: '' }).trim())}</p><p><a href="${safeUrl}">${safeUrl}</a></p>`
 	});
 }
 
-export async function sendInvitationEmail(to: string, workspaceName: string, url: string) {
-	const safeWorkspaceName = escapeHtml(sanitizeEmailText(workspaceName));
+export async function sendInvitationEmail(
+	to: string,
+	workspaceName: string,
+	url: string,
+	locale: SupportedLocale = defaultLocale
+) {
+	const safeTextWorkspaceName = sanitizeEmailText(workspaceName);
+	const safeWorkspaceName = escapeHtml(safeTextWorkspaceName);
 	const textUrl = sanitizeEmailText(url);
 	const safeUrl = escapeHtml(textUrl);
 	await sendMail({
 		to,
-		subject: `Convite para ${safeWorkspaceName}`,
-		text: `Você recebeu um convite para acessar ${safeWorkspaceName}. Acesse: ${textUrl}`,
-		html: `<p>Você recebeu um convite para acessar <strong>${safeWorkspaceName}</strong>.</p><p><a href="${safeUrl}">Aceitar convite</a></p>`
+		subject: translate(locale, 'Invite to {workspace}', { workspace: safeTextWorkspaceName }),
+		text: translate(locale, 'You received an invite to access {workspace}. Open: {url}', {
+			workspace: safeTextWorkspaceName,
+			url: textUrl
+		}),
+		html: `<p>${escapeHtml(
+			translate(locale, 'You received an invite to access {workspace}. Open: {url}', {
+				workspace: safeTextWorkspaceName,
+				url: ''
+			}).trim()
+		)}</p><p><strong>${safeWorkspaceName}</strong></p><p><a href="${safeUrl}">${escapeHtml(
+			translate(locale, 'Accept invite')
+		)}</a></p>`
 	});
 }
 
@@ -93,32 +118,42 @@ export async function sendBudgetAlertEmail(
 		spentLabel: string;
 		budgetLabel: string;
 		status: string;
-	}>
+	}>,
+	locale: SupportedLocale = defaultLocale
 ) {
-	const safeWorkspaceName = escapeHtml(sanitizeEmailText(workspaceName));
+	const safeTextWorkspaceName = sanitizeEmailText(workspaceName);
 	const safePeriod = sanitizeEmailText(periodMonth);
 	const lines = items.map(
 		(item) =>
-			`- ${sanitizeEmailText(item.categoryName)}: ${item.usagePct ?? 0}% (${sanitizeEmailText(
-				item.spentLabel
-			)} de ${sanitizeEmailText(item.budgetLabel)})`
+			`- ${sanitizeEmailText(item.categoryName)}: ${item.usagePct ?? 0}% (${translate(locale, '{spent} of {budget}', { spent: sanitizeEmailText(item.spentLabel), budget: sanitizeEmailText(item.budgetLabel) })})`
 	);
 	const htmlItems = items
 		.map(
 			(item) =>
 				`<li><strong>${escapeHtml(sanitizeEmailText(item.categoryName))}</strong>: ${
 					item.usagePct ?? 0
-				}% (${escapeHtml(sanitizeEmailText(item.spentLabel))} de ${escapeHtml(
-					sanitizeEmailText(item.budgetLabel)
+				}% (${escapeHtml(
+					translate(locale, '{spent} of {budget}', {
+						spent: sanitizeEmailText(item.spentLabel),
+						budget: sanitizeEmailText(item.budgetLabel)
+					})
 				)})</li>`
 		)
 		.join('');
 
 	await sendMail({
 		to,
-		subject: `Alertas de orçamento - ${safeWorkspaceName}`,
-		text: `Alertas de orçamento para ${safeWorkspaceName} em ${safePeriod}:\n${lines.join('\n')}`,
-		html: `<p>Alertas de orçamento para <strong>${safeWorkspaceName}</strong> em ${escapeHtml(safePeriod)}:</p><ul>${htmlItems}</ul>`
+		subject: translate(locale, 'Budget alerts - {workspace}', { workspace: safeTextWorkspaceName }),
+		text: `${translate(locale, 'Budget alerts for {workspace} in {period}:', {
+			workspace: safeTextWorkspaceName,
+			period: safePeriod
+		})}\n${lines.join('\n')}`,
+		html: `<p>${escapeHtml(
+			translate(locale, 'Budget alerts for {workspace} in {period}:', {
+				workspace: safeTextWorkspaceName,
+				period: safePeriod
+			})
+		)}</p><ul>${htmlItems}</ul>`
 	});
 }
 

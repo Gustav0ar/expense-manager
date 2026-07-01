@@ -12,9 +12,9 @@ describe('category emojis', () => {
 	});
 
 	it('contains expected business-oriented categories', () => {
-		expect(categoryEmojiLabels['🧾']).toBe('Contabilidade');
-		expect(categoryEmojiLabels['👥']).toBe('Funcionarios');
-		expect(categoryEmojiLabels['🧰']).toBe('Insumos');
-		expect(categoryEmojiLabels['🧼']).toBe('Limpeza');
+		expect(categoryEmojiLabels['🧾']).toBe('Accounting');
+		expect(categoryEmojiLabels['👥']).toBe('Employees');
+		expect(categoryEmojiLabels['🧰']).toBe('Supplies');
+		expect(categoryEmojiLabels['🧼']).toBe('Cleaning');
 	});
 });
