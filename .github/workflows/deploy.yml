@@ -195,22 +195,133 @@ jobs:
           VPS_USERNAME: ${{ secrets.VPS_USERNAME }}
           VPS_PORT: ${{ secrets.VPS_PORT || 22 }}
           VPS_ENV_FILE: ${{ secrets.VPS_ENV_FILE }}
+          PUBLIC_APP_NAME: ${{ vars.PUBLIC_APP_NAME || 'Expense Manager' }}
+          DOMAIN_NAME: ${{ secrets.DOMAIN_NAME }}
+          ORIGIN: ${{ secrets.ORIGIN }}
+          TRUSTED_ORIGINS: ${{ secrets.TRUSTED_ORIGINS }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          REQUIRE_EMAIL_VERIFICATION: ${{ vars.REQUIRE_EMAIL_VERIFICATION || 'true' }}
+          ALLOW_REGISTRATION: ${{ vars.ALLOW_REGISTRATION || 'false' }}
+          POSTGRES_DB: ${{ vars.POSTGRES_DB || 'expense_manager' }}
+          POSTGRES_USER: ${{ vars.POSTGRES_USER || 'expense_manager' }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          DB_POOL_MAX: ${{ vars.DB_POOL_MAX || '5' }}
+          TRUST_PROXY_HEADERS: ${{ vars.TRUST_PROXY_HEADERS || 'true' }}
+          RESTIC_REPOSITORY: ${{ secrets.RESTIC_REPOSITORY }}
+          RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+          RESTIC_HOST: ${{ vars.RESTIC_HOST || 'expense-manager' }}
+          RESTIC_INIT_REPOSITORY: ${{ vars.RESTIC_INIT_REPOSITORY || 'true' }}
+          RESTIC_KEEP_DAILY: ${{ vars.RESTIC_KEEP_DAILY || '7' }}
+          RESTIC_KEEP_WEEKLY: ${{ vars.RESTIC_KEEP_WEEKLY || '4' }}
+          RESTIC_KEEP_MONTHLY: ${{ vars.RESTIC_KEEP_MONTHLY || '12' }}
+          RESTIC_CHECK_AFTER_BACKUP: ${{ vars.RESTIC_CHECK_AFTER_BACKUP || 'false' }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          REGISTRY: ${{ vars.REGISTRY || 'ghcr.io' }}
+          IMAGE_OWNER_LOWERCASE: ${{ vars.IMAGE_OWNER_LOWERCASE }}
+          TRAEFIK_NETWORK: ${{ vars.TRAEFIK_NETWORK || 'web' }}
+          TRAEFIK_HTTP_ENTRYPOINT: ${{ vars.TRAEFIK_HTTP_ENTRYPOINT || 'web' }}
+          TRAEFIK_ENTRYPOINT: ${{ vars.TRAEFIK_ENTRYPOINT || 'websecure' }}
+          TRAEFIK_CERT_RESOLVER: ${{ vars.TRAEFIK_CERT_RESOLVER || 'le' }}
+          APP_MEM_LIMIT: ${{ vars.APP_MEM_LIMIT || '512m' }}
+          APP_CPUS: ${{ vars.APP_CPUS || '1.0' }}
+          POSTGRES_MEM_LIMIT: ${{ vars.POSTGRES_MEM_LIMIT || '1g' }}
+          POSTGRES_CPUS: ${{ vars.POSTGRES_CPUS || '1.0' }}
+          BACKUP_MEM_LIMIT: ${{ vars.BACKUP_MEM_LIMIT || '256m' }}
+          BACKUP_CPUS: ${{ vars.BACKUP_CPUS || '0.5' }}
+          SENDER_API_TOKEN: ${{ secrets.SENDER_API_TOKEN }}
+          SENDER_FROM: ${{ secrets.SENDER_FROM }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ vars.SMTP_PORT || '587' }}
+          SMTP_SECURE: ${{ vars.SMTP_SECURE || 'false' }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/expense-manager' }}
           SSH_KEY_FILE: ${{ runner.temp }}/vps_ssh_key
           ENV_FILE_PATH: ${{ runner.temp }}/expense-manager.env
         run: |
           set -euo pipefail
 
-          if [ -z "${VPS_ENV_FILE}" ]; then
-            echo "::error::VPS_ENV_FILE is not set in the production environment secrets."
-            exit 1
+          write_env_var() {
+            key="$1"
+            value="$2"
+            escaped_value="$(printf '%s' "${value}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+            printf '%s="%s"\n' "${key}" "${escaped_value}" >> "${ENV_FILE_PATH}"
+          }
+
+          if [ -n "${VPS_ENV_FILE}" ]; then
+            umask 077
+            printf '%s\n' "${VPS_ENV_FILE}" | sed 's/\r$//' > "${ENV_FILE_PATH}"
+          else
+            required_individual_secrets=(
+              DOMAIN_NAME
+              ORIGIN
+              BETTER_AUTH_SECRET
+              POSTGRES_PASSWORD
+              RESTIC_REPOSITORY
+              RESTIC_PASSWORD
+              SENDER_API_TOKEN
+              SENDER_FROM
+            )
+
+            for name in "${required_individual_secrets[@]}"; do
+              if [ -z "${!name}" ]; then
+                echo "::error::Set ${name} as a production environment secret, or set VPS_ENV_FILE."
+                exit 1
+              fi
+            done
+
+            umask 077
+            : > "${ENV_FILE_PATH}"
+            write_env_var PUBLIC_APP_NAME "${PUBLIC_APP_NAME}"
+            write_env_var DOMAIN_NAME "${DOMAIN_NAME}"
+            write_env_var ORIGIN "${ORIGIN}"
+            write_env_var TRUSTED_ORIGINS "${TRUSTED_ORIGINS}"
+            write_env_var BETTER_AUTH_SECRET "${BETTER_AUTH_SECRET}"
+            write_env_var REQUIRE_EMAIL_VERIFICATION "${REQUIRE_EMAIL_VERIFICATION}"
+            write_env_var ALLOW_REGISTRATION "${ALLOW_REGISTRATION}"
+            write_env_var POSTGRES_DB "${POSTGRES_DB}"
+            write_env_var POSTGRES_USER "${POSTGRES_USER}"
+            write_env_var POSTGRES_PASSWORD "${POSTGRES_PASSWORD}"
+            write_env_var DB_POOL_MAX "${DB_POOL_MAX}"
+            write_env_var TRUST_PROXY_HEADERS "${TRUST_PROXY_HEADERS}"
+            write_env_var RESTIC_REPOSITORY "${RESTIC_REPOSITORY}"
+            write_env_var RESTIC_PASSWORD "${RESTIC_PASSWORD}"
+            write_env_var RESTIC_HOST "${RESTIC_HOST}"
+            write_env_var RESTIC_INIT_REPOSITORY "${RESTIC_INIT_REPOSITORY}"
+            write_env_var RESTIC_KEEP_DAILY "${RESTIC_KEEP_DAILY}"
+            write_env_var RESTIC_KEEP_WEEKLY "${RESTIC_KEEP_WEEKLY}"
+            write_env_var RESTIC_KEEP_MONTHLY "${RESTIC_KEEP_MONTHLY}"
+            write_env_var RESTIC_CHECK_AFTER_BACKUP "${RESTIC_CHECK_AFTER_BACKUP}"
+            write_env_var AWS_ACCESS_KEY_ID "${AWS_ACCESS_KEY_ID}"
+            write_env_var AWS_SECRET_ACCESS_KEY "${AWS_SECRET_ACCESS_KEY}"
+            write_env_var AWS_DEFAULT_REGION "${AWS_DEFAULT_REGION}"
+            write_env_var REGISTRY "${REGISTRY}"
+            write_env_var IMAGE_OWNER_LOWERCASE "${IMAGE_OWNER_LOWERCASE}"
+            write_env_var TRAEFIK_NETWORK "${TRAEFIK_NETWORK}"
+            write_env_var TRAEFIK_HTTP_ENTRYPOINT "${TRAEFIK_HTTP_ENTRYPOINT}"
+            write_env_var TRAEFIK_ENTRYPOINT "${TRAEFIK_ENTRYPOINT}"
+            write_env_var TRAEFIK_CERT_RESOLVER "${TRAEFIK_CERT_RESOLVER}"
+            write_env_var APP_MEM_LIMIT "${APP_MEM_LIMIT}"
+            write_env_var APP_CPUS "${APP_CPUS}"
+            write_env_var POSTGRES_MEM_LIMIT "${POSTGRES_MEM_LIMIT}"
+            write_env_var POSTGRES_CPUS "${POSTGRES_CPUS}"
+            write_env_var BACKUP_MEM_LIMIT "${BACKUP_MEM_LIMIT}"
+            write_env_var BACKUP_CPUS "${BACKUP_CPUS}"
+            write_env_var SENDER_API_TOKEN "${SENDER_API_TOKEN}"
+            write_env_var SENDER_FROM "${SENDER_FROM}"
+            write_env_var SMTP_HOST "${SMTP_HOST}"
+            write_env_var SMTP_PORT "${SMTP_PORT}"
+            write_env_var SMTP_SECURE "${SMTP_SECURE}"
+            write_env_var SMTP_USER "${SMTP_USER}"
+            write_env_var SMTP_PASSWORD "${SMTP_PASSWORD}"
+            write_env_var SMTP_FROM "${SMTP_FROM}"
           fi
 
-          umask 077
-          printf '%s\n' "${VPS_ENV_FILE}" | sed 's/\r$//' > "${ENV_FILE_PATH}"
-
           if [ ! -s "${ENV_FILE_PATH}" ]; then
-            echo "::error::VPS_ENV_FILE produced an empty environment file."
+            echo "::error::Production environment secrets produced an empty environment file."
             exit 1
           fi
 
