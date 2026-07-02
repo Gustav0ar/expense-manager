@@ -219,10 +219,14 @@ them in GitHub secrets.
    - Verifies `/api/health` and `/` through Traefik.
    - Rolls app containers back to the previous image tag automatically when
      migration, restart, application healthcheck or public smoke checks fail.
-   - Prunes dangling images.
 
 The public `deploy-summary` artifact contains only service name, image tag,
 commit SHA, image owner and a non-reversible host fingerprint.
+
+Public smoke checks retry for up to three minutes by default because Traefik can
+take a short time to route to a recreated container. Override
+`PUBLIC_ROUTE_RETRIES` or `PUBLIC_ROUTE_RETRY_DELAY_SECONDS` in the private VPS
+`.env` only if your Traefik instance needs a different window.
 
 ## VPS Isolation
 
