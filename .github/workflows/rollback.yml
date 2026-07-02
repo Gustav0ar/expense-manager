@@ -36,7 +36,16 @@ jobs:
     name: Roll back VPS
     runs-on: ubuntu-latest
     environment: production
+    env:
+      TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
     steps:
+      - name: Connect to Tailscale
+        if: env.TAILSCALE_AUTHKEY != ''
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ env.TAILSCALE_AUTHKEY }}
+          ping: ${{ secrets.VPS_HOST }}
+
       - name: Prepare and test SSH key
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
