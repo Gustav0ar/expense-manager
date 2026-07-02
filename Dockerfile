@@ -21,10 +21,10 @@ RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NODE_ENV=production
-ENV ORIGIN=http://localhost:3000
-ENV BETTER_AUTH_SECRET=build-time-placeholder-build-time-placeholder
-ENV DATABASE_URL=postgres://postgres:postgres@localhost:5432/app
-RUN pnpm build
+RUN ORIGIN=http://localhost:3000 \
+	BETTER_AUTH_SECRET=build-time-placeholder-build-time-placeholder \
+	DATABASE_URL=postgres://postgres:postgres@localhost:5432/app \
+	pnpm build
 RUN pnpm prune --prod --ignore-scripts
 
 FROM node:24-alpine AS runner
