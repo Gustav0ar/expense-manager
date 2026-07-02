@@ -315,5 +315,3 @@ verify_public_routes || rollback_images "Public route smoke check failed"
 
 upsert_env_var LAST_SUCCESSFUL_IMAGE_TAG "${IMAGE_TAG}"
 upsert_env_var LAST_SUCCESSFUL_DEPLOY_SHA "${HEAD_SHA}"
-
-"${CONTAINER_CLI}" image prune -f

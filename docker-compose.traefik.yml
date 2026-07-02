@@ -119,7 +119,7 @@ services:
       - -c
       - max_connections=50
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
