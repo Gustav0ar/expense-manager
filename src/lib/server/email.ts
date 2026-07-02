@@ -10,10 +10,6 @@ type MailInput = {
 	html?: string;
 };
 
-function smtpConfigured() {
-	return Boolean(env.SMTP_HOST && env.SMTP_PORT && env.SMTP_FROM);
-}
-
 function senderApiConfigured() {
 	return Boolean(env.SENDER_API_TOKEN && env.SENDER_FROM);
 }
@@ -24,7 +20,11 @@ export async function sendMail(input: MailInput) {
 		return;
 	}
 
-	if (!smtpConfigured()) {
+	const smtpHost = env.SMTP_HOST;
+	const smtpPort = env.SMTP_PORT;
+	const smtpFrom = env.SMTP_FROM;
+
+	if (!smtpHost || !smtpPort || !smtpFrom) {
 		if (dev || env.EMAIL_DELIVERY === 'log') {
 			console.info('[email:dev]', {
 				to: input.to,
@@ -40,8 +40,8 @@ export async function sendMail(input: MailInput) {
 	}
 
 	const transporter = nodemailer.createTransport({
-		host: env.SMTP_HOST,
-		port: Number.parseInt(env.SMTP_PORT, 10),
+		host: smtpHost,
+		port: Number.parseInt(smtpPort, 10),
 		secure: env.SMTP_SECURE === 'true',
 		auth:
 			env.SMTP_USER && env.SMTP_PASSWORD
@@ -53,7 +53,7 @@ export async function sendMail(input: MailInput) {
 	});
 
 	await transporter.sendMail({
-		from: env.SMTP_FROM,
+		from: smtpFrom,
 		to: input.to,
 		subject: input.subject,
 		text: input.text,
