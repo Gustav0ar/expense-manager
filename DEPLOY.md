@@ -70,6 +70,7 @@ Set these in `Settings -> Environments -> production -> Variables`.
 | `COMPOSE_COMMAND`       | `docker compose`           | Use `podman compose` only if your VPS supports it.           |
 | `REGISTRY`              | `ghcr.io`                  | Container registry.                                          |
 | `IMAGE_OWNER_LOWERCASE` | `<github-owner-lowercase>` | Lowercase GitHub user or organization that owns the package. |
+| `CONTAINER_PLATFORMS`   | `linux/amd64,linux/arm64`  | Optional image platforms. Set to the VPS architecture only for faster private deploys. |
 
 Avoid storing personal values in variables if you do not want them visible to
 collaborators. Use secrets for hostnames, IPs, usernames and every application

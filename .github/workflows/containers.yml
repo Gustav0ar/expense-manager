@@ -12,6 +12,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
+  CONTAINER_PLATFORMS: ${{ vars.CONTAINER_PLATFORMS || 'linux/amd64,linux/arm64' }}
 
 jobs:
   build-and-push:
@@ -52,7 +53,7 @@ jobs:
           file: Dockerfile
           target: runner
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ env.CONTAINER_PLATFORMS }}
           provenance: false
           labels: ${{ steps.meta-app.outputs.labels }}
           tags: ${{ steps.meta-app.outputs.tags }}
@@ -76,7 +77,7 @@ jobs:
           file: Dockerfile
           target: migrator
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ env.CONTAINER_PLATFORMS }}
           provenance: false
           labels: ${{ steps.meta-migrate.outputs.labels }}
           tags: ${{ steps.meta-migrate.outputs.tags }}
@@ -100,7 +101,7 @@ jobs:
           file: Dockerfile
           target: backup
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ env.CONTAINER_PLATFORMS }}
           provenance: false
           labels: ${{ steps.meta-backup.outputs.labels }}
           tags: ${{ steps.meta-backup.outputs.tags }}
