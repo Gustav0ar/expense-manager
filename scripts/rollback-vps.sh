@@ -106,21 +106,22 @@ curl_public_route() {
 	path="$2"
 	label="$3"
 	url="https://${domain}${path}"
-	attempts="${PUBLIC_ROUTE_RETRIES:-12}"
+	attempts="${PUBLIC_ROUTE_RETRIES:-36}"
 	delay_seconds="${PUBLIC_ROUTE_RETRY_DELAY_SECONDS:-5}"
+	last_error=""
 
 	for attempt in $(seq 1 "${attempts}"); do
-		if curl --fail --silent --max-time 15 \
+		if last_error="$(curl --fail --show-error --silent --max-time 15 \
 			--resolve "${domain}:443:127.0.0.1" \
 			-o /dev/null \
-			"${url}"; then
+			"${url}" 2>&1)"; then
 			echo "${label} public route responded through local Traefik"
 			return 0
 		fi
 
-		if curl --fail --silent --max-time 15 \
+		if last_error="$(curl --fail --show-error --silent --max-time 15 \
 			-o /dev/null \
-			"${url}"; then
+			"${url}" 2>&1)"; then
 			echo "${label} public route responded through DNS"
 			return 0
 		fi
@@ -132,6 +133,9 @@ curl_public_route() {
 	done
 
 	echo "${label} public route did not respond after ${attempts} attempts"
+	if [ -n "${last_error}" ]; then
+		echo "Last public route error: ${last_error}"
+	fi
 	return 1
 }
 
