@@ -23,38 +23,42 @@
 			<p class="notice danger">{form.message}</p>
 		{/if}
 
-		<form method="post" class="stack">
-			<input type="hidden" name="next" value={data.next} />
+		{#if data.registrationEnabled}
+			<form method="post" class="stack">
+				<input type="hidden" name="next" value={data.next} />
 
-			<label>
-				<span>{t('Name')}</span>
-				<input name="name" autocomplete="name" required value={form?.values?.name ?? ''} />
-			</label>
+				<label>
+					<span>{t('Name')}</span>
+					<input name="name" autocomplete="name" required value={form?.values?.name ?? ''} />
+				</label>
 
-			<label>
-				<span>Email</span>
-				<input
-					name="email"
-					type="email"
-					autocomplete="email"
-					required
-					value={form?.values?.email ?? ''}
-				/>
-			</label>
+				<label>
+					<span>Email</span>
+					<input
+						name="email"
+						type="email"
+						autocomplete="email"
+						required
+						value={form?.values?.email ?? ''}
+					/>
+				</label>
 
-			<label>
-				<span>{t('Password')}</span>
-				<input
-					name="password"
-					type="password"
-					autocomplete="new-password"
-					required
-					minlength="10"
-				/>
-			</label>
+				<label>
+					<span>{t('Password')}</span>
+					<input
+						name="password"
+						type="password"
+						autocomplete="new-password"
+						required
+						minlength="10"
+					/>
+				</label>
 
-			<button class="button primary" type="submit">{t('Create account')}</button>
-		</form>
+				<button class="button primary" type="submit">{t('Create account')}</button>
+			</form>
+		{:else}
+			<p class="notice">{t('Registration is currently closed.')}</p>
+		{/if}
 
 		<div class="auth-links">
 			<a href={resolve('/login')}>{t('I already have an account')}</a>

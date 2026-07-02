@@ -11,6 +11,7 @@ import { translate } from '$lib/i18n';
 import { randomUUID } from 'node:crypto';
 import { isMfaEnabled, isMfaSessionVerified } from '$lib/server/services/mfa';
 import { isTrustedOrigin } from '$lib/server/security/origin';
+import { isRegistrationEnabled } from '$lib/server/registration';
 
 const unsafeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -57,6 +58,14 @@ const handleBetterAuth: Handle = async ({ event, resolve }) => {
 		) {
 			throw error(403, translate(locale, 'Origin is invalid.'));
 		}
+	}
+
+	if (
+		event.request.method === 'POST' &&
+		event.url.pathname.replace(/\/$/, '') === '/api/auth/sign-up/email' &&
+		!isRegistrationEnabled()
+	) {
+		throw error(403, translate(locale, 'Registration is currently closed.'));
 	}
 
 	if (event.url.pathname === '/api/health') {

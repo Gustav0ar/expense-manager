@@ -1,7 +1,12 @@
+# Production self-hosting compose file for a VPS behind Traefik.
+#
+# The deploy workflow copies this file to the VPS as docker-compose.yml and
+# runs it with a private .env that is never committed to Git.
+
 services:
   app:
-    build:
-      context: .
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_OWNER_LOWERCASE:?set IMAGE_OWNER_LOWERCASE}/expense-manager-app:${IMAGE_TAG:-latest}
+    container_name: expense-manager-app
     init: true
     restart: unless-stopped
     read_only: true
@@ -23,7 +28,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
       DB_POOL_MAX: ${DB_POOL_MAX:-5}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
-      UPLOAD_DIR: ${UPLOAD_DIR:-/app/uploads}
+      UPLOAD_DIR: /app/uploads
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SECURE: ${SMTP_SECURE:-false}
@@ -45,59 +50,51 @@ services:
       start_period: 20s
     networks:
       - private
+      - traefik
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=${TRAEFIK_NETWORK:-web}'
+      - 'traefik.http.routers.expense-manager.rule=Host(`${DOMAIN_NAME:?set DOMAIN_NAME}`)'
+      - 'traefik.http.routers.expense-manager.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}'
+      - 'traefik.http.routers.expense-manager.tls=true'
+      - 'traefik.http.routers.expense-manager.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-le}'
+      - 'traefik.http.routers.expense-manager.service=expense-manager'
+      - 'traefik.http.routers.expense-manager.middlewares=expense-manager-security'
+      - 'traefik.http.routers.expense-manager-http.rule=Host(`${DOMAIN_NAME:?set DOMAIN_NAME}`)'
+      - 'traefik.http.routers.expense-manager-http.entrypoints=${TRAEFIK_HTTP_ENTRYPOINT:-web}'
+      - 'traefik.http.routers.expense-manager-http.middlewares=expense-manager-https-redirect'
+      - 'traefik.http.routers.expense-manager-http.service=expense-manager'
+      - 'traefik.http.middlewares.expense-manager-https-redirect.redirectscheme.scheme=https'
+      - 'traefik.http.middlewares.expense-manager-security.headers.stsSeconds=31536000'
+      - 'traefik.http.middlewares.expense-manager-security.headers.stsIncludeSubdomains=true'
+      - 'traefik.http.middlewares.expense-manager-security.headers.contentTypeNosniff=true'
+      - 'traefik.http.middlewares.expense-manager-security.headers.frameDeny=true'
+      - 'traefik.http.middlewares.expense-manager-security.headers.referrerPolicy=strict-origin-when-cross-origin'
+      - 'traefik.http.middlewares.expense-manager-security.headers.permissionsPolicy=camera=(), microphone=(), geolocation=()'
+      - 'traefik.http.services.expense-manager.loadbalancer.server.port=3000'
 
   migrate:
-    build:
-      context: .
-      target: migrator
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_OWNER_LOWERCASE:?set IMAGE_OWNER_LOWERCASE}/expense-manager-migrate:${IMAGE_TAG:-latest}
+    container_name: expense-manager-migrate
     init: true
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
-    tmpfs:
-      - /tmp:size=64m,mode=1777
     profiles: ['tools']
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - private
-
-  caddy:
-    image: caddy:2-alpine
-    init: true
-    restart: unless-stopped
-    read_only: true
-    cap_drop:
-      - ALL
-    cap_add:
-      - NET_BIND_SERVICE
-    security_opt:
-      - no-new-privileges:true
-    mem_limit: ${CADDY_MEM_LIMIT:-256m}
-    cpus: ${CADDY_CPUS:-0.5}
-    environment:
-      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN}
-    ports:
-      - '80:80'
-      - '443:443'
-    volumes:
-      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
     tmpfs:
       - /tmp:size=64m,mode=1777
-    depends_on:
-      app:
-        condition: service_healthy
     networks:
       - private
 
   postgres:
     image: postgres:18-alpine
+    container_name: expense-manager-postgres
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -129,9 +126,8 @@ services:
       - private
 
   backup:
-    build:
-      context: .
-      target: backup
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_OWNER_LOWERCASE:?set IMAGE_OWNER_LOWERCASE}/expense-manager-backup:${IMAGE_TAG:-latest}
+    container_name: expense-manager-backup
     init: true
     restart: unless-stopped
     read_only: true
@@ -170,10 +166,11 @@ services:
 
 volumes:
   postgres_data:
-  caddy_data:
-  caddy_config:
   uploads:
 
 networks:
   private:
     driver: bridge
+  traefik:
+    name: ${TRAEFIK_NETWORK:-web}
+    external: true

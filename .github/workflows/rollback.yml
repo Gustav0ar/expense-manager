@@ -1,0 +1,105 @@
+name: Rollback
+
+# Manual production rollback. Keep hostnames, SSH usernames and keys in the
+# protected GitHub environment; do not put infrastructure data in this file.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to roll back to. Leave empty to use PREVIOUS_IMAGE_TAG from the VPS .env.'
+        required: false
+        default: ''
+      restore_database_backup:
+        description: 'Optional pre-deploy dump path, for example backups/predeploy/expense_manager-YYYYMMDDTHHMMSSZ-sha.dump.'
+        required: false
+        default: ''
+      confirm_database_restore:
+        description: 'Type restore-database to restore the database backup. Leave empty for image-only rollback.'
+        required: false
+        default: ''
+      rollback_compose_sha:
+        description: 'Optional commit SHA to refresh docker-compose.traefik.yml before rollback.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: expense-manager-production
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: Roll back VPS
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Prepare and test SSH key
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USERNAME: ${{ secrets.VPS_USERNAME }}
+          VPS_PORT: ${{ secrets.VPS_PORT || 22 }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          SSH_KEY_FILE: ${{ runner.temp }}/vps_ssh_key
+        run: |
+          set -euo pipefail
+
+          for name in VPS_HOST VPS_USERNAME VPS_PORT VPS_SSH_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::${name} is not set in the production environment."
+              exit 1
+            fi
+          done
+
+          install -m 700 -d "$(dirname "${SSH_KEY_FILE}")" "${HOME}/.ssh"
+          printf '%s\n' "${VPS_SSH_KEY}" | sed 's/\r$//' > "${SSH_KEY_FILE}"
+          chmod 600 "${SSH_KEY_FILE}"
+
+          if ! ssh-keygen -y -f "${SSH_KEY_FILE}" >/dev/null 2>&1; then
+            echo "::error::VPS_SSH_KEY is not a parseable private SSH key."
+            exit 1
+          fi
+
+          KEY_FP="$(ssh-keygen -lf "${SSH_KEY_FILE}" | awk '{print $2}')"
+          echo "Rollback key fingerprint: ${KEY_FP}"
+
+          ssh -i "${SSH_KEY_FILE}" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=15 \
+            -p "${VPS_PORT}" \
+            "${VPS_USERNAME}@${VPS_HOST}" \
+            true
+
+      - name: SSH and roll back
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/expense-manager' }}
+          COMPOSE_CMD: ${{ vars.COMPOSE_COMMAND || 'docker compose' }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          RESTORE_DATABASE_BACKUP: ${{ inputs.restore_database_backup }}
+          CONFIRM_DATABASE_RESTORE: ${{ inputs.confirm_database_restore }}
+          ROLLBACK_COMPOSE_SHA: ${{ inputs.rollback_compose_sha }}
+          ROLLBACK_SCRIPT_SHA: ${{ github.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key_path: ${{ runner.temp }}/vps_ssh_key
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: DEPLOY_PATH,COMPOSE_CMD,IMAGE_TAG,RESTORE_DATABASE_BACKUP,CONFIRM_DATABASE_RESTORE,ROLLBACK_COMPOSE_SHA,ROLLBACK_SCRIPT_SHA,GITHUB_REPOSITORY,GITHUB_TOKEN
+          script: |
+            set -euo pipefail
+            ROLLBACK_SCRIPT_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${ROLLBACK_SCRIPT_SHA}/scripts/rollback-vps.sh"
+            curl_headers=(-H "Accept: application/vnd.github.raw")
+            if [ -n "${GITHUB_TOKEN:-}" ]; then
+              curl_headers+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+            fi
+            curl -fsSL "${curl_headers[@]}" -o /tmp/expense-manager-rollback.sh "${ROLLBACK_SCRIPT_URL}"
+            chmod 700 /tmp/expense-manager-rollback.sh
+            /tmp/expense-manager-rollback.sh

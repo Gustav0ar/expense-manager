@@ -78,15 +78,32 @@ SMOKE_PASSWORD="replace-with-private-password" \
 pnpm test:smoke
 ```
 
+## Rollback
+
+Use [`DEPLOY.md`](../DEPLOY.md) as the rollback runbook for Traefik/GitHub
+Actions deployments. The deploy script automatically rolls app containers back
+to the previous image tag when migrations, container restart, healthcheck or
+public smoke checks fail.
+
+Database restore is intentionally separate. Only restore a dump when you have
+confirmed that losing writes after the deployment start is acceptable, and use
+the `restore-database` confirmation required by `scripts/rollback-vps.sh`.
+
 ## Verifiable Backups
 
-The backup job creates a custom Postgres dump, validates it with `pg_restore --list`, writes a `.sha256` checksum and repeats the same process for the attachment package when uploads exist. Configure `BACKUP_OFFSITE_DIR` only when that path is mounted on external storage or another persistent volume.
+The backup job creates a temporary custom Postgres dump, validates it with `pg_restore --list`, writes a `.sha256` checksum and repeats the same process for the attachment package when uploads exist. It then uploads everything to the encrypted remote `RESTIC_REPOSITORY` and removes local temporary files.
 
-To manually validate a backup before restoring:
+To inspect remote snapshots:
 
 ```bash
-sha256sum -c /backups/expense_manager_YYYYMMDDTHHMMSSZ.dump.sha256
-pg_restore --list /backups/expense_manager_YYYYMMDDTHHMMSSZ.dump >/dev/null
-sha256sum -c /backups/uploads_YYYYMMDDTHHMMSSZ.tar.gz.sha256
-tar -tzf /backups/uploads_YYYYMMDDTHHMMSSZ.tar.gz >/dev/null
+docker compose run --rm --no-deps --entrypoint restic backup snapshots
+```
+
+To manually validate restored files before applying them:
+
+```bash
+sha256sum -c restore/path/from/restic/expense_manager_YYYYMMDDTHHMMSSZ.dump.sha256
+pg_restore --list restore/path/from/restic/expense_manager_YYYYMMDDTHHMMSSZ.dump >/dev/null
+sha256sum -c restore/path/from/restic/uploads_YYYYMMDDTHHMMSSZ.tar.gz.sha256
+tar -tzf restore/path/from/restic/uploads_YYYYMMDDTHHMMSSZ.tar.gz >/dev/null
 ```
