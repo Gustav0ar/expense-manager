@@ -10,6 +10,7 @@ export const ptBrMessages = {
 	Analytical: 'Analítico',
 	Analysis: 'Análise',
 	Appearance: 'Aparência',
+	Apply: 'Aplicar',
 	'Automatic rules': 'Regras automáticas',
 	Approve: 'Aprovar',
 	Approved: 'Aprovada',
@@ -64,6 +65,7 @@ export const ptBrMessages = {
 	'Delete expense?': 'Excluir despesa?',
 	Description: 'Descrição',
 	Details: 'Detalhes',
+	'Device language': 'Idioma do dispositivo',
 	'Disable MFA': 'Desativar MFA',
 	'Distribution by category': 'Distribuição por categoria',
 	Done: 'Concluído',
@@ -349,6 +351,8 @@ export const ptBrMessages = {
 	Other: 'Outros',
 
 	'Account created. Sign in to continue.': 'Conta criada. Entre para continuar.',
+	'Account created. Check your email to verify your account before signing in.':
+		'Conta criada. Confira seu email para verificar sua conta antes de entrar.',
 	'Attachment not found.': 'Anexo não encontrado.',
 	'Attachment type is not allowed.': 'Tipo de anexo não permitido.',
 	'Budget not found.': 'Orçamento não encontrado.',
@@ -452,6 +456,8 @@ export const ptBrMessages = {
 	'Access the link to reset your password: {url}': 'Acesse o link para redefinir sua senha: {url}',
 	'Password reset': 'Redefinição de senha',
 	'Verify your email': 'Verifique seu email',
+	'Verify your email before signing in. Check your inbox for the verification link.':
+		'Verifique seu email antes de entrar. Confira sua caixa de entrada pelo link de verificação.',
 	'Access the link to verify your email: {url}': 'Acesse o link para verificar seu email: {url}',
 	'Budget alerts for {workspace} in {period}:':
 		'Alertas de orçamento para {workspace} em {period}:',
