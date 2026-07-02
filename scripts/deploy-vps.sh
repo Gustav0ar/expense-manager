@@ -109,6 +109,9 @@ wait_for_container_health() {
 		sleep 2
 	done
 	echo "${label} did not become healthy in time"
+	"${CONTAINER_CLI}" inspect \
+		-f '{{range .State.Health.Log}}{{.Start}} exit={{.ExitCode}} {{.Output}}{{"\n"}}{{end}}' \
+		"${container}" 2>/dev/null || true
 	return 1
 }
 
