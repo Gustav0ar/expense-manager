@@ -25,6 +25,7 @@ vi.mock('$env/dynamic/private', () => ({
 
 import {
 	escapeHtml,
+	parseMailbox,
 	sanitizeEmailText,
 	sendBudgetAlertEmail,
 	sendInvitationEmail,
@@ -44,6 +45,16 @@ describe('email helpers', () => {
 		expect(sanitizeEmailText('Empresa\r\nBcc: attacker@example.com')).toBe(
 			'Empresa Bcc: attacker@example.com'
 		);
+	});
+
+	it('parses Sender-compatible mailbox values', () => {
+		expect(parseMailbox('Expense Manager <no-reply@example.com>')).toEqual({
+			email: 'no-reply@example.com',
+			name: 'Expense Manager'
+		});
+		expect(parseMailbox('no-reply@example.com')).toEqual({
+			email: 'no-reply@example.com'
+		});
 	});
 
 	it('logs sanitized budget alert emails when SMTP is not configured', async () => {
@@ -104,8 +115,8 @@ describe('email helpers', () => {
 
 		try {
 			await expect(
-				sendMail({ to: 'admin@example.com', subject: 'Teste', text: 'Mensagem' })
-			).rejects.toThrow('SMTP is not configured');
+				sendMail({ to: 'admin@example.com', subject: 'Test', text: 'Message' })
+			).rejects.toThrow('Email delivery is not configured');
 		} finally {
 			restoreEmailEnv(previous);
 		}
@@ -170,6 +181,79 @@ describe('email helpers', () => {
 		}
 	});
 
+	it('sends transactional emails through the Sender API when configured', async () => {
+		const previous = captureEmailEnv();
+		const fetchMock = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(new Response('{}', { status: 202 }));
+		createTransportMock.mockClear();
+
+		try {
+			clearEmailEnv();
+			privateEnv.SENDER_API_TOKEN = 'sender-token';
+			privateEnv.SENDER_FROM = 'Expense Manager <no-reply@example.com>';
+
+			await sendMail({
+				to: 'admin@example.com',
+				subject: 'Budget alert',
+				text: 'Budget usage is above the alert threshold.',
+				html: '<p>Budget usage is above the alert threshold.</p>'
+			});
+
+			expect(createTransportMock).not.toHaveBeenCalled();
+			expect(fetchMock).toHaveBeenCalledWith(
+				'https://api.sender.net/v2/message/send',
+				expect.objectContaining({
+					method: 'POST',
+					headers: expect.objectContaining({
+						Accept: 'application/json',
+						Authorization: 'Bearer sender-token',
+						'Content-Type': 'application/json'
+					}),
+					body: JSON.stringify({
+						from: {
+							email: 'no-reply@example.com',
+							name: 'Expense Manager'
+						},
+						to: {
+							email: 'admin@example.com'
+						},
+						subject: 'Budget alert',
+						text: 'Budget usage is above the alert threshold.',
+						html: '<p>Budget usage is above the alert threshold.</p>'
+					})
+				})
+			);
+		} finally {
+			fetchMock.mockRestore();
+			restoreEmailEnv(previous);
+		}
+	});
+
+	it('reports Sender API delivery failures without leaking the token', async () => {
+		const previous = captureEmailEnv();
+		const fetchMock = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(new Response('invalid token', { status: 401 }));
+
+		try {
+			clearEmailEnv();
+			privateEnv.SENDER_API_TOKEN = 'sender-token';
+			privateEnv.SENDER_FROM = 'Expense Manager <no-reply@example.com>';
+
+			await expect(
+				sendMail({
+					to: 'admin@example.com',
+					subject: 'Budget alert',
+					text: 'Budget usage is above the alert threshold.'
+				})
+			).rejects.toThrow('Sender API failed with HTTP 401: invalid token');
+		} finally {
+			fetchMock.mockRestore();
+			restoreEmailEnv(previous);
+		}
+	});
+
 	it('localizes transactional email copy when pt-BR is requested', async () => {
 		const previousDeliveryMode = privateEnv.EMAIL_DELIVERY;
 		privateEnv.EMAIL_DELIVERY = 'log';
@@ -210,7 +294,9 @@ function captureEmailEnv() {
 		SMTP_SECURE: privateEnv.SMTP_SECURE,
 		SMTP_USER: privateEnv.SMTP_USER,
 		SMTP_PASSWORD: privateEnv.SMTP_PASSWORD,
-		SMTP_FROM: privateEnv.SMTP_FROM
+		SMTP_FROM: privateEnv.SMTP_FROM,
+		SENDER_API_TOKEN: privateEnv.SENDER_API_TOKEN,
+		SENDER_FROM: privateEnv.SENDER_FROM
 	};
 }
 
@@ -222,6 +308,8 @@ function clearEmailEnv() {
 	delete privateEnv.SMTP_USER;
 	delete privateEnv.SMTP_PASSWORD;
 	delete privateEnv.SMTP_FROM;
+	delete privateEnv.SENDER_API_TOKEN;
+	delete privateEnv.SENDER_FROM;
 }
 
 function restoreEmailEnv(values: ReturnType<typeof captureEmailEnv>) {

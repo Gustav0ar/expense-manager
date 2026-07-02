@@ -14,7 +14,16 @@ function smtpConfigured() {
 	return Boolean(env.SMTP_HOST && env.SMTP_PORT && env.SMTP_FROM);
 }
 
+function senderApiConfigured() {
+	return Boolean(env.SENDER_API_TOKEN && env.SENDER_FROM);
+}
+
 export async function sendMail(input: MailInput) {
+	if (senderApiConfigured()) {
+		await sendSenderApiMail(input);
+		return;
+	}
+
 	if (!smtpConfigured()) {
 		if (dev || env.EMAIL_DELIVERY === 'log') {
 			console.info('[email:dev]', {
@@ -25,7 +34,9 @@ export async function sendMail(input: MailInput) {
 			return;
 		}
 
-		throw new Error('SMTP is not configured. Set SMTP_HOST, SMTP_PORT and SMTP_FROM.');
+		throw new Error(
+			'Email delivery is not configured. Set SENDER_API_TOKEN and SENDER_FROM, or SMTP_HOST, SMTP_PORT and SMTP_FROM.'
+		);
 	}
 
 	const transporter = nodemailer.createTransport({
@@ -48,6 +59,45 @@ export async function sendMail(input: MailInput) {
 		text: input.text,
 		html: input.html
 	});
+}
+
+async function sendSenderApiMail(input: MailInput) {
+	const from = parseMailbox(env.SENDER_FROM || '');
+	const response = await fetch('https://api.sender.net/v2/message/send', {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			Authorization: `Bearer ${env.SENDER_API_TOKEN}`,
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({
+			from,
+			to: {
+				email: input.to
+			},
+			subject: input.subject,
+			text: input.text,
+			...(input.html ? { html: input.html } : {})
+		})
+	});
+
+	if (!response.ok) {
+		const body = (await response.text()).slice(0, 500);
+		throw new Error(`Sender API failed with HTTP ${response.status}: ${body}`);
+	}
+}
+
+export function parseMailbox(value: string) {
+	const trimmed = value.trim();
+	const namedMatch = trimmed.match(/^(.+?)\s*<([^<>\s]+@[^<>\s]+)>$/);
+	if (namedMatch) {
+		return {
+			email: namedMatch[2],
+			name: namedMatch[1].replace(/^"|"$/g, '').trim()
+		};
+	}
+
+	return { email: trimmed };
 }
 
 export async function sendPasswordResetEmail(

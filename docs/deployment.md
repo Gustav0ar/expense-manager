@@ -14,7 +14,7 @@ local production-like testing or for a standalone Caddy deployment.
 - `pnpm` does not need to be installed on the VPS; the Docker image installs dependencies during the build
 - Domain pointed to the VPS
 - Ports 80 and 443 open
-- SMTP configured for password reset, verification, invitations and budget alerts.
+- Email delivery configured for password reset, verification, invitations and budget alerts.
   See [`docs/email.md`](email.md) for the Sender setup.
 - Remote object storage or another off-VPS restic backend for encrypted backups
 - Persistent space for the `uploads` volume, used by receipt attachments

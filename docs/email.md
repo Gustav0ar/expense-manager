@@ -6,8 +6,8 @@ dedicated SMTP provider instead of a mail server on the VPS.
 
 ## Recommended Provider: Sender
 
-Use Sender through SMTP. The application already supports SMTP through
-Nodemailer, so no code change is required.
+Use Sender through the transactional email API in production. SMTP remains
+available as a fallback for environments where API delivery is not desired.
 
 Sender setup:
 
@@ -15,41 +15,47 @@ Sender setup:
 2. Add the sending domain in `Account settings -> Domains`.
 3. Add every DNS record Sender provides for ownership, SPF, DKIM and DMARC.
 4. Wait until Sender marks the domain as verified.
-5. Open `Transactional emails -> Setup instructions -> SMTP`.
-6. Create a dedicated SMTP user for this app, for example
+5. Open `Transactional emails -> Setup instructions -> API`.
+6. Create a dedicated API token for this app, for example
    `expense-manager-production`.
-7. Copy the generated password immediately and store it only in the production
-   secret store.
+7. Store the API token only in the production secret store.
 
 Production environment values:
 
 ```env
 EMAIL_DELIVERY=""
+SENDER_API_TOKEN="<sender-api-token>"
+SENDER_FROM="Expense Manager <no-reply@your-verified-domain.example>"
+REQUIRE_EMAIL_VERIFICATION="true"
+```
+
+The `SENDER_FROM` domain must match a verified Sender domain. Do not use a
+personal mailbox as the production sender.
+
+SMTP fallback values, if API delivery cannot be used:
+
+```env
 SMTP_HOST="smtp.sender.net"
 SMTP_PORT="587"
 SMTP_SECURE="false"
 SMTP_USER="<sender-smtp-username>"
 SMTP_PASSWORD="<sender-smtp-password>"
 SMTP_FROM="Expense Manager <no-reply@your-verified-domain.example>"
-REQUIRE_EMAIL_VERIFICATION="true"
 ```
 
 Use port `587` with STARTTLS first. If the VPS network blocks it, use port
 `2525`. Keep `SMTP_SECURE="false"` for both because Nodemailer starts the
 connection normally and upgrades it with STARTTLS when the server supports it.
 
-The `SMTP_FROM` domain must match a verified Sender domain. Do not use a
-personal mailbox as the production sender.
-
 ## Secret Handling
 
-- Never commit SMTP credentials.
-- Keep SMTP credentials only in the VPS `.env`, GitHub Actions secrets or a
+- Never commit Sender API tokens or SMTP credentials.
+- Keep email credentials only in the VPS `.env`, GitHub Actions secrets or a
   private secret manager.
-- Use a dedicated SMTP user for production.
-- Use a separate SMTP user for staging if staging sends real email.
-- Rotate the SMTP password immediately if it is copied into a chat, log, shell
-  history, issue, pull request or commit.
+- Use a dedicated Sender token for production.
+- Use a separate Sender token for staging if staging sends real email.
+- Rotate the token immediately if it is copied into a chat, log, shell history,
+  issue, pull request or commit.
 - Do not enable `EMAIL_DELIVERY="log"` in production because it writes email
   subjects and bodies to logs.
 

@@ -109,6 +109,8 @@ jobs:
     needs: preflight
     environment: production
     if: needs.preflight.result == 'success'
+    env:
+      TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -141,6 +143,13 @@ jobs:
           path: .github/deploy-summary.json
           if-no-files-found: error
           retention-days: 90
+
+      - name: Connect to Tailscale
+        if: env.TAILSCALE_AUTHKEY != ''
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ env.TAILSCALE_AUTHKEY }}
+          ping: ${{ secrets.VPS_HOST }}
 
       - name: Prepare and test SSH key
         env:
@@ -225,12 +234,8 @@ jobs:
             TRAEFIK_HTTP_ENTRYPOINT
             TRAEFIK_ENTRYPOINT
             TRAEFIK_CERT_RESOLVER
-            SMTP_HOST
-            SMTP_PORT
-            SMTP_SECURE
-            SMTP_USER
-            SMTP_PASSWORD
-            SMTP_FROM
+            SENDER_API_TOKEN
+            SENDER_FROM
           )
 
           for name in "${required_keys[@]}"; do
