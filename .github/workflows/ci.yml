@@ -38,6 +38,8 @@ jobs:
       IMAGE_OWNER_LOWERCASE: example
       IMAGE_TAG: ci
       REGISTRY: ghcr.io
+      RESTIC_REPOSITORY: local:/tmp/expense-manager-ci-restic
+      RESTIC_PASSWORD: ci-restic-password
       TRAEFIK_NETWORK: web
 
     steps:
