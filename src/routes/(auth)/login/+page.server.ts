@@ -10,9 +10,11 @@ import { translate } from '$lib/i18n';
 export const load: PageServerLoad = (event) => {
 	if (event.locals.user) throw redirect(303, '/app');
 	return {
+		returnTo: `${event.url.pathname}${event.url.search}`,
 		next: safeNext(event.url.searchParams.get('next') || '/app'),
 		registered: event.url.searchParams.get('registered') === '1',
 		reset: event.url.searchParams.get('reset') === '1',
+		verifyEmail: event.url.searchParams.get('verifyEmail') === '1',
 		registrationEnabled: isRegistrationEnabled()
 	};
 };
@@ -47,6 +49,16 @@ export const actions: Actions = {
 			});
 		} catch (err) {
 			if (err instanceof APIError) {
+				if (isEmailNotVerifiedError(err)) {
+					return fail(403, {
+						message: translate(
+							event.locals.locale,
+							'Verify your email before signing in. Check your inbox for the verification link.'
+						),
+						values: { email: parsed.data.email, next }
+					});
+				}
+
 				return fail(400, {
 					message: translate(event.locals.locale, 'Credentials are invalid.'),
 					values: { email: parsed.data.email, next }
@@ -61,4 +73,8 @@ export const actions: Actions = {
 
 function safeNext(next: string) {
 	return next.startsWith('/') && !next.startsWith('//') ? next : '/app';
+}
+
+function isEmailNotVerifiedError(err: APIError) {
+	return err.body?.code === 'EMAIL_NOT_VERIFIED' || err.body?.message === 'Email not verified';
 }

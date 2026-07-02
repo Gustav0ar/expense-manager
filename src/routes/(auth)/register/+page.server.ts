@@ -1,7 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { APIError } from 'better-auth/api';
 import type { Actions, PageServerLoad } from './$types';
-import { auth } from '$lib/server/auth';
+import { auth, isEmailVerificationRequired } from '$lib/server/auth';
 import { parseForm, signUpSchema } from '$lib/server/validation';
 import { assertRateLimit } from '$lib/server/security/rate-limit';
 import { getInviteTokenFromNext, isRegistrationEnabled } from '$lib/server/registration';
@@ -70,6 +70,10 @@ export const actions: Actions = {
 				});
 			}
 			throw err;
+		}
+
+		if (isEmailVerificationRequired()) {
+			throw redirect(303, '/login?verifyEmail=1');
 		}
 
 		throw redirect(303, next);

@@ -95,6 +95,34 @@ test('covers login and register screen navigation, banners and safe next values'
 	);
 });
 
+test('detects the browser language and allows manual language changes on login', async ({
+	page
+}) => {
+	await page.goto('/login?next=/app/reports');
+	await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
+	await expect(page.getByRole('heading', { name: 'Entrar' })).toBeVisible();
+	await expect(page.getByLabel('Idioma')).toHaveValue('system');
+
+	await page.getByLabel('Idioma').selectOption('en');
+	await page.getByRole('button', { name: 'Aplicar' }).click();
+	await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+	await expect(page.getByRole('heading', { name: 'Login' })).toBeVisible();
+	await expect(page.getByLabel('Language')).toHaveValue('en');
+	await expect(page.locator('input[name="next"]')).toHaveValue('/app/reports');
+
+	await page.getByLabel('Language').selectOption('system');
+	await page.getByRole('button', { name: 'Apply' }).click();
+	await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
+	await expect(page.getByRole('heading', { name: 'Entrar' })).toBeVisible();
+	await expect(page.getByLabel('Idioma')).toHaveValue('system');
+
+	const invalidResponse = await page.request.post('/locale', {
+		form: { locale: 'es', returnTo: 'https://evil.example/login' }
+	});
+	expect(invalidResponse.status()).toBe(400);
+	expect(await invalidResponse.text()).toContain('Idioma inválido.');
+});
+
 test.describe('english auth screens', () => {
 	test.use({
 		locale: 'en-US',

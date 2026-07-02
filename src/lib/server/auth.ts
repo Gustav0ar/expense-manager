@@ -38,6 +38,7 @@ export const auth = betterAuth({
 	},
 	emailVerification: {
 		sendOnSignUp: requireEmailVerification,
+		sendOnSignIn: requireEmailVerification,
 		sendVerificationEmail: async ({ user, url }) => {
 			await sendVerificationEmail(user.email, url, getCurrentLocale());
 		}
@@ -75,6 +76,10 @@ function getAuthSecret() {
 function getBetterAuthRateLimitMax() {
 	const parsed = Number.parseInt(env.BETTER_AUTH_RATE_LIMIT_MAX || '100', 10);
 	return Number.isFinite(parsed) && parsed >= 1 ? parsed : 100;
+}
+
+export function isEmailVerificationRequired() {
+	return requireEmailVerification;
 }
 
 function getCurrentLocale() {

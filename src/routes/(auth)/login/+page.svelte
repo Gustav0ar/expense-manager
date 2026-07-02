@@ -16,7 +16,23 @@
 
 <main class="auth-page">
 	<section class="auth-panel">
-		<a class="brand" href={resolve('/')}>Expense Manager</a>
+		<div class="auth-header">
+			<a class="brand" href={resolve('/')}>Expense Manager</a>
+			<form class="locale-form" method="post" action={resolve('/locale')}>
+				<input type="hidden" name="returnTo" value={data.returnTo} />
+				<label class="screen-reader-label" for="login-locale">{t('Language')}</label>
+				<select id="login-locale" name="locale" aria-label={t('Language')}>
+					<option value="system" selected={data.localePreference === 'system'}>
+						{t('Device language')}
+					</option>
+					<option value="en" selected={data.localePreference === 'en'}>{t('English')}</option>
+					<option value="pt-BR" selected={data.localePreference === 'pt-BR'}>
+						{t('Portuguese (Brazil)')}
+					</option>
+				</select>
+				<button class="button secondary locale-submit" type="submit">{t('Apply')}</button>
+			</form>
+		</div>
 		<h1>{t('Login')}</h1>
 
 		{#if data.registered}
@@ -25,6 +41,12 @@
 
 		{#if data.reset}
 			<p class="notice success">{t('Password updated.')}</p>
+		{/if}
+
+		{#if data.verifyEmail}
+			<p class="notice success">
+				{t('Account created. Check your email to verify your account before signing in.')}
+			</p>
 		{/if}
 
 		{#if form?.message}
