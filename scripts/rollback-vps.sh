@@ -39,8 +39,8 @@ chmod 600 .env
 
 dump_compose_diagnostics() {
 	echo "::group::Compose diagnostics"
-	"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile tools ps || true
-	"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile tools logs --no-color --tail=160 app postgres migrate backup || true
+	"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile tools --profile backup ps || true
+	"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile tools --profile backup logs --no-color --tail=160 app postgres migrate backup || true
 	echo "::endgroup::"
 }
 
@@ -62,6 +62,17 @@ upsert_env_var() {
 read_env_var() {
 	key="$1"
 	grep -E "^${key}=" .env | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//' || true
+}
+
+backup_enabled() {
+	case "$(read_env_var BACKUP_ENABLED | tr '[:upper:]' '[:lower:]')" in
+		"" | true | 1 | yes | on) return 0 ;;
+		false | 0 | no | off) return 1 ;;
+		*)
+			echo "BACKUP_ENABLED must be true or false."
+			exit 1
+			;;
+	esac
 }
 
 wait_for_container_health() {
@@ -192,7 +203,7 @@ restore_database_backup() {
 	fi
 
 	echo "Stopping application services before database restore."
-	"${COMPOSE_ARGS[@]}" -f docker-compose.yml stop app backup || true
+	"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile backup stop app backup || true
 	"${COMPOSE_ARGS[@]}" -f docker-compose.yml up -d postgres || fail_with_diagnostics
 	wait_for_container_health expense-manager-postgres Postgres || fail_with_diagnostics
 
@@ -252,16 +263,23 @@ export IMAGE_TAG="${TARGET_IMAGE_TAG}"
 echo "Rolling back image tag from ${current_image_tag:-unknown} to ${TARGET_IMAGE_TAG}."
 
 "${COMPOSE_ARGS[@]}" -f docker-compose.yml pull app || fail_with_diagnostics
-if "${COMPOSE_ARGS[@]}" -f docker-compose.yml pull backup; then
-	services=(app backup)
+if backup_enabled; then
+	if "${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile backup pull backup; then
+		services=(app backup)
+	else
+		echo "Backup image for ${TARGET_IMAGE_TAG} was not available; rolling back the app only."
+		services=(app)
+	fi
 else
-	echo "Backup image for ${TARGET_IMAGE_TAG} was not available; rolling back the app only."
+	echo "Remote backup is disabled; rolling back app without backup service."
+	"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile backup stop backup || true
+	"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile backup rm -f backup || true
 	services=(app)
 fi
 
 restore_database_backup
 
-"${COMPOSE_ARGS[@]}" -f docker-compose.yml up -d --remove-orphans "${services[@]}" || fail_with_diagnostics
+"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile backup up -d --remove-orphans "${services[@]}" || fail_with_diagnostics
 wait_for_container_health expense-manager-app App || fail_with_diagnostics
 verify_public_routes || fail_with_diagnostics
 

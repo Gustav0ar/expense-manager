@@ -132,6 +132,7 @@ services:
     build:
       context: .
       target: backup
+    profiles: ['backup']
     init: true
     restart: unless-stopped
     read_only: true
@@ -142,11 +143,12 @@ services:
     mem_limit: ${BACKUP_MEM_LIMIT:-256m}
     cpus: ${BACKUP_CPUS:-0.5}
     environment:
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
-      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:?set RESTIC_REPOSITORY}
-      RESTIC_PASSWORD: ${RESTIC_PASSWORD:?set RESTIC_PASSWORD}
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-}
+      RESTIC_PASSWORD: ${RESTIC_PASSWORD:-}
       RESTIC_HOST: ${RESTIC_HOST:-expense-manager}
       RESTIC_INIT_REPOSITORY: ${RESTIC_INIT_REPOSITORY:-true}
       RESTIC_KEEP_DAILY: ${RESTIC_KEEP_DAILY:-7}
@@ -161,7 +163,10 @@ services:
     tmpfs:
       - /tmp:size=512m,mode=1777
     entrypoint: ['/bin/sh', '-c']
-    command: ['while true; do /usr/local/bin/backup.sh; sleep 86400; done']
+    command:
+      [
+        'if [ "$${BACKUP_ENABLED:-true}" != "true" ]; then echo "Remote backup disabled."; sleep infinity; fi; while true; do /usr/local/bin/backup.sh; sleep 86400; done'
+      ]
     depends_on:
       postgres:
         condition: service_healthy

@@ -38,8 +38,8 @@ cd "${DEPLOY_PATH}"
 
 dump_compose_diagnostics() {
 	echo "::group::Compose diagnostics"
-	"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile tools ps || true
-	"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile tools logs --no-color --tail=160 app postgres migrate backup || true
+	"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile tools --profile backup ps || true
+	"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile tools --profile backup logs --no-color --tail=160 app postgres migrate backup || true
 	echo "::endgroup::"
 }
 
@@ -63,8 +63,17 @@ rollback_images() {
 	upsert_env_var IMAGE_TAG "${previous_image_tag}"
 	export IMAGE_TAG="${previous_image_tag}"
 
-	"${COMPOSE_ARGS[@]}" -f docker-compose.yml pull app backup || fail_with_diagnostics
-	"${COMPOSE_ARGS[@]}" -f docker-compose.yml up -d --remove-orphans app backup || fail_with_diagnostics
+	rollback_services=(app)
+	if backup_enabled; then
+		rollback_services+=(backup)
+		"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile backup pull app backup || fail_with_diagnostics
+	else
+		echo "Remote backup is disabled; rolling back app without backup service."
+		"${COMPOSE_ARGS[@]}" -f docker-compose.yml pull app || fail_with_diagnostics
+		"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile backup stop backup || true
+		"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile backup rm -f backup || true
+	fi
+	"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile backup up -d --remove-orphans "${rollback_services[@]}" || fail_with_diagnostics
 	wait_for_container_health expense-manager-app App || fail_with_diagnostics
 	verify_public_routes || fail_with_diagnostics
 	upsert_env_var LAST_ROLLBACK_IMAGE_TAG "${previous_image_tag}"
@@ -116,6 +125,17 @@ upsert_env_var() {
 read_env_var() {
 	key="$1"
 	grep -E "^${key}=" .env | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//' || true
+}
+
+backup_enabled() {
+	case "$(read_env_var BACKUP_ENABLED | tr '[:upper:]' '[:lower:]')" in
+		"" | true | 1 | yes | on) return 0 ;;
+		false | 0 | no | off) return 1 ;;
+		*)
+			echo "BACKUP_ENABLED must be true or false."
+			exit 1
+			;;
+	esac
 }
 
 normalize_domain_name() {
@@ -268,14 +288,26 @@ export REGISTRY
 export IMAGE_OWNER_LOWERCASE="${IMAGE_OWNER}"
 export IMAGE_TAG
 
-"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile tools pull || fail_with_diagnostics
+compose_profiles=(--profile tools)
+deploy_services=(app)
+if backup_enabled; then
+	compose_profiles+=(--profile backup)
+	deploy_services+=(backup)
+else
+	echo "WARNING: BACKUP_ENABLED=false. Remote backups are disabled for this deploy."
+	echo "This is acceptable for bootstrap only; configure remote restic backups before storing important data."
+	"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile backup stop backup || true
+	"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile backup rm -f backup || true
+fi
+
+"${COMPOSE_ARGS[@]}" -f docker-compose.yml "${compose_profiles[@]}" pull || fail_with_diagnostics
 "${COMPOSE_ARGS[@]}" -f docker-compose.yml up -d postgres || fail_with_diagnostics
 wait_for_container_health expense-manager-postgres Postgres || fail_with_diagnostics
 
 backup_existing_database
 
 "${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile tools run --rm migrate || rollback_images "Migration failed"
-"${COMPOSE_ARGS[@]}" -f docker-compose.yml up -d --remove-orphans app backup || rollback_images "Container restart failed"
+"${COMPOSE_ARGS[@]}" -f docker-compose.yml --profile backup up -d --remove-orphans "${deploy_services[@]}" || rollback_images "Container restart failed"
 
 wait_for_container_health expense-manager-postgres Postgres || fail_with_diagnostics
 wait_for_container_health expense-manager-app App || rollback_images "Application health check failed"

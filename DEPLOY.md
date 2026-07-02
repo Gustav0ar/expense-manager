@@ -44,21 +44,21 @@ restricted tag such as `tag:ci`.
 If `VPS_ENV_FILE` is not set, the deploy workflow builds the VPS `.env` from
 individual protected environment secrets:
 
-| Secret                  | Notes                                          |
-| ----------------------- | ---------------------------------------------- |
-| `DOMAIN_NAME`           | Bare production hostname.                      |
-| `ORIGIN`                | Full production origin.                        |
-| `BETTER_AUTH_SECRET`    | High-entropy app secret.                       |
-| `POSTGRES_PASSWORD`     | Database password.                             |
-| `RESTIC_REPOSITORY`     | Remote off-VPS restic repository.              |
-| `RESTIC_PASSWORD`       | High-entropy restic repository password.       |
-| `SENDER_API_TOKEN`      | Sender transactional email API token.          |
-| `SENDER_FROM`           | Verified sender address, optionally with name. |
-| `TRUSTED_ORIGINS`       | Optional comma-separated extra origins.        |
-| `AWS_ACCESS_KEY_ID`     | Required only for S3-compatible restic.        |
-| `AWS_SECRET_ACCESS_KEY` | Required only for S3-compatible restic.        |
-| `AWS_DEFAULT_REGION`    | Optional S3-compatible region.                 |
-| `SMTP_*`                | Optional SMTP fallback values.                 |
+| Secret                  | Notes                                                                         |
+| ----------------------- | ----------------------------------------------------------------------------- |
+| `DOMAIN_NAME`           | Bare production hostname.                                                     |
+| `ORIGIN`                | Full production origin.                                                       |
+| `BETTER_AUTH_SECRET`    | High-entropy app secret.                                                      |
+| `POSTGRES_PASSWORD`     | Database password.                                                            |
+| `RESTIC_REPOSITORY`     | Remote off-VPS restic repository. Required when `BACKUP_ENABLED=true`.        |
+| `RESTIC_PASSWORD`       | High-entropy restic repository password. Required when `BACKUP_ENABLED=true`. |
+| `SENDER_API_TOKEN`      | Sender transactional email API token.                                         |
+| `SENDER_FROM`           | Verified sender address, optionally with name.                                |
+| `TRUSTED_ORIGINS`       | Optional comma-separated extra origins.                                       |
+| `AWS_ACCESS_KEY_ID`     | Required only for S3-compatible restic.                                       |
+| `AWS_SECRET_ACCESS_KEY` | Required only for S3-compatible restic.                                       |
+| `AWS_DEFAULT_REGION`    | Optional S3-compatible region.                                                |
+| `SMTP_*`                | Optional SMTP fallback values.                                                |
 
 ### Environment Variables
 
@@ -71,6 +71,7 @@ Set these in `Settings -> Environments -> production -> Variables`.
 | `REGISTRY`              | `ghcr.io`                  | Container registry.                                                                    |
 | `IMAGE_OWNER_LOWERCASE` | `<github-owner-lowercase>` | Lowercase GitHub user or organization that owns the package.                           |
 | `CONTAINER_PLATFORMS`   | `linux/amd64,linux/arm64`  | Optional image platforms. Set to the VPS architecture only for faster private deploys. |
+| `BACKUP_ENABLED`        | `true`                     | Set to `false` only to bootstrap without remote backups.                               |
 
 Avoid storing personal values in variables if you do not want them visible to
 collaborators. Use secrets for hostnames, IPs, usernames and every application
@@ -136,6 +137,7 @@ POSTGRES_PASSWORD=<long-random-database-password>
 DB_POOL_MAX=5
 TRUST_PROXY_HEADERS=true
 
+BACKUP_ENABLED=true
 RESTIC_REPOSITORY=s3:s3.example.com/expense-manager-backups
 RESTIC_PASSWORD=<long-random-restic-password>
 RESTIC_HOST=expense-manager
@@ -305,6 +307,12 @@ docker compose exec app wget -qO- http://localhost:3000/api/health
 Production backups are remote by default. The `backup` service runs daily,
 creates temporary files inside the container, uploads them to an encrypted
 `restic` repository and then removes local temporary files.
+
+If you do not have a remote backup provider yet, set `BACKUP_ENABLED=false` as a
+GitHub production environment variable. This disables the daily remote backup
+service and lets the deploy continue without `RESTIC_REPOSITORY` or
+`RESTIC_PASSWORD`. Use this only for bootstrap or non-critical data. It is not a
+disaster-recovery plan.
 
 The remote repository receives:
 

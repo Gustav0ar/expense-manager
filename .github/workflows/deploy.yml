@@ -207,6 +207,7 @@ jobs:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           DB_POOL_MAX: ${{ vars.DB_POOL_MAX || '5' }}
           TRUST_PROXY_HEADERS: ${{ vars.TRUST_PROXY_HEADERS || 'true' }}
+          BACKUP_ENABLED: ${{ vars.BACKUP_ENABLED || 'true' }}
           RESTIC_REPOSITORY: ${{ secrets.RESTIC_REPOSITORY }}
           RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
           RESTIC_HOST: ${{ vars.RESTIC_HOST || 'expense-manager' }}
@@ -260,11 +261,25 @@ jobs:
               ORIGIN
               BETTER_AUTH_SECRET
               POSTGRES_PASSWORD
-              RESTIC_REPOSITORY
-              RESTIC_PASSWORD
               SENDER_API_TOKEN
               SENDER_FROM
             )
+
+            case "${BACKUP_ENABLED}" in
+              true)
+                required_individual_secrets+=(
+                  RESTIC_REPOSITORY
+                  RESTIC_PASSWORD
+                )
+                ;;
+              false)
+                echo "::warning::BACKUP_ENABLED=false. Deploy will run without remote restic backups."
+                ;;
+              *)
+                echo "::error::BACKUP_ENABLED must be true or false."
+                exit 1
+                ;;
+            esac
 
             for name in "${required_individual_secrets[@]}"; do
               if [ -z "${!name}" ]; then
@@ -287,6 +302,7 @@ jobs:
             write_env_var POSTGRES_PASSWORD "${POSTGRES_PASSWORD}"
             write_env_var DB_POOL_MAX "${DB_POOL_MAX}"
             write_env_var TRUST_PROXY_HEADERS "${TRUST_PROXY_HEADERS}"
+            write_env_var BACKUP_ENABLED "${BACKUP_ENABLED}"
             write_env_var RESTIC_REPOSITORY "${RESTIC_REPOSITORY}"
             write_env_var RESTIC_PASSWORD "${RESTIC_PASSWORD}"
             write_env_var RESTIC_HOST "${RESTIC_HOST}"
@@ -337,8 +353,7 @@ jobs:
             POSTGRES_PASSWORD
             DB_POOL_MAX
             TRUST_PROXY_HEADERS
-            RESTIC_REPOSITORY
-            RESTIC_PASSWORD
+            BACKUP_ENABLED
             REGISTRY
             IMAGE_OWNER_LOWERCASE
             TRAEFIK_NETWORK
@@ -348,6 +363,23 @@ jobs:
             SENDER_API_TOKEN
             SENDER_FROM
           )
+
+          backup_enabled_value="$( (grep -E "^BACKUP_ENABLED=" "${ENV_FILE_PATH}" || true) | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//' )"
+          case "${backup_enabled_value}" in
+            true)
+              required_keys+=(
+                RESTIC_REPOSITORY
+                RESTIC_PASSWORD
+              )
+              ;;
+            false)
+              echo "::warning::BACKUP_ENABLED=false in production environment file. Remote backups are disabled."
+              ;;
+            *)
+              echo "::error::BACKUP_ENABLED must be true or false."
+              exit 1
+              ;;
+          esac
 
           for name in "${required_keys[@]}"; do
             if ! grep -Eq "^${name}=" "${ENV_FILE_PATH}"; then
