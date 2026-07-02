@@ -1,49 +1,110 @@
 #!/bin/sh
 set -eu
 
-backup_dir="${BACKUP_DIR:-/backups}"
-upload_dir="${UPLOAD_DIR:-/app/uploads}"
-offsite_dir="${BACKUP_OFFSITE_DIR:-}"
-retention_days="${BACKUP_RETENTION_DAYS:-14}"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-db_file="${backup_dir}/${POSTGRES_DB}_${timestamp}.dump"
-uploads_file="${backup_dir}/uploads_${timestamp}.tar.gz"
+postgres_host="${POSTGRES_HOST:-postgres}"
+postgres_port="${POSTGRES_PORT:-5432}"
+upload_dir="${UPLOAD_DIR:-/app/uploads}"
+restic_host="${RESTIC_HOST:-expense-manager}"
+restic_cache_dir="${RESTIC_CACHE_DIR:-/tmp/restic-cache}"
+restic_init_repository="${RESTIC_INIT_REPOSITORY:-true}"
+keep_daily="${RESTIC_KEEP_DAILY:-7}"
+keep_weekly="${RESTIC_KEEP_WEEKLY:-4}"
+keep_monthly="${RESTIC_KEEP_MONTHLY:-12}"
+check_after_backup="${RESTIC_CHECK_AFTER_BACKUP:-false}"
+work_dir="$(mktemp -d /tmp/expense-manager-backup.XXXXXX)"
+db_file="${work_dir}/${POSTGRES_DB}_${timestamp}.dump"
+uploads_file="${work_dir}/uploads_${timestamp}.tar.gz"
 
-mkdir -p "$backup_dir"
-
-checksum_file() {
-	sha256sum "$1" > "$1.sha256"
+cleanup() {
+	rm -rf "$work_dir"
 }
+trap cleanup EXIT INT TERM
 
-copy_to_offsite() {
-	file="$1"
-	if [ -n "$offsite_dir" ] && [ "$offsite_dir" != "$backup_dir" ]; then
-		mkdir -p "$offsite_dir"
-		cp -p "$file" "$file.sha256" "$offsite_dir"/
-		echo "offsite_backup_copied=$offsite_dir/$(basename "$file")"
+require_env() {
+	name="$1"
+	eval "value=\${$name:-}"
+	if [ -z "$value" ]; then
+		echo "$name is required for remote backups." >&2
+		exit 1
 	fi
 }
 
-export PGPASSWORD="${POSTGRES_PASSWORD}"
+require_env POSTGRES_DB
+require_env POSTGRES_USER
+require_env POSTGRES_PASSWORD
+require_env RESTIC_REPOSITORY
+
+if [ -z "${RESTIC_PASSWORD:-}" ] && [ -z "${RESTIC_PASSWORD_FILE:-}" ]; then
+	echo "RESTIC_PASSWORD or RESTIC_PASSWORD_FILE is required for encrypted remote backups." >&2
+	exit 1
+fi
+
+mkdir -p "$restic_cache_dir"
+export PGPASSWORD="$POSTGRES_PASSWORD"
+export RESTIC_CACHE_DIR="$restic_cache_dir"
+
+echo "Creating Postgres logical backup."
 pg_dump \
-	-h postgres \
-	-U "${POSTGRES_USER}" \
-	-d "${POSTGRES_DB}" \
+	-h "$postgres_host" \
+	-p "$postgres_port" \
+	-U "$POSTGRES_USER" \
+	-d "$POSTGRES_DB" \
 	-Fc \
 	-f "$db_file"
 
 pg_restore --list "$db_file" >/dev/null
-checksum_file "$db_file"
-copy_to_offsite "$db_file"
+sha256sum "$db_file" > "$db_file.sha256"
 
 if [ -d "$upload_dir" ]; then
+	echo "Creating uploads archive."
 	tar -C "$upload_dir" -czf "$uploads_file" .
 	tar -tzf "$uploads_file" >/dev/null
-	checksum_file "$uploads_file"
-	copy_to_offsite "$uploads_file"
-	echo "uploads_backup_created=$uploads_file"
+	sha256sum "$uploads_file" > "$uploads_file.sha256"
 fi
 
-find "$backup_dir" -type f \( -name "${POSTGRES_DB}_*.dump" -o -name "${POSTGRES_DB}_*.dump.sha256" \) -mtime +"$retention_days" -delete
-find "$backup_dir" -type f \( -name "uploads_*.tar.gz" -o -name "uploads_*.tar.gz.sha256" \) -mtime +"$retention_days" -delete
-echo "backup_created=$db_file"
+if ! restic snapshots >/dev/null 2>&1; then
+	if [ "$restic_init_repository" = "true" ]; then
+		echo "Initializing restic repository."
+		restic init
+	else
+		echo "Restic repository is not reachable or not initialized." >&2
+		exit 1
+	fi
+fi
+
+echo "Uploading encrypted backup to remote restic repository."
+if [ -f "$uploads_file" ]; then
+	restic backup \
+		--host "$restic_host" \
+		--tag expense-manager \
+		--tag postgres \
+		--tag uploads \
+		"$db_file" \
+		"$db_file.sha256" \
+		"$uploads_file" \
+		"$uploads_file.sha256"
+else
+	restic backup \
+		--host "$restic_host" \
+		--tag expense-manager \
+		--tag postgres \
+		"$db_file" \
+		"$db_file.sha256"
+fi
+
+echo "Applying remote backup retention."
+restic forget \
+	--host "$restic_host" \
+	--tag expense-manager \
+	--keep-daily "$keep_daily" \
+	--keep-weekly "$keep_weekly" \
+	--keep-monthly "$keep_monthly" \
+	--prune
+
+if [ "$check_after_backup" = "true" ]; then
+	echo "Running restic repository check."
+	restic check
+fi
+
+echo "remote_backup_created=$timestamp"

@@ -9,6 +9,12 @@ WORKDIR /app
 COPY . .
 CMD ["pnpm", "db:migrate"]
 
+FROM postgres:18-alpine AS backup
+RUN apk add --no-cache ca-certificates restic tzdata
+COPY scripts/backup.sh /usr/local/bin/backup.sh
+RUN chmod 755 /usr/local/bin/backup.sh
+ENTRYPOINT ["/usr/local/bin/backup.sh"]
+
 FROM node:24-alpine AS build
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@11.9.0 --activate

@@ -183,6 +183,7 @@ export const ptBrMessages = {
 	'Recover password': 'Recuperar senha',
 	'Recovery codes': 'Recovery codes',
 	'Recurring expenses': 'Despesas recorrentes',
+	'Registration is currently closed.': 'O cadastro está fechado no momento.',
 	Recurrences: 'Recorrências',
 	Rejected: 'Rejeitada',
 	Reject: 'Rejeitar',
@@ -216,6 +217,7 @@ export const ptBrMessages = {
 	Theme: 'Tema',
 	'This action removes the entry and updates dashboards and reports.':
 		'Essa ação remove o lançamento e atualiza os dashboards e relatórios.',
+	'This invite belongs to another email.': 'Este convite pertence a outro email.',
 	Total: 'Total',
 	'Total in period': 'Total no período',
 	'Totals registered': 'Totais cadastrados',

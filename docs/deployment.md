@@ -1,13 +1,22 @@
 # VPS Deployment
 
+For a public GitHub repository deployed to a private VPS behind Traefik, use
+[`DEPLOY.md`](../DEPLOY.md) as the primary production runbook. It includes the
+protected GitHub environment, GHCR images, dedicated deploy user, Traefik
+compose file and the rules for keeping hostnames, IPs and secrets out of Git.
+
+The notes below describe the direct Docker Compose deployment that is useful for
+local production-like testing or for a standalone Caddy deployment.
+
 ## Requirements
 
 - Docker Engine with Docker Compose
 - `pnpm` does not need to be installed on the VPS; the Docker image installs dependencies during the build
 - Domain pointed to the VPS
 - Ports 80 and 443 open
-- SMTP configured for password reset and invitations
-- External storage for backup copies
+- SMTP configured for password reset, verification, invitations and budget alerts.
+  See [`docs/email.md`](email.md) for the Sender setup.
+- Remote object storage or another off-VPS restic backend for encrypted backups
 - Persistent space for the `uploads` volume, used by receipt attachments
 
 ## Required Variables
@@ -15,9 +24,12 @@
 - `APP_DOMAIN`
 - `ORIGIN`
 - `BETTER_AUTH_SECRET`
+- `ALLOW_REGISTRATION`: set to `false` to disable public self-service account registration.
 - `POSTGRES_DB`
 - `POSTGRES_USER`
 - `POSTGRES_PASSWORD`
+- `RESTIC_REPOSITORY`
+- `RESTIC_PASSWORD`
 
 ## Recommended Variables
 
@@ -25,7 +37,8 @@
 - `DB_POOL_MAX`: maximum application connection pool size.
 - `TRUST_PROXY_HEADERS`: use `true` only when the app is not directly exposed and only receives traffic through a trusted reverse proxy. The default `docker-compose.yml` sets it to `true` because Caddy is the only published service.
 - `TRUSTED_ORIGINS`: comma-separated extra origins for alternate URLs, VPN or Tailscale access. Use complete origins such as `https://finance.example.com` or `http://100.x.y.z:5173`.
-- `BACKUP_OFFSITE_DIR`: optional path inside the backup container for copying already validated dumps and checksums. Mount this path to external storage according to your operating policy.
+- `RESTIC_KEEP_DAILY`, `RESTIC_KEEP_WEEKLY`, `RESTIC_KEEP_MONTHLY`: remote retention policy. The default keeps 7 daily, 4 weekly and 12 monthly snapshots.
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`: required only for S3-compatible restic repositories.
 - `APP_MEM_LIMIT`, `APP_CPUS`, `POSTGRES_MEM_LIMIT`, `POSTGRES_CPUS`, `CADDY_MEM_LIMIT`, `BACKUP_MEM_LIMIT`: optional operational limits for tuning VPS resource usage.
 
 ## First Release
@@ -37,11 +50,20 @@ docker compose --profile tools run --rm migrate
 docker compose up -d app caddy backup
 ```
 
-The `backup` service writes Postgres dumps, `uploads_*.tar.gz` files for attachments and `.sha256` checksums. The dump is validated with `pg_restore --list`, and the uploads package is validated with `tar -tzf` before the optional copy to `BACKUP_OFFSITE_DIR`.
+The `backup` service writes encrypted backups to the remote `RESTIC_REPOSITORY`. During each run it creates a temporary Postgres custom-format dump, a temporary `uploads_*.tar.gz` archive and `.sha256` checksums. The dump is validated with `pg_restore --list`, the uploads package is validated with `tar -tzf`, and then all artifacts are uploaded to the remote restic repository. Temporary local files are removed when the run finishes.
 
 ## Restore
 
-Restore Postgres first:
+Restore from the remote repository into a temporary restore directory first:
+
+```bash
+docker compose run --rm --no-deps \
+  --entrypoint restic \
+  -v "$(pwd)/restore:/restore" \
+  backup restore latest --target /restore
+```
+
+Then restore Postgres:
 
 ```bash
 docker compose exec -T postgres pg_restore \
@@ -49,7 +71,7 @@ docker compose exec -T postgres pg_restore \
   -d "$POSTGRES_DB" \
   --clean \
   --if-exists \
-  /path/to/backup.dump
+  /restore/path/from/restic/expense_manager_YYYYMMDDTHHMMSSZ.dump
 ```
 
 Then restore the attachments matching the same dump timestamp:
@@ -57,8 +79,8 @@ Then restore the attachments matching the same dump timestamp:
 ```bash
 docker compose stop app
 docker compose run --rm --no-deps \
-  -v "$(pwd)/backups:/restore:ro" \
-  app sh -lc 'rm -rf /app/uploads/* && tar -C /app/uploads -xzf /restore/uploads_YYYYMMDDTHHMMSSZ.tar.gz'
+  -v "$(pwd)/restore:/restore:ro" \
+  app sh -lc 'rm -rf /app/uploads/* && tar -C /app/uploads -xzf /restore/path/from/restic/uploads_YYYYMMDDTHHMMSSZ.tar.gz'
 docker compose up -d app
 ```
 
@@ -89,12 +111,22 @@ Details and action criteria are in `docs/operations.md`.
 
 ## Rollback
 
-Keep release tags in GitHub. To roll back:
+For the Traefik/GitHub Actions deployment, use the rollback process in
+[`DEPLOY.md`](../DEPLOY.md). It records previous image tags, performs automatic
+image rollback when deploy smoke checks fail and requires explicit confirmation
+before restoring a database dump.
+
+For a standalone Caddy deployment, keep release tags in GitHub and validate the
+app after switching versions:
 
 ```bash
 git checkout <previous-tag>
 docker compose build app
 docker compose up -d app
+docker compose exec app wget -qO- http://localhost:3000/api/health
 ```
 
-Destructive migrations require a database-specific rollback plan.
+If the database must also be restored, validate the backup with
+`pg_restore --list`, stop the app, restore with `pg_restore --clean --if-exists`
+and only then start the app again. Destructive migrations require a tested
+database rollback plan before release.

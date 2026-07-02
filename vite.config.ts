@@ -40,6 +40,7 @@ export default defineConfig({
 			include: [
 				'src/lib/category-emojis.ts',
 				'src/lib/server/email.ts',
+				'src/lib/server/registration.ts',
 				'src/lib/server/security/client-ip.ts',
 				'src/lib/server/security/origin.ts',
 				'src/lib/server/security/roles.ts',

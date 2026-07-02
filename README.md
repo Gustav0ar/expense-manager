@@ -15,6 +15,7 @@ Self-hosted web system for managing expenses, categories, users, dashboards, rep
 ## Features
 
 - Email and password authentication
+- Optional registration lockdown through `ALLOW_REGISTRATION=false`
 - Configurable email verification
 - Password recovery through SMTP
 - Multi-user workspaces
@@ -35,6 +36,7 @@ Self-hosted web system for managing expenses, categories, users, dashboards, rep
 - Audit trail for main operations with a dedicated screen
 - Healthcheck with database status and duration
 - Daily backup with `pg_dump`, validation and SHA-256 checksums
+- Protected VPS deploy with pre-deploy backup and rollback runbook
 - Operational Postgres observability script
 - i18n-ready UI with English defaults and pt-BR translations
 
@@ -96,9 +98,17 @@ pnpm db:migrate
 
 ## VPS Deployment
 
+For a public GitHub repository deployed to a private VPS behind Traefik, follow
+[`DEPLOY.md`](DEPLOY.md). It keeps production secrets, hostnames, IPs and SSH
+keys out of the repository, uses protected GitHub Actions deployment and
+documents automatic image rollback plus controlled database restore.
+
+For a direct Caddy-based deployment:
+
 1. Point the domain DNS to the VPS.
 2. Copy `.env.example` to `.env`.
 3. Fill `APP_DOMAIN`, `ORIGIN`, `BETTER_AUTH_SECRET`, `POSTGRES_PASSWORD`, `REQUIRE_EMAIL_VERIFICATION`, `UPLOAD_DIR` if you want to customize the path, and SMTP.
+   Also configure `RESTIC_REPOSITORY` and `RESTIC_PASSWORD` for encrypted off-VPS backups.
 4. Start the database:
 
 ```bash
@@ -135,7 +145,16 @@ Production operations and diagnostics are in `docs/operations.md`.
 
 ## Backup And Restore
 
-Daily Postgres and attachment backups are saved in the `backups` volume with `.sha256` files. If `BACKUP_OFFSITE_DIR` points to a mounted directory, the job also copies verified files to that destination.
+Daily Postgres and attachment backups are encrypted and saved to the remote `RESTIC_REPOSITORY`. The backup container only keeps temporary files during the backup run.
+
+Restore the latest remote snapshot to a temporary local directory:
+
+```bash
+docker compose run --rm --no-deps \
+  --entrypoint restic \
+  -v "$(pwd)/restore:/restore" \
+  backup restore latest --target /restore
+```
 
 Database restore:
 
@@ -145,7 +164,7 @@ docker compose exec -T postgres pg_restore \
   -d "$POSTGRES_DB" \
   --clean \
   --if-exists \
-  /path/to/backup.dump
+  /restore/path/from/restic/expense_manager_YYYYMMDDTHHMMSSZ.dump
 ```
 
 Attachment restore:
@@ -153,8 +172,8 @@ Attachment restore:
 ```bash
 docker compose stop app
 docker compose run --rm --no-deps \
-  -v "$(pwd)/backups:/restore:ro" \
-  app sh -lc 'rm -rf /app/uploads/* && tar -C /app/uploads -xzf /restore/uploads_YYYYMMDDTHHMMSSZ.tar.gz'
+  -v "$(pwd)/restore:/restore:ro" \
+  app sh -lc 'rm -rf /app/uploads/* && tar -C /app/uploads -xzf /restore/path/from/restic/uploads_YYYYMMDDTHHMMSSZ.tar.gz'
 docker compose up -d app
 ```
 
@@ -165,7 +184,8 @@ Test restores periodically in a separate database.
 - Never commit `.env`.
 - Generate `BETTER_AUTH_SECRET` with `openssl rand -base64 32`.
 - Use HTTPS in production.
-- Configure SMTP for password reset and invitations.
+- Configure SMTP for password reset, verification, invitations and budget alerts.
+  See [`docs/email.md`](docs/email.md) for the Sender setup.
 - Run migrations before publishing a new version.
 - Monitor `/api/health`, disk usage, Postgres logs, backup age and `pg_stat_statements`.
 

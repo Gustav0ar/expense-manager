@@ -1,0 +1,322 @@
+name: Deploy
+
+# This workflow is safe for a public repository when configured as documented:
+# real hostnames, IPs, SSH usernames, keys, domains and app environment values
+# stay in GitHub environment secrets/variables and are copied to the VPS during
+# deploy without being committed to the repository.
+
+on:
+  workflow_run:
+    workflows: ['Containers']
+    types: [completed]
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force deploy even if the last container build failed'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+  packages: read
+  actions: read
+
+concurrency:
+  group: expense-manager-production
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: Verify required workflows
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: Skip checks for forced manual deploy
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.force == 'true' }}
+        run: echo "Forced manual deploy requested; skipping workflow preflight."
+
+      - name: Require CI, Security and Containers for this SHA
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.force != 'true' }}
+        uses: actions/github-script@v7
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const headSha = process.env.HEAD_SHA;
+            const requiredWorkflows = ['CI', 'Security', 'Containers'];
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+            if (!headSha) {
+              core.setFailed('Unable to determine deploy commit SHA.');
+              return;
+            }
+
+            for (let attempt = 1; attempt <= 60; attempt += 1) {
+              const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+                owner,
+                repo,
+                head_sha: headSha,
+                per_page: 100
+              });
+
+              const waiting = [];
+              const failed = [];
+
+              for (const workflowName of requiredWorkflows) {
+                const runs = data.workflow_runs
+                  .filter((run) => run.name === workflowName && run.head_sha === headSha)
+                  .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+                const latest = runs[0];
+
+                if (!latest) {
+                  waiting.push(`${workflowName}: missing`);
+                  continue;
+                }
+                if (latest.status !== 'completed') {
+                  waiting.push(`${workflowName}: ${latest.status}`);
+                  continue;
+                }
+                if (latest.conclusion !== 'success') {
+                  failed.push(`${workflowName}: ${latest.conclusion} (${latest.html_url})`);
+                }
+              }
+
+              if (failed.length > 0) {
+                core.setFailed(`Required workflow failed for ${headSha}: ${failed.join(', ')}`);
+                return;
+              }
+              if (waiting.length === 0) {
+                core.info(`All required workflows passed for ${headSha}.`);
+                return;
+              }
+              if (attempt === 60) {
+                core.setFailed(`Timed out waiting for required workflows on ${headSha}: ${waiting.join(', ')}`);
+                return;
+              }
+
+              core.info(`Waiting for required workflows on ${headSha}: ${waiting.join(', ')}`);
+              await sleep(10_000);
+            }
+
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    needs: preflight
+    environment: production
+    if: needs.preflight.result == 'success'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Build deploy summary
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          IMAGE_OWNER: ${{ vars.IMAGE_OWNER_LOWERCASE }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          HEAD_SHA_SHORT="$(printf '%s' "${HEAD_SHA}" | cut -c1-7)"
+          IMAGE_TAG="sha-${HEAD_SHA_SHORT}"
+          HOST_FP="$(printf '%s' "${VPS_HOST}" | sha256sum | cut -c1-12)"
+          cat > .github/deploy-summary.json <<EOF
+          {
+            "service": "expense-manager",
+            "image_tag": "${IMAGE_TAG}",
+            "head_sha": "${HEAD_SHA}",
+            "image_owner": "${IMAGE_OWNER}",
+            "trigger": "${{ github.event_name }}",
+            "host_fingerprint": "${HOST_FP}"
+          }
+          EOF
+
+      - name: Upload public deploy summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-summary
+          path: .github/deploy-summary.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Prepare and test SSH key
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USERNAME: ${{ secrets.VPS_USERNAME }}
+          VPS_PORT: ${{ secrets.VPS_PORT || 22 }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          SSH_KEY_FILE: ${{ runner.temp }}/vps_ssh_key
+        run: |
+          set -euo pipefail
+
+          for name in VPS_HOST VPS_USERNAME VPS_PORT VPS_SSH_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::${name} is not set in the production environment."
+              exit 1
+            fi
+          done
+
+          install -m 700 -d "$(dirname "${SSH_KEY_FILE}")" "${HOME}/.ssh"
+          printf '%s\n' "${VPS_SSH_KEY}" | sed 's/\r$//' > "${SSH_KEY_FILE}"
+          chmod 600 "${SSH_KEY_FILE}"
+
+          if ! ssh-keygen -y -f "${SSH_KEY_FILE}" >/dev/null 2>&1; then
+            echo "::error::VPS_SSH_KEY is not a parseable private SSH key."
+            exit 1
+          fi
+
+          KEY_FP="$(ssh-keygen -lf "${SSH_KEY_FILE}" | awk '{print $2}')"
+          echo "Deploy key fingerprint: ${KEY_FP}"
+
+          ssh -i "${SSH_KEY_FILE}" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=15 \
+            -p "${VPS_PORT}" \
+            "${VPS_USERNAME}@${VPS_HOST}" \
+            true
+
+      - name: Install production environment file
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USERNAME: ${{ secrets.VPS_USERNAME }}
+          VPS_PORT: ${{ secrets.VPS_PORT || 22 }}
+          VPS_ENV_FILE: ${{ secrets.VPS_ENV_FILE }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/expense-manager' }}
+          SSH_KEY_FILE: ${{ runner.temp }}/vps_ssh_key
+          ENV_FILE_PATH: ${{ runner.temp }}/expense-manager.env
+        run: |
+          set -euo pipefail
+
+          if [ -z "${VPS_ENV_FILE}" ]; then
+            echo "::error::VPS_ENV_FILE is not set in the production environment secrets."
+            exit 1
+          fi
+
+          umask 077
+          printf '%s\n' "${VPS_ENV_FILE}" | sed 's/\r$//' > "${ENV_FILE_PATH}"
+
+          if [ ! -s "${ENV_FILE_PATH}" ]; then
+            echo "::error::VPS_ENV_FILE produced an empty environment file."
+            exit 1
+          fi
+
+          required_keys=(
+            PUBLIC_APP_NAME
+            DOMAIN_NAME
+            ORIGIN
+            BETTER_AUTH_SECRET
+            REQUIRE_EMAIL_VERIFICATION
+            ALLOW_REGISTRATION
+            POSTGRES_DB
+            POSTGRES_USER
+            POSTGRES_PASSWORD
+            DB_POOL_MAX
+            TRUST_PROXY_HEADERS
+            RESTIC_REPOSITORY
+            RESTIC_PASSWORD
+            REGISTRY
+            IMAGE_OWNER_LOWERCASE
+            TRAEFIK_NETWORK
+            TRAEFIK_HTTP_ENTRYPOINT
+            TRAEFIK_ENTRYPOINT
+            TRAEFIK_CERT_RESOLVER
+            SMTP_HOST
+            SMTP_PORT
+            SMTP_SECURE
+            SMTP_USER
+            SMTP_PASSWORD
+            SMTP_FROM
+          )
+
+          for name in "${required_keys[@]}"; do
+            if ! grep -Eq "^${name}=" "${ENV_FILE_PATH}"; then
+              echo "::error::VPS_ENV_FILE is missing required key ${name}."
+              exit 1
+            fi
+            value="$(grep -E "^${name}=" "${ENV_FILE_PATH}" | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//')"
+            if [ -z "${value}" ]; then
+              echo "::error::VPS_ENV_FILE key ${name} must not be empty."
+              exit 1
+            fi
+          done
+
+          if grep -Eq '(replace-with|<sender-|<openssl|<long-random|<github-owner|<remote-backup|your-domain\.example|your-verified-domain\.example|finance\.example\.com|s3\.example\.com)' "${ENV_FILE_PATH}"; then
+            echo "::error::VPS_ENV_FILE still contains placeholder values."
+            exit 1
+          fi
+
+          REMOTE_TMP=".expense-manager.env.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+          scp -i "${SSH_KEY_FILE}" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=accept-new \
+            -P "${VPS_PORT}" \
+            "${ENV_FILE_PATH}" \
+            "${VPS_USERNAME}@${VPS_HOST}:${REMOTE_TMP}"
+
+          DEPLOY_PATH_Q="$(printf '%q' "${DEPLOY_PATH}")"
+          REMOTE_TMP_Q="$(printf '%q' "${REMOTE_TMP}")"
+          ssh -i "${SSH_KEY_FILE}" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=accept-new \
+            -p "${VPS_PORT}" \
+            "${VPS_USERNAME}@${VPS_HOST}" \
+            "set -euo pipefail
+            DEPLOY_PATH=${DEPLOY_PATH_Q}
+            REMOTE_TMP=${REMOTE_TMP_Q}
+            install -d -m 750 \"\${DEPLOY_PATH}\"
+            tmp_file=\$(mktemp \"\${DEPLOY_PATH}/.env.XXXXXX\")
+            install -m 600 \"\${HOME}/\${REMOTE_TMP}\" \"\${tmp_file}\"
+            rm -f \"\${HOME}/\${REMOTE_TMP}\"
+
+            if [ -f \"\${DEPLOY_PATH}/.env\" ]; then
+              for key in IMAGE_TAG PREVIOUS_IMAGE_TAG LAST_SUCCESSFUL_IMAGE_TAG LAST_SUCCESSFUL_DEPLOY_SHA LAST_PREDEPLOY_BACKUP LAST_ROLLBACK_IMAGE_TAG LAST_ROLLBACK_AT LAST_ROLLBACK_REASON; do
+                existing_line=\$(grep -E \"^\${key}=\" \"\${DEPLOY_PATH}/.env\" | tail -n 1 || true)
+                if [ -n \"\${existing_line}\" ]; then
+                  next_file=\$(mktemp \"\${DEPLOY_PATH}/.env.next.XXXXXX\")
+                  grep -v -E \"^\${key}=\" \"\${tmp_file}\" > \"\${next_file}\" || true
+                  printf '%s\n' \"\${existing_line}\" >> \"\${next_file}\"
+                  cat \"\${next_file}\" > \"\${tmp_file}\"
+                  rm -f \"\${next_file}\"
+                fi
+              done
+            fi
+
+            chmod 600 \"\${tmp_file}\"
+            mv \"\${tmp_file}\" \"\${DEPLOY_PATH}/.env\""
+
+          rm -f "${ENV_FILE_PATH}"
+
+      - name: SSH and deploy
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/expense-manager' }}
+          COMPOSE_CMD: ${{ vars.COMPOSE_COMMAND || 'docker compose' }}
+          REGISTRY: ${{ vars.REGISTRY || 'ghcr.io' }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          IMAGE_OWNER: ${{ vars.IMAGE_OWNER_LOWERCASE }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key_path: ${{ runner.temp }}/vps_ssh_key
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: DEPLOY_PATH,COMPOSE_CMD,REGISTRY,HEAD_SHA,IMAGE_OWNER,GITHUB_REPOSITORY,GITHUB_TOKEN
+          script: |
+            set -euo pipefail
+            HEAD_SHA_SHORT="$(printf '%s' "${HEAD_SHA}" | cut -c1-7)"
+            DEPLOY_SCRIPT_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${HEAD_SHA}/scripts/deploy-vps.sh"
+            curl_headers=(-H "Accept: application/vnd.github.raw")
+            if [ -n "${GITHUB_TOKEN:-}" ]; then
+              curl_headers+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+            fi
+            curl -fsSL "${curl_headers[@]}" -o /tmp/expense-manager-deploy.sh "${DEPLOY_SCRIPT_URL}"
+            chmod 700 /tmp/expense-manager-deploy.sh
+            IMAGE_TAG="sha-${HEAD_SHA_SHORT}" /tmp/expense-manager-deploy.sh

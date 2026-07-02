@@ -24,8 +24,10 @@
 ## Pre-Production Checklist
 
 - `BETTER_AUTH_SECRET` generated with high entropy
-- SMTP tested
+- SMTP tested with the production provider. See [`docs/email.md`](email.md) for
+  the Sender setup.
 - `REQUIRE_EMAIL_VERIFICATION=true` in production unless an operational exception is documented
+- `ALLOW_REGISTRATION=false` when production access should be invite-only or manually managed
 - HTTPS active
 - `TRUST_PROXY_HEADERS=true` only if the app is isolated behind a trusted reverse proxy
 - Backups copied outside the VPS

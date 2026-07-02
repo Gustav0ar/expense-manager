@@ -4,6 +4,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { auth } from '$lib/server/auth';
 import { parseForm, signInSchema } from '$lib/server/validation';
 import { assertRateLimit } from '$lib/server/security/rate-limit';
+import { isRegistrationEnabled } from '$lib/server/registration';
 import { translate } from '$lib/i18n';
 
 export const load: PageServerLoad = (event) => {
@@ -11,7 +12,8 @@ export const load: PageServerLoad = (event) => {
 	return {
 		next: safeNext(event.url.searchParams.get('next') || '/app'),
 		registered: event.url.searchParams.get('registered') === '1',
-		reset: event.url.searchParams.get('reset') === '1'
+		reset: event.url.searchParams.get('reset') === '1',
+		registrationEnabled: isRegistrationEnabled()
 	};
 };
 

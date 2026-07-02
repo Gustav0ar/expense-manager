@@ -60,7 +60,9 @@
 
 		<div class="auth-links">
 			<a href={resolve('/forgot-password')}>{t('Forgot password')}</a>
-			<a href={resolve('/register')}>{t('Create account')}</a>
+			{#if data.registrationEnabled}
+				<a href={resolve('/register')}>{t('Create account')}</a>
+			{/if}
 		</div>
 	</section>
 </main>
