@@ -224,6 +224,28 @@ them in GitHub secrets.
 The public `deploy-summary` artifact contains only service name, image tag,
 commit SHA, image owner and a non-reversible host fingerprint.
 
+## VPS Isolation
+
+Use a dedicated `DEPLOY_PATH` for this app, for example
+`/mnt/storage/containers/expenses`. Deployment commands run from that directory
+with this app's compose file and only manage this app's services, containers
+named `expense-manager-*`, and volumes created by this compose project.
+
+The only intentionally shared Docker resource is the external Traefik network
+configured by `TRAEFIK_NETWORK` (default `web`). The deploy script does not run
+global Docker cleanup commands, so it will not prune images or volumes used by
+other applications on the VPS.
+
+## Postgres Storage Layout
+
+The production compose files use `postgres:18-alpine`. PostgreSQL 18 stores
+cluster data under a major-version-specific `PGDATA` path
+(`/var/lib/postgresql/18/docker` in the official image), so the persistent
+volume is mounted at `/var/lib/postgresql`.
+
+Do not change the Postgres major version or volume mount path on an existing
+database without a tested backup and restore plan.
+
 ## Rollback
 
 Rollback has two layers:
