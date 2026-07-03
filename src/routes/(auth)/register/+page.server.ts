@@ -2,11 +2,14 @@ import { fail, redirect } from '@sveltejs/kit';
 import { APIError } from 'better-auth/api';
 import type { Actions, PageServerLoad } from './$types';
 import { auth, isEmailVerificationRequired } from '$lib/server/auth';
+import { db } from '$lib/server/db';
+import { user } from '$lib/server/db/auth.schema';
 import { parseForm, signUpSchema } from '$lib/server/validation';
 import { assertRateLimit } from '$lib/server/security/rate-limit';
 import { getInviteTokenFromNext, isRegistrationEnabled } from '$lib/server/registration';
 import { getPendingInvitation } from '$lib/server/services/invitations';
 import { translate } from '$lib/i18n';
+import { eq } from 'drizzle-orm';
 
 export const load: PageServerLoad = async (event) => {
 	if (event.locals.user) throw redirect(303, '/app');
@@ -53,6 +56,16 @@ export const actions: Actions = {
 			max: 3
 		});
 
+		if (isEmailVerificationRequired() && (await accountExists(parsed.data.email))) {
+			await auth.api.sendVerificationEmail({
+				body: {
+					email: parsed.data.email,
+					callbackURL: next
+				}
+			});
+			throw redirect(303, '/login?resentVerification=1');
+		}
+
 		try {
 			await auth.api.signUpEmail({
 				body: {
@@ -64,6 +77,16 @@ export const actions: Actions = {
 			});
 		} catch (err) {
 			if (err instanceof APIError) {
+				if (isEmailVerificationRequired() && isExistingAccountError(err)) {
+					await auth.api.sendVerificationEmail({
+						body: {
+							email: parsed.data.email,
+							callbackURL: next
+						}
+					});
+					throw redirect(303, '/login?resentVerification=1');
+				}
+
 				return fail(400, {
 					message: err.message || translate(event.locals.locale, 'Could not create the account.'),
 					values: { name: parsed.data.name, email: parsed.data.email }
@@ -93,4 +116,21 @@ async function getAllowedInvite(next: string) {
 
 	const token = getInviteTokenFromNext(next);
 	return token ? await getPendingInvitation(token) : null;
+}
+
+function isExistingAccountError(err: APIError) {
+	return (
+		err.body?.code === 'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL' ||
+		err.body?.message === 'User already exists. Use another email.' ||
+		err.message === 'User already exists. Use another email.'
+	);
+}
+
+async function accountExists(email: string) {
+	const [existingUser] = await db
+		.select({ id: user.id })
+		.from(user)
+		.where(eq(user.email, email))
+		.limit(1);
+	return Boolean(existingUser);
 }

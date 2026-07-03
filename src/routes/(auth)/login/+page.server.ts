@@ -15,6 +15,7 @@ export const load: PageServerLoad = (event) => {
 		registered: event.url.searchParams.get('registered') === '1',
 		reset: event.url.searchParams.get('reset') === '1',
 		verifyEmail: event.url.searchParams.get('verifyEmail') === '1',
+		resentVerification: event.url.searchParams.get('resentVerification') === '1',
 		registrationEnabled: isRegistrationEnabled()
 	};
 };
@@ -53,7 +54,7 @@ export const actions: Actions = {
 					return fail(403, {
 						message: translate(
 							event.locals.locale,
-							'Verify your email before signing in. Check your inbox for the verification link.'
+							'We sent a new verification link. Check your inbox before signing in.'
 						),
 						values: { email: parsed.data.email, next }
 					});

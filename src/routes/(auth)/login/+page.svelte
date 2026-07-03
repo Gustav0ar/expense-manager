@@ -58,6 +58,12 @@
 			</p>
 		{/if}
 
+		{#if data.resentVerification}
+			<p class="notice success">
+				{t('If the account exists and needs verification, we sent a new verification link.')}
+			</p>
+		{/if}
+
 		{#if form?.message}
 			<p class="notice danger">{form.message}</p>
 		{/if}
