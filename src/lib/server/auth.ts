@@ -70,7 +70,14 @@ function getAuthSecret() {
 	) {
 		throw new Error('BETTER_AUTH_SECRET must be a high-entropy production secret.');
 	}
-	return value;
+	if (!building && !value) {
+		console.warn(
+			'[auth] BETTER_AUTH_SECRET is not set. Using the development fallback secret. ' +
+				'Set BETTER_AUTH_SECRET in your environment for consistent sessions.'
+		);
+		return developmentSecret;
+	}
+	return value ?? developmentSecret;
 }
 
 function getBetterAuthRateLimitMax() {

@@ -9,6 +9,7 @@ import {
 	isNull,
 	lte,
 	lt,
+	ne,
 	or,
 	sql,
 	type SQL
@@ -399,12 +400,15 @@ export async function updateExpense(context: WorkspaceContext, id: number, input
 			and(
 				eq(expense.id, id),
 				eq(expense.workspaceId, context.workspaceId),
-				isNull(expense.deletedAt)
+				isNull(expense.deletedAt),
+				// Re-assert the payment status we checked above so a concurrent
+				// reconciliation between the SELECT and this UPDATE is detected.
+				shouldResetReview ? eq(expense.paymentStatus, 'unpaid') : sql`true`
 			)
 		)
 		.returning({ id: expense.id });
 
-	if (!updated) throw error(404, 'Expense not found.');
+	if (!updated) throw error(409, translate(context.locale, 'Expense was modified. Reload and try again.'));
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,
@@ -454,6 +458,10 @@ export async function reviewExpense(
 			and(
 				eq(expense.id, id),
 				eq(expense.workspaceId, context.workspaceId),
+				// Block re-reviewing an already-approved expense that has been paid or
+				// reconciled: the rejection path would wipe payment data on a closed expense.
+				// Rejected and pending expenses can always be re-reviewed.
+				ne(expense.reviewStatus, 'approved'),
 				isNull(expense.deletedAt)
 			)
 		)
@@ -537,16 +545,28 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 		throw error(403, translate(context.locale, 'Permission denied.'));
 	}
 
-	await db
+	const [deleted] = await db
 		.update(expense)
 		.set({ deletedAt: new Date() })
 		.where(
 			and(
 				eq(expense.id, id),
 				eq(expense.workspaceId, context.workspaceId),
-				isNull(expense.deletedAt)
+				isNull(expense.deletedAt),
+				// Re-assert the statuses we checked above so a concurrent approval
+				// or payment between the SELECT and this UPDATE is detected.
+				canReviewExpenses(context.role)
+					? sql`true`
+					: eq(expense.reviewStatus, current.reviewStatus),
+				canReconcileExpenses(context.role)
+					? sql`true`
+					: eq(expense.paymentStatus, current.paymentStatus)
 			)
-		);
+		)
+		.returning({ id: expense.id });
+
+	if (!deleted)
+		throw error(409, translate(context.locale, 'Expense was modified. Reload and try again.'));
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,
@@ -562,21 +582,28 @@ export async function getDashboard(context: WorkspaceContext, from?: string, to?
 	from ??= firstDayOfMonth(today);
 	to ??= lastDayOfMonth(today);
 	const previous = previousPeriod(from, to);
-	const [currentTotal, previousTotal] = await Promise.all([
-		getTotal(context.workspaceId, from, to),
-		getTotal(context.workspaceId, previous.from, previous.to)
-	]);
-	const deltaPct =
-		previousTotal > 0 ? ((currentTotal - previousTotal) / previousTotal) * 100 : null;
 	const currentFilters = { from, to };
 
-	const [byCategory, byWeek, byMonth, byPaymentMethod, budgetSummary] = await Promise.all([
+	const [
+		currentTotal,
+		previousTotal,
+		byCategory,
+		byWeek,
+		byMonth,
+		byPaymentMethod,
+		budgetSummary
+	] = await Promise.all([
+		getTotal(context.workspaceId, from, to),
+		getTotal(context.workspaceId, previous.from, previous.to),
 		getTotalsByCategory(context.workspaceId, currentFilters),
 		getTotalsByPeriod(context.workspaceId, currentFilters, 'week', context.weekStartsOn),
 		getTotalsByPeriod(context.workspaceId, currentFilters, 'month', context.weekStartsOn),
 		getTotalsByPaymentMethod(context.workspaceId, currentFilters),
 		getBudgetSummary(context, startOfMonth(from))
 	]);
+
+	const deltaPct =
+		previousTotal > 0 ? ((currentTotal - previousTotal) / previousTotal) * 100 : null;
 
 	const topCategory = byCategory[0] ?? null;
 	const periodDays = Math.max(

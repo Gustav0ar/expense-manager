@@ -98,11 +98,21 @@ function emailVerificationFailure(
 	result: VerificationEmailRequestResult,
 	values: { email: string; next: string }
 ) {
-	if (result.status === 'sent' || result.status === 'not_found' || result.status === 'verified') {
+	if (result.status === 'sent') {
 		return fail(403, {
 			message: translate(
 				locale,
 				'We sent a new verification link. Check your inbox before signing in.'
+			),
+			values
+		});
+	}
+
+	if (result.status === 'not_found' || result.status === 'verified') {
+		return fail(403, {
+			message: translate(
+				locale,
+				'If this email is registered and unverified, we sent a new link. Check your inbox.'
 			),
 			values
 		});

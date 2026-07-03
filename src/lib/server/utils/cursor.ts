@@ -1,3 +1,5 @@
+import { isValidIsoDate } from '$lib/server/validation';
+
 type ExpenseCursor = {
 	date: string;
 	id: number;
@@ -13,7 +15,8 @@ export function decodeExpenseCursor(value: string | undefined) {
 	try {
 		const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as ExpenseCursor;
 		if (
-			!parsed.date ||
+			typeof parsed.date !== 'string' ||
+			!isValidIsoDate(parsed.date) ||
 			typeof parsed.id !== 'number' ||
 			!Number.isInteger(parsed.id) ||
 			parsed.id < 0 ||

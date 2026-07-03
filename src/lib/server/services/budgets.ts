@@ -197,15 +197,17 @@ export async function sendBudgetAlerts(context: WorkspaceContext, periodMonth: s
 		status: item.status
 	}));
 
-	for (const recipient of recipients) {
-		await sendBudgetAlertEmail(
-			recipient.email,
-			context.workspaceName,
-			month,
-			emailItems,
-			context.locale
-		);
-	}
+	await Promise.all(
+		recipients.map((recipient) =>
+			sendBudgetAlertEmail(
+				recipient.email,
+				context.workspaceName,
+				month,
+				emailItems,
+				context.locale
+			)
+		)
+	);
 
 	await db.insert(auditEvent).values({
 		workspaceId: context.workspaceId,
