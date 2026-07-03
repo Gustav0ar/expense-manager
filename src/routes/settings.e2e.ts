@@ -175,7 +175,7 @@ test('covers workspace preferences, appearance, language, creation and switching
 	await expect(page.locator('html')).toHaveAttribute('data-theme', 'system');
 	await expect(themeForm(page).getByLabel('Sistema')).toBeChecked();
 
-	await expect(localeForm(page).locator('button[type="submit"]')).toHaveCount(0);
+	await expect(localeForm(page).getByRole('button', { name: 'Salvar idioma' })).toBeVisible();
 	await expect(localeForm(page).locator('select[name="locale"] option[value="pt-BR"]')).toHaveText(
 		'🇧🇷 Português (Brasil)'
 	);
@@ -184,6 +184,7 @@ test('covers workspace preferences, appearance, language, creation and switching
 	await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 	await expect(page.locator('main .eyebrow', { hasText: 'Settings' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Language' })).toBeVisible();
+	await expect(localeForm(page).getByRole('button', { name: 'Save language' })).toBeVisible();
 	await expect(localeForm(page).locator('select[name="locale"] option[value="en"]')).toHaveText(
 		'🇺🇸 English'
 	);
