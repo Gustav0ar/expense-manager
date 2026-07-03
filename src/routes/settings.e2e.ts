@@ -31,7 +31,8 @@ async function registerAccount(page: Page, input: { email: string; name: string;
 	await page.goto(`/register${search}`);
 	await page.getByLabel('Nome').fill(input.name);
 	await page.getByLabel('Email').fill(input.email);
-	await page.getByLabel('Senha').fill(password);
+	await page.locator('input[name="password"]').fill(password);
+	await page.locator('input[name="passwordConfirmation"]').fill(password);
 	await page.getByRole('button', { name: 'Criar conta' }).click();
 }
 

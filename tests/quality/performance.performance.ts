@@ -58,7 +58,8 @@ async function registerAndSeed(page: Page) {
 	await page.goto('/register');
 	await page.getByLabel('Name').fill('Performance User');
 	await page.getByLabel('Email').fill(uniqueEmail('performance'));
-	await page.getByLabel('Password').fill(password);
+	await page.getByLabel('Password', { exact: true }).fill(password);
+	await page.getByLabel('Confirm password').fill(password);
 	await page.getByRole('button', { name: 'Create account' }).click();
 
 	await expect(page).toHaveURL(/\/app\/onboarding/);

@@ -5,6 +5,10 @@ import { auth } from '$lib/server/auth';
 import { parseForm, signInSchema } from '$lib/server/validation';
 import { assertRateLimit } from '$lib/server/security/rate-limit';
 import { isRegistrationEnabled } from '$lib/server/registration';
+import {
+	requestVerificationEmail,
+	type VerificationEmailRequestResult
+} from '$lib/server/services/email-verification';
 import { translate } from '$lib/i18n';
 
 export const load: PageServerLoad = (event) => {
@@ -51,12 +55,21 @@ export const actions: Actions = {
 		} catch (err) {
 			if (err instanceof APIError) {
 				if (isEmailNotVerifiedError(err)) {
-					return fail(403, {
-						message: translate(
-							event.locals.locale,
-							'We sent a new verification link. Check your inbox before signing in.'
-						),
-						values: { email: parsed.data.email, next }
+					const verificationResult = await requestVerificationEmail({
+						email: parsed.data.email,
+						send: async () => {
+							await auth.api.sendVerificationEmail({
+								body: {
+									email: parsed.data.email,
+									callbackURL: next
+								}
+							});
+						}
+					});
+
+					return emailVerificationFailure(event.locals.locale, verificationResult, {
+						email: parsed.data.email,
+						next
 					});
 				}
 
@@ -78,4 +91,42 @@ function safeNext(next: string) {
 
 function isEmailNotVerifiedError(err: APIError) {
 	return err.body?.code === 'EMAIL_NOT_VERIFIED' || err.body?.message === 'Email not verified';
+}
+
+function emailVerificationFailure(
+	locale: string,
+	result: VerificationEmailRequestResult,
+	values: { email: string; next: string }
+) {
+	if (result.status === 'sent' || result.status === 'not_found' || result.status === 'verified') {
+		return fail(403, {
+			message: translate(
+				locale,
+				'We sent a new verification link. Check your inbox before signing in.'
+			),
+			values
+		});
+	}
+
+	if (result.status === 'cooldown') {
+		return fail(429, {
+			message: translate(locale, 'Wait 2 minutes before requesting another verification email.'),
+			values
+		});
+	}
+
+	if (result.status === 'limit') {
+		return fail(429, {
+			message: translate(
+				locale,
+				'Verification email limit reached. If the email is not verified within 1 hour, this registration will expire.'
+			),
+			values
+		});
+	}
+
+	return fail(410, {
+		message: translate(locale, 'Your unverified registration expired. Create your account again.'),
+		values
+	});
 }

@@ -213,9 +213,18 @@ describe('validation schemas', () => {
 			signUpSchema.safeParse({
 				name: 'Test User',
 				email: 'user@example.com',
-				password: ['test', 'password', '123'].join('-')
+				password: ['test', 'password', '123'].join('-'),
+				passwordConfirmation: ['test', 'password', '123'].join('-')
 			}).success
 		).toBe(true);
+		expect(
+			signUpSchema.safeParse({
+				name: 'Test User',
+				email: 'user@example.com',
+				password: ['test', 'password', '123'].join('-'),
+				passwordConfirmation: 'different-password'
+			}).success
+		).toBe(false);
 		expect(
 			resetPasswordSchema.safeParse({ token: 'x'.repeat(16), password: String(1234567890) }).success
 		).toBe(true);

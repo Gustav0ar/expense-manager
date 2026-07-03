@@ -2,14 +2,18 @@ import { fail, redirect } from '@sveltejs/kit';
 import { APIError } from 'better-auth/api';
 import type { Actions, PageServerLoad } from './$types';
 import { auth, isEmailVerificationRequired } from '$lib/server/auth';
-import { db } from '$lib/server/db';
-import { user } from '$lib/server/db/auth.schema';
 import { parseForm, signUpSchema } from '$lib/server/validation';
 import { assertRateLimit } from '$lib/server/security/rate-limit';
 import { getInviteTokenFromNext, isRegistrationEnabled } from '$lib/server/registration';
 import { getPendingInvitation } from '$lib/server/services/invitations';
+import {
+	findVerificationUser,
+	pruneExpiredUnverifiedRegistrations,
+	recordInitialVerificationEmail,
+	requestVerificationEmail,
+	type VerificationEmailRequestResult
+} from '$lib/server/services/email-verification';
 import { translate } from '$lib/i18n';
-import { eq } from 'drizzle-orm';
 
 export const load: PageServerLoad = async (event) => {
 	if (event.locals.user) throw redirect(303, '/app');
@@ -37,8 +41,8 @@ export const actions: Actions = {
 
 		if (!parsed.success) {
 			return fail(400, {
-				message: translate(event.locals.locale, 'Check name, email and password.'),
-				values: Object.fromEntries(formData)
+				message: translate(event.locals.locale, signUpValidationMessage(parsed.error.issues)),
+				values: safeValues(formData, next)
 			});
 		}
 
@@ -56,14 +60,19 @@ export const actions: Actions = {
 			max: 3
 		});
 
-		if (isEmailVerificationRequired() && (await accountExists(parsed.data.email))) {
-			await auth.api.sendVerificationEmail({
-				body: {
+		if (isEmailVerificationRequired()) {
+			await pruneExpiredUnverifiedRegistrations();
+			const existingUser = await findVerificationUser(parsed.data.email);
+
+			if (existingUser && !existingUser.emailVerified) {
+				const result = await resendVerificationEmail(parsed.data.email, next);
+				const response = verificationResponse(event.locals.locale, result, {
+					name: parsed.data.name,
 					email: parsed.data.email,
-					callbackURL: next
-				}
-			});
-			throw redirect(303, '/login?resentVerification=1');
+					next
+				});
+				if (response) return response;
+			}
 		}
 
 		try {
@@ -78,13 +87,13 @@ export const actions: Actions = {
 		} catch (err) {
 			if (err instanceof APIError) {
 				if (isEmailVerificationRequired() && isExistingAccountError(err)) {
-					await auth.api.sendVerificationEmail({
-						body: {
-							email: parsed.data.email,
-							callbackURL: next
-						}
+					const result = await resendVerificationEmail(parsed.data.email, next);
+					const response = verificationResponse(event.locals.locale, result, {
+						name: parsed.data.name,
+						email: parsed.data.email,
+						next
 					});
-					throw redirect(303, '/login?resentVerification=1');
+					if (response) return response;
 				}
 
 				return fail(400, {
@@ -96,6 +105,7 @@ export const actions: Actions = {
 		}
 
 		if (isEmailVerificationRequired()) {
+			await recordInitialVerificationEmail(parsed.data.email);
 			throw redirect(303, '/login?verifyEmail=1');
 		}
 
@@ -126,11 +136,60 @@ function isExistingAccountError(err: APIError) {
 	);
 }
 
-async function accountExists(email: string) {
-	const [existingUser] = await db
-		.select({ id: user.id })
-		.from(user)
-		.where(eq(user.email, email))
-		.limit(1);
-	return Boolean(existingUser);
+async function resendVerificationEmail(email: string, callbackURL: string) {
+	return requestVerificationEmail({
+		email,
+		send: async () => {
+			await auth.api.sendVerificationEmail({
+				body: { email, callbackURL }
+			});
+		}
+	});
+}
+
+function verificationResponse(
+	locale: string,
+	result: VerificationEmailRequestResult,
+	values: { name: string; email: string; next: string }
+) {
+	if (result.status === 'sent') throw redirect(303, '/login?resentVerification=1');
+	if (result.status === 'expired' || result.status === 'not_found') return null;
+
+	if (result.status === 'cooldown') {
+		return fail(429, {
+			message: translate(locale, 'Wait 2 minutes before requesting another verification email.'),
+			values
+		});
+	}
+
+	if (result.status === 'limit') {
+		return fail(429, {
+			message: translate(
+				locale,
+				'Verification email limit reached. If the email is not verified within 1 hour, this registration will expire.'
+			),
+			values
+		});
+	}
+
+	return fail(400, {
+		message: translate(locale, 'Could not create the account.'),
+		values
+	});
+}
+
+function safeValues(formData: FormData, next: string) {
+	return {
+		name: formData.get('name')?.toString() ?? '',
+		email: formData.get('email')?.toString() ?? '',
+		next
+	};
+}
+
+function signUpValidationMessage(issues: Array<{ message: string }>) {
+	if (issues.some((issue) => issue.message === 'Passwords do not match.')) {
+		return 'Passwords do not match.';
+	}
+
+	return 'Check name, email and password.';
 }

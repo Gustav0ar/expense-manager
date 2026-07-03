@@ -18,6 +18,7 @@ async function submitRegisterForm(page: Page, input: { email: string; name: stri
 	await form.locator('input[name="name"]').fill(input.name);
 	await form.locator('input[name="email"]').fill(input.email);
 	await form.locator('input[name="password"]').fill(['test', 'password', '123'].join('-'));
+	await form.locator('input[name="passwordConfirmation"]').fill(['test', 'password', '123'].join('-'));
 	await expect(form.locator('input[name="name"]')).toHaveValue(input.name);
 	await expect(form.locator('input[name="email"]')).toHaveValue(input.email);
 	await form.getByRole('button', { name: 'Criar conta' }).click();
@@ -454,7 +455,8 @@ test.describe('english locale defaults', () => {
 		await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible();
 		await page.getByLabel('Name').fill('Test User');
 		await page.getByLabel('Email').fill(email);
-		await page.getByLabel('Password').fill(['test', 'password', '123'].join('-'));
+		await page.getByLabel('Password', { exact: true }).fill(['test', 'password', '123'].join('-'));
+		await page.getByLabel('Confirm password').fill(['test', 'password', '123'].join('-'));
 		await page.getByRole('button', { name: 'Create account' }).click();
 
 		await expect(page).toHaveURL(/\/app\/onboarding/);

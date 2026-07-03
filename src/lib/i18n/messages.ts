@@ -44,6 +44,7 @@ export const ptBrMessages = {
 	Compact: 'Compacto',
 	'Configure MFA': 'Configurar MFA',
 	Confirm: 'Confirmar',
+	'Confirm password': 'Confirmar senha',
 	Contains: 'Contém',
 	contains: 'contém',
 	Competency: 'Competência',
@@ -210,6 +211,7 @@ export const ptBrMessages = {
 	Settings: 'Ajustes',
 	'Settings short': 'Ajustes',
 	Setup: 'Configuração',
+	'Show password': 'Mostrar senha',
 	'Sign up': 'Cadastrar',
 	Start: 'Início',
 	'Start date': 'Data inicial',
@@ -276,6 +278,7 @@ export const ptBrMessages = {
 	'Authenticator code or recovery code': 'Código do autenticador ou recovery code',
 	Verify: 'Verificar',
 	'Forgot password': 'Esqueci minha senha',
+	'Hide password': 'Ocultar senha',
 	'I already have an account': 'Já tenho uma conta',
 	'New password': 'Nova senha',
 	'If the email exists, you will receive the instructions.':
@@ -402,6 +405,7 @@ export const ptBrMessages = {
 	'Name cannot contain control characters.': 'Nome não pode conter caracteres de controle.',
 	'Invalid date.': 'Data inválida.',
 	'Password updated.': 'Senha atualizada.',
+	'Passwords do not match.': 'As senhas não conferem.',
 	'Payment must be at most 80 characters.': 'Pagamento deve ter no máximo 80 caracteres.',
 	'Provide a valid email.': 'Informe um email válido.',
 	'Provide the MFA code.': 'Informe o código MFA.',
@@ -462,6 +466,12 @@ export const ptBrMessages = {
 		'Verifique seu email antes de entrar. Confira sua caixa de entrada pelo link de verificação.',
 	'We sent a new verification link. Check your inbox before signing in.':
 		'Enviamos um novo link de verificação. Confira sua caixa de entrada antes de entrar.',
+	'Wait 2 minutes before requesting another verification email.':
+		'Aguarde 2 minutos antes de solicitar outro email de verificação.',
+	'Verification email limit reached. If the email is not verified within 1 hour, this registration will expire.':
+		'Limite de emails de verificação atingido. Se o email não for verificado em 1 hora, este cadastro será expirado.',
+	'Your unverified registration expired. Create your account again.':
+		'Seu cadastro não verificado expirou. Crie sua conta novamente.',
 	'Access the link to verify your email: {url}': 'Acesse o link para verificar seu email: {url}',
 	'Budget alerts for {workspace} in {period}:':
 		'Alertas de orçamento para {workspace} em {period}:',

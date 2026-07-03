@@ -10,7 +10,8 @@ async function registerAccount(page: Page, input: { email: string; name: string 
 	await page.goto('/register');
 	await page.getByLabel('Name').fill(input.name);
 	await page.getByLabel('Email').fill(input.email);
-	await page.getByLabel('Password').fill(password);
+	await page.getByLabel('Password', { exact: true }).fill(password);
+	await page.getByLabel('Confirm password').fill(password);
 	await page.getByRole('button', { name: 'Create account' }).click();
 }
 
@@ -35,11 +36,11 @@ test('requires email verification before first production login', async ({ page 
 
 	await expect(page).toHaveURL(/\/login\?verifyEmail=1$/);
 	await expect(
-		page.getByText('We sent a new verification link. Check your inbox before signing in.')
+		page.getByText('Wait 2 minutes before requesting another verification email.')
 	).toBeVisible();
 });
 
-test('resends verification when an unverified account tries to register again', async ({
+test('rate limits verification email when an unverified account registers again too soon', async ({
 	page
 }) => {
 	const email = uniqueEmail('verify-email-duplicate');
@@ -49,8 +50,7 @@ test('resends verification when an unverified account tries to register again', 
 
 	await registerAccount(page, { email, name: 'Duplicate Verification User' });
 
-	await expect(page).toHaveURL(/\/login\?resentVerification=1$/);
 	await expect(
-		page.getByText('If the account exists and needs verification, we sent a new verification link.')
+		page.getByText('Wait 2 minutes before requesting another verification email.')
 	).toBeVisible();
 });
