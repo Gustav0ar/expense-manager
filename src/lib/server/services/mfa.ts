@@ -1,11 +1,16 @@
 import { error } from '@sveltejs/kit';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { env } from '$env/dynamic/private';
-import { and, eq, gt, lte, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, lte, or, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { auditEvent, mfaSession, userMfaConfig } from '$lib/server/db/schema';
 import { safeEqual, sha256 } from '$lib/server/utils/crypto';
-import { buildOtpAuthUri, generateTotpSecret, verifyTotpCode } from '$lib/server/utils/totp';
+import {
+	buildOtpAuthUri,
+	generateTotpCode,
+	generateTotpSecret,
+	verifyTotpCode
+} from '$lib/server/utils/totp';
 
 const mfaSessionTtlMs = 12 * 60 * 60 * 1000;
 const cleanupIntervalMs = 60 * 60 * 1000;
@@ -167,7 +172,26 @@ async function verifyMfaCodeForUser(userId: string, code: string) {
 	if (!config) return false;
 
 	const secret = decryptSecret(config.encryptedSecret);
-	if (verifyTotpCode(secret, code)) return true;
+	const totpResult = findAcceptedTotpCounter(secret, code);
+	if (totpResult !== null) {
+		// Atomically claim this counter: only succeeds when the row still has
+		// last_used_totp_counter IS NULL or a smaller value, which prevents
+		// replays within the acceptance window.
+		const updated = await db
+			.update(userMfaConfig)
+			.set({ lastUsedTotpCounter: totpResult })
+			.where(
+				and(
+					eq(userMfaConfig.userId, userId),
+					or(
+						isNull(userMfaConfig.lastUsedTotpCounter),
+						sql`${userMfaConfig.lastUsedTotpCounter} < ${totpResult}`
+					)
+				)
+			)
+			.returning({ userId: userMfaConfig.userId });
+		return updated.length > 0;
+	}
 
 	const normalizedRecoveryCode = normalizeRecoveryCode(code);
 	const recoveryHash = hashRecoveryCode(normalizedRecoveryCode);
@@ -188,6 +212,30 @@ async function verifyMfaCodeForUser(userId: string, code: string) {
 	`);
 
 	return updated.length > 0;
+}
+
+/**
+ * Find the TOTP counter value for the accepted code, or null if rejected.
+ * Returns the counter so the caller can persist it for replay prevention.
+ */
+function findAcceptedTotpCounter(
+	secret: string,
+	code: string,
+	timestamp = Date.now(),
+	window = 1,
+	stepSeconds = 30
+): number | null {
+	const normalized = code.replace(/\s/g, '');
+	if (!/^\d{6}$/.test(normalized)) return null;
+
+	for (let drift = -window; drift <= window; drift += 1) {
+		const t = timestamp + drift * stepSeconds * 1000;
+		const expected = generateTotpCode(secret, t, stepSeconds);
+		if (expected === normalized) {
+			return Math.floor(t / 1000 / stepSeconds);
+		}
+	}
+	return null;
 }
 
 async function cleanupExpiredMfaSessions() {

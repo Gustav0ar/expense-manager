@@ -250,8 +250,6 @@ export async function inviteMember(
 
 		const invitationId = Number(invitation.id);
 
-		await sendInvitationEmail(email, context.workspaceName, url, context.locale);
-
 		await tx.insert(auditEvent).values({
 			workspaceId: context.workspaceId,
 			actorUserId: context.userId,
@@ -263,6 +261,11 @@ export async function inviteMember(
 
 		return { invitationId, url };
 	});
+
+	// Send the email after the transaction commits so a failed email
+	// cannot roll back the invitation row, and a rolled-back transaction
+	// does not send an email for a non-existent record.
+	await sendInvitationEmail(email, context.workspaceName, url, context.locale);
 
 	return result;
 }
@@ -282,7 +285,8 @@ export async function changeMemberRole(
 			and(
 				eq(workspaceMember.id, memberId),
 				eq(workspaceMember.workspaceId, context.workspaceId),
-				ne(workspaceMember.role, 'owner')
+				ne(workspaceMember.role, 'owner'),
+				ne(workspaceMember.userId, context.userId)
 			)
 		)
 		.returning({ id: workspaceMember.id, userId: workspaceMember.userId });
@@ -310,7 +314,8 @@ export async function removeMember(context: WorkspaceContext, memberId: number) 
 			and(
 				eq(workspaceMember.id, memberId),
 				eq(workspaceMember.workspaceId, context.workspaceId),
-				ne(workspaceMember.role, 'owner')
+				ne(workspaceMember.role, 'owner'),
+				ne(workspaceMember.userId, context.userId)
 			)
 		)
 		.returning({ id: workspaceMember.id });

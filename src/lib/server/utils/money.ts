@@ -10,12 +10,15 @@ export function parseCurrencyToCents(input: string): number {
 		throw new Error('Amount is invalid.');
 	}
 
-	const numberValue = Number(normalized);
-	if (!Number.isFinite(numberValue) || numberValue <= 0) {
-		throw new Error('Amount must be greater than zero.');
-	}
-
-	return Math.round(numberValue * 100);
+	const isNegative = normalized.startsWith('-');
+	const unsigned = normalized.replace(/^-/, '');
+	const dotIdx = unsigned.indexOf('.');
+	const intStr = dotIdx === -1 ? unsigned : unsigned.slice(0, dotIdx);
+	const fracStr = dotIdx === -1 ? '' : unsigned.slice(dotIdx + 1);
+	const cents =
+		parseInt(intStr || '0', 10) * 100 + parseInt(fracStr.padEnd(2, '0').slice(0, 2), 10);
+	if (isNegative || cents <= 0) throw new Error('Amount must be greater than zero.');
+	return cents;
 }
 
 export function parseBrlToCents(input: string): number {
