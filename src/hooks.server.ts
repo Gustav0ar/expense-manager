@@ -13,6 +13,7 @@ import { isMfaEnabled, isMfaSessionVerified } from '$lib/server/services/mfa';
 import { pruneExpiredUnverifiedRegistrations } from '$lib/server/services/email-verification';
 import { isTrustedOrigin } from '$lib/server/security/origin';
 import { isRegistrationEnabled } from '$lib/server/registration';
+import { traceRequest } from '$lib/server/observability/tracing';
 
 const unsafeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const verificationCleanupIntervalMs = 60_000;
@@ -36,7 +37,8 @@ function setSecurityHeaders(response: Response) {
 
 const handleBetterAuth: Handle = async ({ event, resolve }) => {
 	const startedAt = performance.now();
-	const requestId = event.request.headers.get('x-request-id') || randomUUID();
+	const requestId =
+		event.locals.requestId || event.request.headers.get('x-request-id') || randomUUID();
 	event.locals.requestId = requestId;
 	const themePreference = getThemePreference(event.cookies);
 	const { locale, preference: localePreference } = resolveRequestLocale(event);
@@ -106,7 +108,10 @@ const handleBetterAuth: Handle = async ({ event, resolve }) => {
 	return response;
 };
 
-export const handle: Handle = handleBetterAuth;
+export const handle: Handle = async ({ event, resolve }) => {
+	event.locals.requestId = event.request.headers.get('x-request-id') || randomUUID();
+	return traceRequest(event, () => handleBetterAuth({ event, resolve }));
+};
 
 function cleanupExpiredUnverifiedRegistrations() {
 	if (building) return;
