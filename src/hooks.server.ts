@@ -133,7 +133,24 @@ function shouldEnforceMfa(pathname: string) {
 	if (pathname === '/mfa' || pathname.startsWith('/mfa/')) return false;
 	if (pathname === '/logout' || pathname.startsWith('/logout/')) return false;
 	if (pathname === '/api/health') return false;
-	if (pathname.startsWith('/api/auth')) return false;
+	// Allow unauthenticated / pre-auth better-auth flows (sign-in, sign-up,
+	// email verification, password reset, OAuth callbacks, sign-out and read-only
+	// session endpoints). Sensitive write endpoints (change-password, change-email,
+	// delete-user, revoke-sessions) are intentionally NOT in this list so MFA is
+	// enforced on them.
+	if (
+		pathname.startsWith('/api/auth/sign-in') ||
+		pathname.startsWith('/api/auth/sign-up') ||
+		pathname === '/api/auth/sign-out' ||
+		pathname === '/api/auth/get-session' ||
+		pathname === '/api/auth/verify-email' ||
+		pathname.startsWith('/api/auth/reset-password') ||
+		pathname.startsWith('/api/auth/forget-password') ||
+		pathname.startsWith('/api/auth/callback') ||
+		pathname.startsWith('/api/auth/oauth') ||
+		pathname === '/api/auth/ok'
+	)
+		return false;
 	return true;
 }
 

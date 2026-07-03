@@ -52,9 +52,11 @@ export async function assertRateLimit(event: RequestEvent, options: RateLimitOpt
 async function cleanupExpiredRateLimitBuckets() {
 	const now = Date.now();
 	if (now - lastRateLimitCleanupAt < cleanupIntervalMs) return;
-	lastRateLimitCleanupAt = now;
 	await db
 		.delete(rateLimitBucket)
 		.where(lte(rateLimitBucket.resetAt, new Date()))
+		.then(() => {
+			lastRateLimitCleanupAt = now;
+		})
 		.catch(() => {});
 }

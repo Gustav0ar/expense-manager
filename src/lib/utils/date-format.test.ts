@@ -80,6 +80,20 @@ describe('date format helpers', () => {
 		expect(getBrowserLocales()).toBe('pt-BR');
 	});
 
+	it('falls back to navigator when html lang is empty', () => {
+		// Covers the falsy branch of `if (documentLocale)` at date-format.ts:10
+		vi.stubGlobal('window', {});
+		vi.stubGlobal('document', { documentElement: { lang: '' } });
+		vi.stubGlobal('navigator', { languages: ['pt-BR'], language: 'pt-BR' });
+
+		expect(getBrowserLocales()).toEqual(['pt-BR']);
+	});
+
+	it('formats date ranges with an array locale (covers rangeSeparator array branch)', () => {
+		// Covers the Array.isArray(locales) branch in rangeSeparator at date-format.ts:16
+		expect(formatDateRangeLabel('2026-06-01', '2026-06-30', ['pt-BR'])).toContain('06/2026');
+	});
+
 	it('falls back when Intl formatRange is not available', () => {
 		const original = Intl.DateTimeFormat.prototype.formatRange;
 		Object.defineProperty(Intl.DateTimeFormat.prototype, 'formatRange', {

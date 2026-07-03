@@ -14,6 +14,10 @@ describe('format helpers', () => {
 		expect(formatPercent(null)).toBe('No baseline');
 		expect(formatPercent(null, 'pt-BR')).toBe('Sem base');
 		expect(formatPercent(null, ['pt-BR'])).toBe('Sem base');
+		// Passing a non-string, non-array locales value (e.g. an Intl.Locale object)
+		// falls through to defaultLocale in the ternary — covers the else branch at format.ts:28
+		const intlLocale = new Intl.Locale('en-US');
+		expect(formatPercent(null, intlLocale)).toBe('No baseline');
 	});
 
 	it('formats ISO dates with the provided Intl locale', () => {

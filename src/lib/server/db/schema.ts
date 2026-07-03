@@ -555,6 +555,7 @@ export const userMfaConfig = pgTable('user_mfa_config', {
 		.references(() => user.id, { onDelete: 'cascade' }),
 	encryptedSecret: text('encrypted_secret').notNull(),
 	recoveryCodeHashes: jsonb('recovery_code_hashes').$type<string[]>().notNull().default([]),
+	lastUsedTotpCounter: bigint('last_used_totp_counter', { mode: 'number' }),
 	enabledAt: timestamp('enabled_at', { withTimezone: true }).notNull().defaultNow(),
 	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 	updatedAt: timestamp('updated_at', { withTimezone: true })
