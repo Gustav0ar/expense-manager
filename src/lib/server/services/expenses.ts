@@ -459,10 +459,11 @@ export async function reviewExpense(
 			and(
 				eq(expense.id, id),
 				eq(expense.workspaceId, context.workspaceId),
-				// Block re-reviewing an already-approved expense that has been paid or
-				// reconciled: the rejection path would wipe payment data on a closed expense.
+				// Block rejecting a reconciled expense: reconciled = closed books,
+				// wiping paidAt/reconciledAt on a reconciled entry is data corruption.
+				// Approved+unpaid or approved+paid can still be recalled/rejected.
 				// Rejected and pending expenses can always be re-reviewed.
-				ne(expense.reviewStatus, 'approved'),
+				input.reviewStatus === 'rejected' ? ne(expense.paymentStatus, 'reconciled') : sql`true`,
 				isNull(expense.deletedAt)
 			)
 		)
