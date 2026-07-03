@@ -35,8 +35,22 @@ test('requires email verification before first production login', async ({ page 
 
 	await expect(page).toHaveURL(/\/login\?verifyEmail=1$/);
 	await expect(
-		page.getByText(
-			'Verify your email before signing in. Check your inbox for the verification link.'
-		)
+		page.getByText('We sent a new verification link. Check your inbox before signing in.')
+	).toBeVisible();
+});
+
+test('resends verification when an unverified account tries to register again', async ({
+	page
+}) => {
+	const email = uniqueEmail('verify-email-duplicate');
+
+	await registerAccount(page, { email, name: 'Duplicate Verification User' });
+	await expect(page).toHaveURL(/\/login\?verifyEmail=1$/);
+
+	await registerAccount(page, { email, name: 'Duplicate Verification User' });
+
+	await expect(page).toHaveURL(/\/login\?resentVerification=1$/);
+	await expect(
+		page.getByText('If the account exists and needs verification, we sent a new verification link.')
 	).toBeVisible();
 });

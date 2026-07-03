@@ -353,6 +353,8 @@ export const ptBrMessages = {
 	'Account created. Sign in to continue.': 'Conta criada. Entre para continuar.',
 	'Account created. Check your email to verify your account before signing in.':
 		'Conta criada. Confira seu email para verificar sua conta antes de entrar.',
+	'If the account exists and needs verification, we sent a new verification link.':
+		'Se a conta existir e precisar de verificação, enviamos um novo link de verificação.',
 	'Attachment not found.': 'Anexo não encontrado.',
 	'Attachment type is not allowed.': 'Tipo de anexo não permitido.',
 	'Budget not found.': 'Orçamento não encontrado.',
@@ -458,6 +460,8 @@ export const ptBrMessages = {
 	'Verify your email': 'Verifique seu email',
 	'Verify your email before signing in. Check your inbox for the verification link.':
 		'Verifique seu email antes de entrar. Confira sua caixa de entrada pelo link de verificação.',
+	'We sent a new verification link. Check your inbox before signing in.':
+		'Enviamos um novo link de verificação. Confira sua caixa de entrada antes de entrar.',
 	'Access the link to verify your email: {url}': 'Acesse o link para verificar seu email: {url}',
 	'Budget alerts for {workspace} in {period}:':
 		'Alertas de orçamento para {workspace} em {period}:',
