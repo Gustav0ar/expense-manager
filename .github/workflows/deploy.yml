@@ -243,6 +243,12 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          OTEL_TRACING_ENABLED: ${{ vars.OTEL_TRACING_ENABLED || 'false' }}
+          OTEL_SERVICE_NAME: ${{ vars.OTEL_SERVICE_NAME || 'expense-manager' }}
+          OTEL_DEPLOYMENT_ENVIRONMENT: ${{ vars.OTEL_DEPLOYMENT_ENVIRONMENT || 'production' }}
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT || '' }}
+          OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${{ vars.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT || '' }}
+          OTEL_TRACES_SAMPLE_RATE: ${{ vars.OTEL_TRACES_SAMPLE_RATE || '0.1' }}
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/expense-manager' }}
           SSH_KEY_FILE: ${{ runner.temp }}/vps_ssh_key
           ENV_FILE_PATH: ${{ runner.temp }}/expense-manager.env
@@ -381,6 +387,12 @@ jobs:
             write_env_var SMTP_USER "${SMTP_USER}"
             write_env_var SMTP_PASSWORD "${SMTP_PASSWORD}"
             write_env_var SMTP_FROM "${SMTP_FROM}"
+            write_env_var OTEL_TRACING_ENABLED "${OTEL_TRACING_ENABLED}"
+            write_env_var OTEL_SERVICE_NAME "${OTEL_SERVICE_NAME}"
+            write_env_var OTEL_DEPLOYMENT_ENVIRONMENT "${OTEL_DEPLOYMENT_ENVIRONMENT}"
+            write_env_var OTEL_EXPORTER_OTLP_ENDPOINT "${OTEL_EXPORTER_OTLP_ENDPOINT}"
+            write_env_var OTEL_EXPORTER_OTLP_TRACES_ENDPOINT "${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT}"
+            write_env_var OTEL_TRACES_SAMPLE_RATE "${OTEL_TRACES_SAMPLE_RATE}"
           fi
 
           if [ ! -s "${ENV_FILE_PATH}" ]; then

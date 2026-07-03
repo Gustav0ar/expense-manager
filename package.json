@@ -61,6 +61,10 @@
 	},
 	"dependencies": {
 		"@lucide/svelte": "^1.21.0",
+		"@opentelemetry/api": "^1.9.1",
+		"@opentelemetry/exporter-trace-otlp-http": "^0.219.0",
+		"@opentelemetry/resources": "^2.8.0",
+		"@opentelemetry/sdk-node": "^0.219.0",
 		"better-auth": "^1.6.20",
 		"drizzle-orm": "^0.45.2",
 		"nodemailer": "^9.0.1",

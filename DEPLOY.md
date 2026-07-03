@@ -67,14 +67,18 @@ individual protected environment secrets:
 
 Set these in `Settings -> Environments -> production -> Variables`.
 
-| Variable                | Default                    | Notes                                                                                  |
-| ----------------------- | -------------------------- | -------------------------------------------------------------------------------------- |
-| `DEPLOY_PATH`           | `/opt/expense-manager`     | Directory on the VPS that stores compose files and `.env`.                             |
-| `COMPOSE_COMMAND`       | `docker compose`           | Use `podman compose` only if your VPS supports it.                                     |
-| `REGISTRY`              | `ghcr.io`                  | Container registry.                                                                    |
-| `IMAGE_OWNER_LOWERCASE` | `<github-owner-lowercase>` | Lowercase GitHub user or organization that owns the package.                           |
-| `CONTAINER_PLATFORMS`   | `linux/amd64,linux/arm64`  | Optional image platforms. Set to the VPS architecture only for faster private deploys. |
-| `BACKUP_ENABLED`        | `true`                     | Set to `false` only to bootstrap without remote backups.                               |
+| Variable                      | Default                    | Notes                                                                                  |
+| ----------------------------- | -------------------------- | -------------------------------------------------------------------------------------- |
+| `DEPLOY_PATH`                 | `/opt/expense-manager`     | Directory on the VPS that stores compose files and `.env`.                             |
+| `COMPOSE_COMMAND`             | `docker compose`           | Use `podman compose` only if your VPS supports it.                                     |
+| `REGISTRY`                    | `ghcr.io`                  | Container registry.                                                                    |
+| `IMAGE_OWNER_LOWERCASE`       | `<github-owner-lowercase>` | Lowercase GitHub user or organization that owns the package.                           |
+| `CONTAINER_PLATFORMS`         | `linux/amd64,linux/arm64`  | Optional image platforms. Set to the VPS architecture only for faster private deploys. |
+| `BACKUP_ENABLED`              | `true`                     | Set to `false` only to bootstrap without remote backups.                               |
+| `OTEL_TRACING_ENABLED`        | `false`                    | Set to `true` only when an OTLP traces endpoint is reachable by the app container.     |
+| `OTEL_SERVICE_NAME`           | `expense-manager`          | Service name shown in tracing tools.                                                   |
+| `OTEL_TRACES_SAMPLE_RATE`     | `0.1`                      | Root request trace sample rate from `0` to `1`. Start low on small VPS hosts.          |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty                      | Generic OTLP HTTP endpoint, for example `http://tempo:4318`.                           |
 
 Avoid storing personal values in variables if you do not want them visible to
 collaborators. Use secrets for hostnames, IPs, usernames and every application
@@ -182,6 +186,13 @@ SMTP_SECURE=false
 SMTP_USER=
 SMTP_PASSWORD=
 SMTP_FROM=
+
+OTEL_TRACING_ENABLED=false
+OTEL_SERVICE_NAME=expense-manager
+OTEL_DEPLOYMENT_ENVIRONMENT=production
+OTEL_EXPORTER_OTLP_ENDPOINT=
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=
+OTEL_TRACES_SAMPLE_RATE=0.1
 ```
 
 `DOMAIN_NAME` must be the bare hostname only. Do not include `https://`, a path
@@ -335,6 +346,63 @@ docker compose logs --tail=120 postgres
 docker compose --profile tools run --rm migrate
 docker compose exec app wget -qO- http://localhost:3000/api/health
 ```
+
+## Production Monitoring
+
+The recommended lightweight setup is a separate monitoring compose project on
+the VPS, exposed only through Tailscale. Keep it independent from this app's
+compose project so other applications on the host are not affected.
+
+At minimum, monitor:
+
+- Public availability: `https://your-domain.example`
+- Public health endpoint: `https://your-domain.example/api/health`
+- Internal health endpoint from the app Docker network:
+  `http://app-container-name:3000/api/health`
+- Host CPU, memory, disk and filesystem usage through `node_exporter`
+- Authenticated synthetic browser flow using a dedicated test account
+- Optional distributed tracing through OTLP HTTP and Grafana Tempo
+
+For the synthetic flow, store the account email and password only as private
+files on the VPS or as Docker secrets. The browser check should log in, visit
+the critical app routes and expose only Prometheus metrics such as:
+
+```text
+expense_manager_synthetic_success
+expense_manager_synthetic_duration_seconds
+expense_manager_synthetic_last_run_timestamp_seconds
+expense_manager_synthetic_route_success
+expense_manager_synthetic_route_duration_seconds
+```
+
+Useful Prometheus validation queries:
+
+```bash
+promtool query instant http://127.0.0.1:9090 \
+  'probe_success{app="expenses"}'
+
+promtool query instant http://127.0.0.1:9090 \
+  'expense_manager_synthetic_success{app="expenses"}'
+
+promtool query instant http://127.0.0.1:9090 \
+  'expense_manager_synthetic_route_success{app="expenses"}'
+```
+
+Keep synthetic accounts limited to the minimum role needed for route rendering,
+do not reuse personal accounts and never commit monitoring credentials.
+
+For traces, run a Tempo or OpenTelemetry Collector service on a private Docker
+network shared with the app. Then set:
+
+```env
+OTEL_TRACING_ENABLED=true
+OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
+OTEL_TRACES_SAMPLE_RATE=0.1
+```
+
+The app records request method, route id, path, status, duration, request id and
+trace id. It intentionally does not record request bodies, query strings,
+passwords, emails, financial values or customer data.
 
 ## Backup And Restore
 
