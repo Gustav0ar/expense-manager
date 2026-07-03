@@ -64,10 +64,22 @@ describe('rate limit client IP resolution', () => {
 			expect(getClientIp(requestWithHeaders({ 'x-forwarded-for': '' }))).toBe('10.0.0.10');
 		});
 
-		it('falls back to getClientAddress when no IP header is present', () => {
+		it('falls back to getClientAddress when forwarded header is whitespace-only', () => {
 			process.env.TRUST_PROXY_HEADERS = 'true';
 
-			expect(getClientIp(requestWithHeaders({}))).toBe('10.0.0.10');
+			expect(getClientIp(requestWithHeaders({ 'x-forwarded-for': '   ' }))).toBe('10.0.0.10');
+		});
+
+		it('falls back to getClientAddress when x-real-ip is empty', () => {
+			process.env.TRUST_PROXY_HEADERS = 'true';
+
+			expect(getClientIp(requestWithHeaders({ 'x-real-ip': '' }))).toBe('10.0.0.10');
+		});
+
+		it('falls back to getClientAddress when x-real-ip is whitespace-only', () => {
+			process.env.TRUST_PROXY_HEADERS = 'true';
+
+			expect(getClientIp(requestWithHeaders({ 'x-real-ip': '  ' }))).toBe('10.0.0.10');
 		});
 	});
 });
