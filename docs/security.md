@@ -24,7 +24,7 @@
 ## Pre-Production Checklist
 
 - `BETTER_AUTH_SECRET` generated with high entropy
-- Sender email delivery tested with the production provider. See
+- Mailjet email delivery tested with the production provider. See
   [`docs/email.md`](email.md) for the setup.
 - `REQUIRE_EMAIL_VERIFICATION=true` in production unless an operational exception is documented
 - `ALLOW_REGISTRATION=false` when production access should be invite-only or manually managed

@@ -10,6 +10,11 @@
 	function t(key: string, params?: Record<string, string | number>) {
 		return translate(data.locale, key, params);
 	}
+
+	function submitLocaleForm(event: Event) {
+		const select = event.currentTarget as HTMLSelectElement;
+		select.form?.requestSubmit();
+	}
 </script>
 
 <svelte:head>
@@ -148,17 +153,16 @@
 			<form method="post" action="?/updateLocale" class="stack">
 				<label>
 					<span>{t('Language')}</span>
-					<select name="locale">
+					<select name="locale" onchange={submitLocaleForm}>
 						<option value="system" selected={data.localePreference === 'system'}
-							>{t('System')}</option
+							>🌐 {t('System')}</option
 						>
-						<option value="en" selected={data.localePreference === 'en'}>{t('English')}</option>
+						<option value="en" selected={data.localePreference === 'en'}>🇺🇸 {t('English')}</option>
 						<option value="pt-BR" selected={data.localePreference === 'pt-BR'}>
-							{t('Portuguese (Brazil)')}
+							🇧🇷 {t('Portuguese (Brazil)')}
 						</option>
 					</select>
 				</label>
-				<button class="button primary" type="submit">{t('Save')}</button>
 			</form>
 		</section>
 

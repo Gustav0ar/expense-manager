@@ -102,16 +102,20 @@ test('detects the browser language and allows manual language changes on login',
 	await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
 	await expect(page.getByRole('heading', { name: 'Entrar' })).toBeVisible();
 	await expect(page.getByLabel('Idioma')).toHaveValue('system');
+	await expect(page.getByLabel('Idioma').locator('option[value="system"]')).toHaveText(
+		'🌐 Idioma do dispositivo'
+	);
+	await expect(page.getByRole('button', { name: 'Aplicar' })).toHaveCount(0);
 
 	await page.getByLabel('Idioma').selectOption('en');
-	await page.getByRole('button', { name: 'Aplicar' }).click();
 	await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 	await expect(page.getByRole('heading', { name: 'Login' })).toBeVisible();
 	await expect(page.getByLabel('Language')).toHaveValue('en');
+	await expect(page.getByLabel('Language').locator('option[value="en"]')).toHaveText('🇺🇸 English');
+	await expect(page.getByRole('button', { name: 'Apply' })).toHaveCount(0);
 	await expect(page.locator('input[name="next"]')).toHaveValue('/app/reports');
 
 	await page.getByLabel('Language').selectOption('system');
-	await page.getByRole('button', { name: 'Apply' }).click();
 	await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
 	await expect(page.getByRole('heading', { name: 'Entrar' })).toBeVisible();
 	await expect(page.getByLabel('Idioma')).toHaveValue('system');

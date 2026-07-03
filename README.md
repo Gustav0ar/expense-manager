@@ -107,7 +107,7 @@ For a direct Caddy-based deployment:
 
 1. Point the domain DNS to the VPS.
 2. Copy `.env.example` to `.env`.
-3. Fill `APP_DOMAIN`, `ORIGIN`, `BETTER_AUTH_SECRET`, `POSTGRES_PASSWORD`, `REQUIRE_EMAIL_VERIFICATION`, `UPLOAD_DIR` if you want to customize the path, and SMTP.
+3. Fill `APP_DOMAIN`, `ORIGIN`, `BETTER_AUTH_SECRET`, `POSTGRES_PASSWORD`, `REQUIRE_EMAIL_VERIFICATION`, `UPLOAD_DIR` if you want to customize the path, and email delivery.
    Also configure `RESTIC_REPOSITORY` and `RESTIC_PASSWORD` for encrypted off-VPS backups.
 4. Start the database:
 
@@ -184,8 +184,8 @@ Test restores periodically in a separate database.
 - Never commit `.env`.
 - Generate `BETTER_AUTH_SECRET` with `openssl rand -base64 32`.
 - Use HTTPS in production.
-- Configure SMTP for password reset, verification, invitations and budget alerts.
-  See [`docs/email.md`](docs/email.md) for the Sender setup.
+- Configure Mailjet or SMTP for password reset, verification, invitations and budget alerts.
+  See [`docs/email.md`](docs/email.md) for the setup.
 - Run migrations before publishing a new version.
 - Monitor `/api/health`, disk usage, Postgres logs, backup age and `pg_stat_statements`.
 

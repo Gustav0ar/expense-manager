@@ -231,6 +231,10 @@ jobs:
           POSTGRES_CPUS: ${{ vars.POSTGRES_CPUS || '1.0' }}
           BACKUP_MEM_LIMIT: ${{ vars.BACKUP_MEM_LIMIT || '256m' }}
           BACKUP_CPUS: ${{ vars.BACKUP_CPUS || '0.5' }}
+          EMAIL_PROVIDER: ${{ vars.EMAIL_PROVIDER || 'auto' }}
+          MAILJET_API_KEY: ${{ secrets.MAILJET_API_KEY }}
+          MAILJET_SECRET_KEY: ${{ secrets.MAILJET_SECRET_KEY }}
+          MAILJET_FROM: ${{ secrets.MAILJET_FROM }}
           SENDER_API_TOKEN: ${{ secrets.SENDER_API_TOKEN }}
           SENDER_FROM: ${{ secrets.SENDER_FROM }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
@@ -261,9 +265,48 @@ jobs:
               ORIGIN
               BETTER_AUTH_SECRET
               POSTGRES_PASSWORD
-              SENDER_API_TOKEN
-              SENDER_FROM
             )
+
+            case "${EMAIL_PROVIDER}" in
+              mailjet)
+                required_individual_secrets+=(
+                  MAILJET_API_KEY
+                  MAILJET_SECRET_KEY
+                  MAILJET_FROM
+                )
+                ;;
+              sender)
+                required_individual_secrets+=(
+                  SENDER_API_TOKEN
+                  SENDER_FROM
+                )
+                ;;
+              smtp)
+                required_individual_secrets+=(
+                  SMTP_HOST
+                  SMTP_FROM
+                )
+                ;;
+              auto)
+                if [ -n "${MAILJET_API_KEY}" ] && [ -n "${MAILJET_SECRET_KEY}" ] && [ -n "${MAILJET_FROM}" ]; then
+                  :
+                elif [ -n "${SENDER_API_TOKEN}" ] && [ -n "${SENDER_FROM}" ]; then
+                  :
+                elif [ -n "${SMTP_HOST}" ] && [ -n "${SMTP_FROM}" ]; then
+                  :
+                else
+                  echo "::error::EMAIL_PROVIDER=auto requires Mailjet, Sender or SMTP secrets."
+                  exit 1
+                fi
+                ;;
+              log)
+                echo "::warning::EMAIL_PROVIDER=log writes transactional email to logs and should not be used in production."
+                ;;
+              *)
+                echo "::error::EMAIL_PROVIDER must be auto, mailjet, sender, smtp or log."
+                exit 1
+                ;;
+            esac
 
             case "${BACKUP_ENABLED}" in
               true)
@@ -326,6 +369,10 @@ jobs:
             write_env_var POSTGRES_CPUS "${POSTGRES_CPUS}"
             write_env_var BACKUP_MEM_LIMIT "${BACKUP_MEM_LIMIT}"
             write_env_var BACKUP_CPUS "${BACKUP_CPUS}"
+            write_env_var EMAIL_PROVIDER "${EMAIL_PROVIDER}"
+            write_env_var MAILJET_API_KEY "${MAILJET_API_KEY}"
+            write_env_var MAILJET_SECRET_KEY "${MAILJET_SECRET_KEY}"
+            write_env_var MAILJET_FROM "${MAILJET_FROM}"
             write_env_var SENDER_API_TOKEN "${SENDER_API_TOKEN}"
             write_env_var SENDER_FROM "${SENDER_FROM}"
             write_env_var SMTP_HOST "${SMTP_HOST}"
@@ -360,9 +407,57 @@ jobs:
             TRAEFIK_HTTP_ENTRYPOINT
             TRAEFIK_ENTRYPOINT
             TRAEFIK_CERT_RESOLVER
-            SENDER_API_TOKEN
-            SENDER_FROM
+            EMAIL_PROVIDER
           )
+
+          email_provider_value="$( (grep -E "^EMAIL_PROVIDER=" "${ENV_FILE_PATH}" || true) | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//' )"
+          case "${email_provider_value}" in
+            mailjet)
+              required_keys+=(
+                MAILJET_API_KEY
+                MAILJET_SECRET_KEY
+                MAILJET_FROM
+              )
+              ;;
+            sender)
+              required_keys+=(
+                SENDER_API_TOKEN
+                SENDER_FROM
+              )
+              ;;
+            smtp)
+              required_keys+=(
+                SMTP_HOST
+                SMTP_FROM
+              )
+              ;;
+            auto)
+              mailjet_api_key_value="$( (grep -E "^MAILJET_API_KEY=" "${ENV_FILE_PATH}" || true) | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//' )"
+              mailjet_secret_key_value="$( (grep -E "^MAILJET_SECRET_KEY=" "${ENV_FILE_PATH}" || true) | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//' )"
+              mailjet_from_value="$( (grep -E "^MAILJET_FROM=" "${ENV_FILE_PATH}" || true) | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//' )"
+              sender_api_token_value="$( (grep -E "^SENDER_API_TOKEN=" "${ENV_FILE_PATH}" || true) | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//' )"
+              sender_from_value="$( (grep -E "^SENDER_FROM=" "${ENV_FILE_PATH}" || true) | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//' )"
+              smtp_host_value="$( (grep -E "^SMTP_HOST=" "${ENV_FILE_PATH}" || true) | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//' )"
+              smtp_from_value="$( (grep -E "^SMTP_FROM=" "${ENV_FILE_PATH}" || true) | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//' )"
+              if [ -n "${mailjet_api_key_value}" ] && [ -n "${mailjet_secret_key_value}" ] && [ -n "${mailjet_from_value}" ]; then
+                :
+              elif [ -n "${sender_api_token_value}" ] && [ -n "${sender_from_value}" ]; then
+                :
+              elif [ -n "${smtp_host_value}" ] && [ -n "${smtp_from_value}" ]; then
+                :
+              else
+                echo "::error::EMAIL_PROVIDER=auto requires Mailjet, Sender or SMTP values in the production environment file."
+                exit 1
+              fi
+              ;;
+            log)
+              echo "::warning::EMAIL_PROVIDER=log writes transactional email to logs and should not be used in production."
+              ;;
+            *)
+              echo "::error::EMAIL_PROVIDER must be auto, mailjet, sender, smtp or log."
+              exit 1
+              ;;
+          esac
 
           backup_enabled_value="$( (grep -E "^BACKUP_ENABLED=" "${ENV_FILE_PATH}" || true) | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//' )"
           case "${backup_enabled_value}" in
@@ -393,7 +488,7 @@ jobs:
             fi
           done
 
-          if grep -Eq '(replace-with|<sender-|<openssl|<long-random|<github-owner|<remote-backup|your-domain\.example|your-verified-domain\.example|finance\.example\.com|s3\.example\.com)' "${ENV_FILE_PATH}"; then
+          if grep -Eq '(replace-with|<sender-|<mailjet-|<openssl|<long-random|<github-owner|<remote-backup|your-domain\.example|your-verified-domain\.example|finance\.example\.com|s3\.example\.com)' "${ENV_FILE_PATH}"; then
             echo "::error::VPS_ENV_FILE still contains placeholder values."
             exit 1
           fi

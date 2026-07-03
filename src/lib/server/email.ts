@@ -10,32 +10,89 @@ type MailInput = {
 	html?: string;
 };
 
+type MailProvider = 'auto' | 'mailjet' | 'sender' | 'smtp' | 'log';
+
+function configuredProvider(): MailProvider {
+	const provider = (env.EMAIL_PROVIDER || 'auto').trim().toLowerCase();
+	if (
+		provider === 'mailjet' ||
+		provider === 'sender' ||
+		provider === 'smtp' ||
+		provider === 'log'
+	) {
+		return provider;
+	}
+	return 'auto';
+}
+
+function mailjetApiConfigured() {
+	return Boolean(env.MAILJET_API_KEY && env.MAILJET_SECRET_KEY && env.MAILJET_FROM);
+}
+
 function senderApiConfigured() {
 	return Boolean(env.SENDER_API_TOKEN && env.SENDER_FROM);
 }
 
 export async function sendMail(input: MailInput) {
-	if (senderApiConfigured()) {
+	const provider = configuredProvider();
+
+	if (provider === 'log') {
+		logEmail(input);
+		return;
+	}
+
+	if (provider === 'mailjet') {
+		if (!mailjetApiConfigured()) {
+			throw new Error(
+				'Mailjet email delivery is not configured. Set MAILJET_API_KEY, MAILJET_SECRET_KEY and MAILJET_FROM.'
+			);
+		}
+		await sendMailjetApiMail(input);
+		return;
+	}
+
+	if (provider === 'sender') {
+		if (!senderApiConfigured()) {
+			throw new Error(
+				'Sender email delivery is not configured. Set SENDER_API_TOKEN and SENDER_FROM.'
+			);
+		}
 		await sendSenderApiMail(input);
 		return;
 	}
 
+	if (provider === 'auto' && mailjetApiConfigured()) {
+		await sendMailjetApiMail(input);
+		return;
+	}
+
+	if (provider === 'auto' && senderApiConfigured()) {
+		await sendSenderApiMail(input);
+		return;
+	}
+
+	await sendSmtpMail(input, provider);
+}
+
+async function sendSmtpMail(input: MailInput, provider: MailProvider) {
 	const smtpHost = env.SMTP_HOST;
 	const smtpPort = env.SMTP_PORT;
 	const smtpFrom = env.SMTP_FROM;
 
 	if (!smtpHost || !smtpPort || !smtpFrom) {
+		if (provider === 'smtp') {
+			throw new Error(
+				'SMTP email delivery is not configured. Set SMTP_HOST, SMTP_PORT and SMTP_FROM.'
+			);
+		}
+
 		if (dev || env.EMAIL_DELIVERY === 'log') {
-			console.info('[email:dev]', {
-				to: input.to,
-				subject: input.subject,
-				text: input.text
-			});
+			logEmail(input);
 			return;
 		}
 
 		throw new Error(
-			'Email delivery is not configured. Set SENDER_API_TOKEN and SENDER_FROM, or SMTP_HOST, SMTP_PORT and SMTP_FROM.'
+			'Email delivery is not configured. Set EMAIL_PROVIDER=mailjet with MAILJET_API_KEY, MAILJET_SECRET_KEY and MAILJET_FROM, or configure Sender/SMTP.'
 		);
 	}
 
@@ -59,6 +116,45 @@ export async function sendMail(input: MailInput) {
 		text: input.text,
 		html: input.html
 	});
+}
+
+function logEmail(input: MailInput) {
+	console.info('[email:dev]', {
+		to: input.to,
+		subject: input.subject,
+		text: input.text
+	});
+}
+
+async function sendMailjetApiMail(input: MailInput) {
+	const from = parseMailbox(env.MAILJET_FROM || '');
+	const authorization = Buffer.from(`${env.MAILJET_API_KEY}:${env.MAILJET_SECRET_KEY}`).toString(
+		'base64'
+	);
+	const response = await fetch('https://api.mailjet.com/v3.1/send', {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			Authorization: `Basic ${authorization}`,
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({
+			Messages: [
+				{
+					From: toMailjetContact(from),
+					To: [{ Email: input.to }],
+					Subject: input.subject,
+					TextPart: input.text,
+					...(input.html ? { HTMLPart: input.html } : {})
+				}
+			]
+		})
+	});
+
+	if (!response.ok) {
+		const body = (await response.text()).slice(0, 500);
+		throw new Error(`Mailjet API failed with HTTP ${response.status}: ${body}`);
+	}
 }
 
 async function sendSenderApiMail(input: MailInput) {
@@ -98,6 +194,13 @@ export function parseMailbox(value: string) {
 	}
 
 	return { email: trimmed };
+}
+
+function toMailjetContact(mailbox: ReturnType<typeof parseMailbox>) {
+	return {
+		Email: mailbox.email,
+		Name: mailbox.name || 'Expense Manager'
+	};
 }
 
 export async function sendPasswordResetEmail(
