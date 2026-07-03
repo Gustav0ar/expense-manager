@@ -43,7 +43,8 @@ async function registerAndCreateWorkspace(page: Page) {
 	await page.goto('/register');
 	await page.getByLabel('Nome').fill('Report Tester');
 	await page.getByLabel('Email').fill(uniqueEmail('reports'));
-	await page.getByLabel('Senha').fill('test-password-123');
+	await page.locator('input[name="password"]').fill('test-password-123');
+	await page.locator('input[name="passwordConfirmation"]').fill('test-password-123');
 	await page.getByRole('button', { name: 'Criar conta' }).click();
 
 	await expect(page).toHaveURL(/\/app\/onboarding/);
@@ -276,7 +277,8 @@ async function createPendingExpenseAsMember(ownerPage: Page, browser: Browser) {
 		await memberPage.goto(`/register?next=${encodeURIComponent(invitePath)}`);
 		await memberPage.getByLabel('Nome').fill('Report Member');
 		await memberPage.getByLabel('Email').fill(invitedEmail);
-		await memberPage.getByLabel('Senha').fill('test-password-123');
+		await memberPage.locator('input[name="password"]').fill('test-password-123');
+		await memberPage.locator('input[name="passwordConfirmation"]').fill('test-password-123');
 		await memberPage.getByRole('button', { name: 'Criar conta' }).click();
 		await expect(memberPage).toHaveURL(/\/invite\//);
 		await memberPage.getByRole('button', { name: 'Aceitar convite' }).click();

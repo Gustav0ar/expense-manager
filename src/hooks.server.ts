@@ -10,10 +10,14 @@ import { resolveRequestLocale } from '$lib/server/i18n';
 import { translate } from '$lib/i18n';
 import { randomUUID } from 'node:crypto';
 import { isMfaEnabled, isMfaSessionVerified } from '$lib/server/services/mfa';
+import { pruneExpiredUnverifiedRegistrations } from '$lib/server/services/email-verification';
 import { isTrustedOrigin } from '$lib/server/security/origin';
 import { isRegistrationEnabled } from '$lib/server/registration';
 
 const unsafeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const verificationCleanupIntervalMs = 60_000;
+let nextVerificationCleanupAt = 0;
+let verificationCleanupPromise: Promise<unknown> | null = null;
 
 function setSecurityHeaders(response: Response) {
 	response.headers.set('X-Content-Type-Options', 'nosniff');
@@ -38,6 +42,7 @@ const handleBetterAuth: Handle = async ({ event, resolve }) => {
 	const { locale, preference: localePreference } = resolveRequestLocale(event);
 	event.locals.locale = locale;
 	event.locals.localePreference = localePreference;
+	cleanupExpiredUnverifiedRegistrations();
 	const themedResolve: typeof resolve = (resolveEvent, options) =>
 		resolve(resolveEvent, {
 			...options,
@@ -102,6 +107,22 @@ const handleBetterAuth: Handle = async ({ event, resolve }) => {
 };
 
 export const handle: Handle = handleBetterAuth;
+
+function cleanupExpiredUnverifiedRegistrations() {
+	if (building) return;
+
+	const now = Date.now();
+	if (verificationCleanupPromise || now < nextVerificationCleanupAt) return;
+
+	nextVerificationCleanupAt = now + verificationCleanupIntervalMs;
+	verificationCleanupPromise = pruneExpiredUnverifiedRegistrations()
+		.catch((err) => {
+			console.error('Expired email verification cleanup failed.', err);
+		})
+		.finally(() => {
+			verificationCleanupPromise = null;
+		});
+}
 
 function shouldEnforceMfa(pathname: string) {
 	if (pathname === '/mfa' || pathname.startsWith('/mfa/')) return false;

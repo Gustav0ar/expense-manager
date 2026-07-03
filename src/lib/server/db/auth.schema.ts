@@ -1,5 +1,5 @@
 import { relations } from 'drizzle-orm';
-import { pgTable, text, timestamp, boolean, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean, index, integer } from 'drizzle-orm/pg-core';
 
 export const user = pgTable('user', {
 	id: text('id').primaryKey(),
@@ -71,6 +71,29 @@ export const verification = pgTable(
 			.notNull()
 	},
 	(table) => [index('verification_identifier_idx').on(table.identifier)]
+);
+
+export const emailVerificationThrottle = pgTable(
+	'email_verification_throttle',
+	{
+		userId: text('user_id')
+			.primaryKey()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		email: text('email').notNull(),
+		sentCount: integer('sent_count').notNull().default(0),
+		lastSentAt: timestamp('last_sent_at', { withTimezone: true }),
+		limitReachedAt: timestamp('limit_reached_at', { withTimezone: true }),
+		deleteAfter: timestamp('delete_after', { withTimezone: true }),
+		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+		updatedAt: timestamp('updated_at', { withTimezone: true })
+			.defaultNow()
+			.$onUpdate(() => /* @__PURE__ */ new Date())
+			.notNull()
+	},
+	(table) => [
+		index('email_verification_throttle_email_idx').on(table.email),
+		index('email_verification_throttle_delete_after_idx').on(table.deleteAfter)
+	]
 );
 
 export const userRelations = relations(user, ({ many }) => ({

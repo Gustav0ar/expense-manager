@@ -40,16 +40,19 @@ async function fillRegisterForm(form: Locator, input: { email: string; name: str
 	const name = form.locator('input[name="name"]');
 	const email = form.locator('input[name="email"]');
 	const passwordInput = form.locator('input[name="password"]');
+	const passwordConfirmationInput = form.locator('input[name="passwordConfirmation"]');
 
 	for (let attempt = 0; attempt < 3; attempt += 1) {
 		await name.fill(input.name);
 		await email.fill(input.email);
 		await passwordInput.fill(password);
+		await passwordConfirmationInput.fill(password);
 
 		try {
 			await expect(name).toHaveValue(input.name, { timeout: 1000 });
 			await expect(email).toHaveValue(input.email, { timeout: 1000 });
 			await expect(passwordInput).toHaveValue(password, { timeout: 1000 });
+			await expect(passwordConfirmationInput).toHaveValue(password, { timeout: 1000 });
 			return;
 		} catch (err) {
 			if (attempt === 2) throw err;

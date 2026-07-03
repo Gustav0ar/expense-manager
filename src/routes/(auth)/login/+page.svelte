@@ -60,7 +60,7 @@
 
 		{#if data.resentVerification}
 			<p class="notice success">
-				{t('If the account exists and needs verification, we sent a new verification link.')}
+				{t('We sent a new verification link. Check your inbox before signing in.')}
 			</p>
 		{/if}
 

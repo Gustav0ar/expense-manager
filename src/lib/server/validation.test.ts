@@ -213,9 +213,18 @@ describe('validation schemas', () => {
 			signUpSchema.safeParse({
 				name: 'Test User',
 				email: 'user@example.com',
-				password: 'test-password-123'
+				password: 'test-password-123',
+				passwordConfirmation: 'test-password-123'
 			}).success
 		).toBe(true);
+		expect(
+			signUpSchema.safeParse({
+				name: 'Test User',
+				email: 'user@example.com',
+				password: 'test-password-123',
+				passwordConfirmation: 'different-password'
+			}).success
+		).toBe(false);
 		expect(
 			resetPasswordSchema.safeParse({ token: 'x'.repeat(16), password: '1234567890' }).success
 		).toBe(true);

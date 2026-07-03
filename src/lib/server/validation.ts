@@ -340,11 +340,22 @@ export const signInSchema = z.object({
 	password: z.string().min(1).max(128)
 });
 
-export const signUpSchema = z.object({
-	name: z.string().trim().min(2).max(80),
-	email: authEmailSchema,
-	password: passwordSchema
-});
+export const signUpSchema = z
+	.object({
+		name: z.string().trim().min(2).max(80),
+		email: authEmailSchema,
+		password: passwordSchema,
+		passwordConfirmation: z.string().min(1).max(128)
+	})
+	.superRefine((values, context) => {
+		if (values.password !== values.passwordConfirmation) {
+			context.addIssue({
+				code: 'custom',
+				path: ['passwordConfirmation'],
+				message: 'Passwords do not match.'
+			});
+		}
+	});
 
 export const forgotPasswordSchema = z.object({
 	email: authEmailSchema

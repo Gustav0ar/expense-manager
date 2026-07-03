@@ -57,13 +57,16 @@ async function fillRegisterForm(
 	const name = form.locator('input[name="name"]');
 	const email = form.locator('input[name="email"]');
 	const passwordInput = form.locator('input[name="password"]');
+	const passwordConfirmationInput = form.locator('input[name="passwordConfirmation"]');
 
 	await name.fill(input.name);
 	await email.fill(input.email);
 	await passwordInput.fill(password);
+	await passwordConfirmationInput.fill(password);
 	await expect(name).toHaveValue(input.name);
 	await expect(email).toHaveValue(input.email);
 	await expect(passwordInput).toHaveValue(password);
+	await expect(passwordConfirmationInput).toHaveValue(password);
 }
 
 async function registerAndCreateWorkspace(page: Page, workspaceName = 'Roles E2E') {

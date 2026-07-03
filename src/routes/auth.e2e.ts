@@ -31,10 +31,12 @@ async function registerAccount(
 ) {
 	const search = input.next ? `?next=${encodeURIComponent(input.next)}` : '';
 	await page.goto(`/register${search}`);
-	await page.getByLabel('Nome').fill(input.name ?? 'Auth User');
-	await page.getByLabel('Email').fill(input.email);
-	await page.getByLabel('Senha').fill(input.password ?? password);
-	await page.getByRole('button', { name: 'Criar conta' }).click();
+	const form = registerForm(page);
+	await form.getByLabel('Nome').fill(input.name ?? 'Auth User');
+	await form.getByLabel('Email').fill(input.email);
+	await form.locator('input[name="password"]').fill(input.password ?? password);
+	await form.locator('input[name="passwordConfirmation"]').fill(input.password ?? password);
+	await form.getByRole('button', { name: 'Criar conta' }).click();
 }
 
 async function createWorkspace(page: Page, name = 'Auth Workspace') {
@@ -139,13 +141,14 @@ test.describe('english auth screens', () => {
 		await expect(page.getByRole('heading', { name: 'Login' })).toBeVisible();
 		await expect(page.getByText('Account created. Sign in to continue.')).toBeVisible();
 		await expect(page.getByText('Password updated.')).toBeVisible();
-		await expect(page.getByLabel('Password')).toBeVisible();
+		await expect(page.getByLabel('Password', { exact: true })).toBeVisible();
 		await expect(page.getByRole('link', { name: 'Create account' })).toBeVisible();
 
 		await page.goto('/register');
 		await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible();
 		await expect(page.getByLabel('Name')).toBeVisible();
-		await expect(page.getByLabel('Password')).toBeVisible();
+		await expect(page.getByLabel('Password', { exact: true })).toBeVisible();
+		await expect(page.getByLabel('Confirm password')).toBeVisible();
 		await expect(page.getByRole('link', { name: 'I already have an account' })).toBeVisible();
 	});
 });
@@ -157,13 +160,25 @@ test('covers register validation, duplicate accounts, success and logged-in redi
 	await page.goto('/register');
 	const form = registerForm(page);
 	await form.evaluate((element) => element.setAttribute('novalidate', ''));
+	await expect(form.locator('input[name="password"]')).toHaveAttribute('type', 'password');
+	await form.getByRole('button', { name: 'Mostrar senha' }).first().click();
+	await expect(form.locator('input[name="password"]')).toHaveAttribute('type', 'text');
+	await expect(form.getByRole('button', { name: 'Ocultar senha' }).first()).toBeVisible();
 	await form.getByLabel('Nome').fill('A');
 	await form.getByLabel('Email').fill('email-invalido');
-	await form.getByLabel('Senha').fill('short');
+	await form.locator('input[name="password"]').fill('short');
+	await form.locator('input[name="passwordConfirmation"]').fill('short');
 	await form.getByRole('button', { name: 'Criar conta' }).click();
 	await expect(page.getByText('Confira nome, email e senha.')).toBeVisible();
 	await expect(form.getByLabel('Nome')).toHaveValue('A');
 	await expect(form.getByLabel('Email')).toHaveValue('email-invalido');
+
+	await form.getByLabel('Nome').fill('Valid User');
+	await form.getByLabel('Email').fill(uniqueEmail('auth-password-mismatch'));
+	await form.locator('input[name="password"]').fill(password);
+	await form.locator('input[name="passwordConfirmation"]').fill('different-password');
+	await form.getByRole('button', { name: 'Criar conta' }).click();
+	await expect(page.getByText('As senhas não conferem.')).toBeVisible();
 
 	const email = uniqueEmail('auth-register');
 	await registerAccount(page, { email, name: 'Registered User' });

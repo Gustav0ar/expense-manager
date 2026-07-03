@@ -20,6 +20,7 @@ test('blocks self-service registration when ALLOW_REGISTRATION is false', async 
 			name: 'Locked User',
 			email: `locked-${Date.now()}@example.com`,
 			password: 'test-password-123',
+			passwordConfirmation: 'test-password-123',
 			next: '/app'
 		}
 	});

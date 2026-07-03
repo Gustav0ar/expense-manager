@@ -266,6 +266,38 @@ th {
 	gap: 1rem;
 }
 
+.password-field {
+	position: relative;
+	display: block;
+	width: 100%;
+}
+
+.password-field input {
+	padding-right: 2.75rem;
+}
+
+.password-toggle {
+	position: absolute;
+	top: 50%;
+	right: 0.35rem;
+	display: inline-grid;
+	width: 2rem;
+	height: 2rem;
+	place-items: center;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--color-muted);
+	cursor: pointer;
+	transform: translateY(-50%);
+}
+
+.password-toggle:hover,
+.password-toggle:focus-visible {
+	background: var(--color-surface-muted);
+	color: var(--color-ink);
+}
+
 .auth-links {
 	display: flex;
 	flex-wrap: wrap;

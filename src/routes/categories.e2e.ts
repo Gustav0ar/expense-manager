@@ -15,7 +15,8 @@ async function registerAndCreateWorkspace(page: Page, workspaceName = 'Categoria
 	await page.goto('/register');
 	await page.getByLabel('Nome').fill('Category Tester');
 	await page.getByLabel('Email').fill(uniqueEmail('categories'));
-	await page.getByLabel('Senha').fill('test-password-123');
+	await page.locator('input[name="password"]').fill('test-password-123');
+	await page.locator('input[name="passwordConfirmation"]').fill('test-password-123');
 	await page.getByRole('button', { name: 'Criar conta' }).click();
 
 	await expect(page).toHaveURL(/\/app\/onboarding/);
