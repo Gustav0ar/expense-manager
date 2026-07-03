@@ -174,19 +174,27 @@ test('covers workspace preferences, appearance, language, creation and switching
 	await expect(page.locator('html')).toHaveAttribute('data-theme', 'system');
 	await expect(themeForm(page).getByLabel('Sistema')).toBeChecked();
 
+	await expect(localeForm(page).locator('button[type="submit"]')).toHaveCount(0);
+	await expect(localeForm(page).locator('select[name="locale"] option[value="pt-BR"]')).toHaveText(
+		'🇧🇷 Português (Brasil)'
+	);
+
 	await localeForm(page).locator('select[name="locale"]').selectOption('en');
-	await localeForm(page).locator('button[type="submit"]').click();
 	await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 	await expect(page.locator('main .eyebrow', { hasText: 'Settings' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Language' })).toBeVisible();
+	await expect(localeForm(page).locator('select[name="locale"] option[value="en"]')).toHaveText(
+		'🇺🇸 English'
+	);
 
 	await localeForm(page).locator('select[name="locale"]').selectOption('pt-BR');
-	await localeForm(page).locator('button[type="submit"]').click();
 	await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
 	await expect(page.locator('main .eyebrow', { hasText: 'Ajustes' })).toBeVisible();
+	await expect(localeForm(page).locator('select[name="locale"] option[value="pt-BR"]')).toHaveText(
+		'🇧🇷 Português (Brasil)'
+	);
 
 	await localeForm(page).locator('select[name="locale"]').selectOption('system');
-	await localeForm(page).locator('button[type="submit"]').click();
 	await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
 	await expect(localeForm(page).locator('select[name="locale"]')).toHaveValue('system');
 

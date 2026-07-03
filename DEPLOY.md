@@ -44,21 +44,24 @@ restricted tag such as `tag:ci`.
 If `VPS_ENV_FILE` is not set, the deploy workflow builds the VPS `.env` from
 individual protected environment secrets:
 
-| Secret                  | Notes                                                                         |
-| ----------------------- | ----------------------------------------------------------------------------- |
-| `DOMAIN_NAME`           | Bare production hostname.                                                     |
-| `ORIGIN`                | Full production origin.                                                       |
-| `BETTER_AUTH_SECRET`    | High-entropy app secret.                                                      |
-| `POSTGRES_PASSWORD`     | Database password.                                                            |
-| `RESTIC_REPOSITORY`     | Remote off-VPS restic repository. Required when `BACKUP_ENABLED=true`.        |
-| `RESTIC_PASSWORD`       | High-entropy restic repository password. Required when `BACKUP_ENABLED=true`. |
-| `SENDER_API_TOKEN`      | Sender transactional email API token.                                         |
-| `SENDER_FROM`           | Verified sender address, optionally with name.                                |
-| `TRUSTED_ORIGINS`       | Optional comma-separated extra origins.                                       |
-| `AWS_ACCESS_KEY_ID`     | Required only for S3-compatible restic.                                       |
-| `AWS_SECRET_ACCESS_KEY` | Required only for S3-compatible restic.                                       |
-| `AWS_DEFAULT_REGION`    | Optional S3-compatible region.                                                |
-| `SMTP_*`                | Optional SMTP fallback values.                                                |
+| Secret                  | Notes                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| `DOMAIN_NAME`           | Bare production hostname.                                                       |
+| `ORIGIN`                | Full production origin.                                                         |
+| `BETTER_AUTH_SECRET`    | High-entropy app secret.                                                        |
+| `POSTGRES_PASSWORD`     | Database password.                                                              |
+| `RESTIC_REPOSITORY`     | Remote off-VPS restic repository. Required when `BACKUP_ENABLED=true`.          |
+| `RESTIC_PASSWORD`       | High-entropy restic repository password. Required when `BACKUP_ENABLED=true`.   |
+| `MAILJET_API_KEY`       | Mailjet transactional email API key. Required when `EMAIL_PROVIDER=mailjet`.    |
+| `MAILJET_SECRET_KEY`    | Mailjet transactional email secret key. Required when `EMAIL_PROVIDER=mailjet`. |
+| `MAILJET_FROM`          | Verified Mailjet sender address, optionally with name.                          |
+| `SENDER_API_TOKEN`      | Legacy Sender transactional email API token.                                    |
+| `SENDER_FROM`           | Legacy Sender verified sender address, optionally with name.                    |
+| `TRUSTED_ORIGINS`       | Optional comma-separated extra origins.                                         |
+| `AWS_ACCESS_KEY_ID`     | Required only for S3-compatible restic.                                         |
+| `AWS_SECRET_ACCESS_KEY` | Required only for S3-compatible restic.                                         |
+| `AWS_DEFAULT_REGION`    | Optional S3-compatible region.                                                  |
+| `SMTP_*`                | Optional SMTP fallback values.                                                  |
 
 ### Environment Variables
 
@@ -165,6 +168,11 @@ POSTGRES_CPUS=1.0
 BACKUP_MEM_LIMIT=256m
 BACKUP_CPUS=0.5
 
+EMAIL_PROVIDER=mailjet
+MAILJET_API_KEY=<mailjet-api-key>
+MAILJET_SECRET_KEY=<mailjet-secret-key>
+MAILJET_FROM="Expense Manager <no-reply@your-verified-domain.example>"
+
 SENDER_API_TOKEN=<sender-api-token>
 SENDER_FROM="Expense Manager <no-reply@your-verified-domain.example>"
 
@@ -179,8 +187,8 @@ SMTP_FROM=
 `DOMAIN_NAME` must be the bare hostname only. Do not include `https://`, a path
 or a port. `ORIGIN` is the full browser origin.
 
-Use Sender in production if users need password reset, invitations or email
-verification. See [`docs/email.md`](docs/email.md) for the Sender setup.
+Use Mailjet in production if users need password reset, invitations or email
+verification. See [`docs/email.md`](docs/email.md) for the Mailjet setup.
 
 The workflow preserves deploy-generated state keys from the existing VPS `.env`
 when it refreshes the file from GitHub secrets:

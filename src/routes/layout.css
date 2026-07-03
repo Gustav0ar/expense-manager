@@ -217,9 +217,6 @@ th {
 }
 
 .locale-form {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) auto;
-	gap: 0.5rem;
 	width: min(100%, 16rem);
 }
 
@@ -229,12 +226,6 @@ th {
 	padding-block: 0.45rem;
 	font-size: 0.86rem;
 	font-weight: 650;
-}
-
-.locale-submit {
-	min-height: 2.35rem;
-	padding-inline: 0.75rem;
-	font-size: 0.86rem;
 }
 
 .screen-reader-label {

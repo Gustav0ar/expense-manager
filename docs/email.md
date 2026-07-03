@@ -2,44 +2,45 @@
 
 This application sends transactional email for password reset, email
 verification, workspace invitations and budget alerts. Production should use a
-dedicated SMTP provider instead of a mail server on the VPS.
+dedicated provider instead of a mail server on the VPS.
 
-## Recommended Provider: Sender
+## Recommended Provider: Mailjet
 
-Use Sender through the transactional email API in production. SMTP remains
-available as a fallback for environments where API delivery is not desired.
+Use Mailjet through Send API v3.1 in production. SMTP and the legacy Sender
+integration remain available as fallback options.
 
-Sender setup:
+Mailjet setup:
 
-1. Create or open a Sender account.
-2. Add the sending domain in `Account settings -> Domains`.
-3. Add every DNS record Sender provides for ownership, SPF, DKIM and DMARC.
-4. Wait until Sender marks the domain as verified.
-5. Open `Transactional emails -> Setup instructions -> API`.
-6. Create a dedicated API token for this app, for example
+1. Create or open a Mailjet account.
+2. Add and verify the sending domain in Mailjet.
+3. Add every DNS record Mailjet provides for SPF, DKIM and DMARC.
+4. Wait until Mailjet marks the domain as verified.
+5. Create a dedicated API key pair for this app, for example
    `expense-manager-production`.
-7. Store the API token only in the production secret store.
+6. Store the API key and secret key only in the production secret store.
 
 Production environment values:
 
 ```env
-EMAIL_DELIVERY=""
-SENDER_API_TOKEN="<sender-api-token>"
-SENDER_FROM="Expense Manager <no-reply@your-verified-domain.example>"
+EMAIL_PROVIDER="mailjet"
+MAILJET_API_KEY="<mailjet-api-key>"
+MAILJET_SECRET_KEY="<mailjet-secret-key>"
+MAILJET_FROM="Expense Manager <no-reply@your-verified-domain.example>"
 REQUIRE_EMAIL_VERIFICATION="true"
 ```
 
-The `SENDER_FROM` domain must match a verified Sender domain. Do not use a
+The `MAILJET_FROM` domain must match a verified Mailjet domain. Do not use a
 personal mailbox as the production sender.
 
 SMTP fallback values, if API delivery cannot be used:
 
 ```env
-SMTP_HOST="smtp.sender.net"
+EMAIL_PROVIDER="smtp"
+SMTP_HOST="in-v3.mailjet.com"
 SMTP_PORT="587"
 SMTP_SECURE="false"
-SMTP_USER="<sender-smtp-username>"
-SMTP_PASSWORD="<sender-smtp-password>"
+SMTP_USER="<mailjet-api-key>"
+SMTP_PASSWORD="<mailjet-secret-key>"
 SMTP_FROM="Expense Manager <no-reply@your-verified-domain.example>"
 ```
 
@@ -49,22 +50,22 @@ connection normally and upgrades it with STARTTLS when the server supports it.
 
 ## Secret Handling
 
-- Never commit Sender API tokens or SMTP credentials.
+- Never commit Mailjet API keys, secret keys or SMTP credentials.
 - Keep email credentials only in the VPS `.env`, GitHub Actions secrets or a
   private secret manager.
-- Use a dedicated Sender token for production.
-- Use a separate Sender token for staging if staging sends real email.
-- Rotate the token immediately if it is copied into a chat, log, shell history,
+- Use a dedicated Mailjet API key pair for production.
+- Use a separate Mailjet API key pair for staging if staging sends real email.
+- Rotate the secret key immediately if it is copied into a chat, log, shell history,
   issue, pull request or commit.
 - Do not enable `EMAIL_DELIVERY="log"` in production because it writes email
   subjects and bodies to logs.
 
 ## DNS Policy
 
-Sender provides exact DNS values per account/domain. Use those exact records.
+Mailjet provides exact DNS values per account/domain. Use those exact records.
 At minimum, production should have:
 
-- SPF authorizing Sender for the sending domain.
+- SPF authorizing Mailjet for the sending domain.
 - DKIM enabled and passing.
 - DMARC published for the sending domain.
 
@@ -79,7 +80,7 @@ After real delivery is confirmed, move toward a stricter policy such as
 
 ## Deployment Checklist
 
-1. Set the SMTP variables in the private production `.env`.
+1. Set `EMAIL_PROVIDER="mailjet"` and the Mailjet variables in the private production `.env`.
 2. Set `ORIGIN` to the public HTTPS origin of the app.
 3. Set `REQUIRE_EMAIL_VERIFICATION="true"` in production unless there is a
    documented exception.
@@ -89,15 +90,16 @@ After real delivery is confirmed, move toward a stricter policy such as
    - password reset;
    - workspace invitation;
    - budget alert.
-6. Check `Transactional emails -> Logs` in Sender and confirm the messages are
+6. Check Mailjet logs and confirm the messages are
    delivered.
 7. Confirm SPF, DKIM and DMARC pass in the received email headers.
 
+Mailjet's Event API can be added later for real-time delivery, bounce, spam and
+open/click notifications. It is not required for sending verification emails.
+
 ## References
 
-- Sender transactional email setup:
-  https://www.sender.net/help/transactional-emails/setting-up-transactional-emails/
-- Sender SMTP setup:
-  https://www.sender.net/help/transactional-emails/getting-started/
-- Sender sender identity and domain requirements:
-  https://www.sender.net/help/transactional-emails/sender-identity-and-domain-requirements/
+- Mailjet Send API v3.1:
+  https://dev.mailjet.com/email/guides/send-api-v31/
+- Mailjet Event API:
+  https://dev.mailjet.com/email/guides/#event-api-real-time-notifications

@@ -515,10 +515,9 @@ test.describe('english locale defaults', () => {
 			.locator('form[action="?/updateLocale"]')
 			.getByLabel('Language')
 			.selectOption('pt-BR');
-		await page
-			.locator('form[action="?/updateLocale"]')
-			.getByRole('button', { name: 'Save' })
-			.click();
+		await expect(
+			page.locator('form[action="?/updateLocale"]').getByRole('button', { name: 'Save' })
+		).toHaveCount(0);
 		await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
 		const updateForm = page.locator('form[action="?/update"]');
 		await updateForm.getByLabel('Moeda').fill('BRL');

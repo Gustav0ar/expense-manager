@@ -230,6 +230,119 @@ describe('email helpers', () => {
 		}
 	});
 
+	it('sends transactional emails through the Mailjet API when configured', async () => {
+		const previous = captureEmailEnv();
+		const fetchMock = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(new Response(JSON.stringify({ Messages: [] }), { status: 200 }));
+		createTransportMock.mockClear();
+
+		try {
+			clearEmailEnv();
+			privateEnv.EMAIL_PROVIDER = 'mailjet';
+			privateEnv.MAILJET_API_KEY = 'mailjet-key';
+			privateEnv.MAILJET_SECRET_KEY = 'mailjet-secret';
+			privateEnv.MAILJET_FROM = 'Expense Manager <no-reply@example.com>';
+
+			await sendMail({
+				to: 'admin@example.com',
+				subject: 'Budget alert',
+				text: 'Budget usage is above the alert threshold.',
+				html: '<p>Budget usage is above the alert threshold.</p>'
+			});
+
+			expect(createTransportMock).not.toHaveBeenCalled();
+			expect(fetchMock).toHaveBeenCalledWith(
+				'https://api.mailjet.com/v3.1/send',
+				expect.objectContaining({
+					method: 'POST',
+					headers: expect.objectContaining({
+						Accept: 'application/json',
+						Authorization: `Basic ${Buffer.from('mailjet-key:mailjet-secret').toString('base64')}`,
+						'Content-Type': 'application/json'
+					}),
+					body: JSON.stringify({
+						Messages: [
+							{
+								From: {
+									Email: 'no-reply@example.com',
+									Name: 'Expense Manager'
+								},
+								To: [
+									{
+										Email: 'admin@example.com'
+									}
+								],
+								Subject: 'Budget alert',
+								TextPart: 'Budget usage is above the alert threshold.',
+								HTMLPart: '<p>Budget usage is above the alert threshold.</p>'
+							}
+						]
+					})
+				})
+			);
+		} finally {
+			fetchMock.mockRestore();
+			restoreEmailEnv(previous);
+		}
+	});
+
+	it('prefers Mailjet over Sender in automatic provider mode', async () => {
+		const previous = captureEmailEnv();
+		const fetchMock = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(new Response(JSON.stringify({ Messages: [] }), { status: 200 }));
+
+		try {
+			clearEmailEnv();
+			privateEnv.MAILJET_API_KEY = 'mailjet-key';
+			privateEnv.MAILJET_SECRET_KEY = 'mailjet-secret';
+			privateEnv.MAILJET_FROM = 'Expense Manager <no-reply@example.com>';
+			privateEnv.SENDER_API_TOKEN = 'sender-token';
+			privateEnv.SENDER_FROM = 'Expense Manager <sender@example.com>';
+
+			await sendMail({
+				to: 'admin@example.com',
+				subject: 'Provider priority',
+				text: 'Mailjet should be selected.'
+			});
+
+			expect(fetchMock).toHaveBeenCalledWith(
+				'https://api.mailjet.com/v3.1/send',
+				expect.any(Object)
+			);
+		} finally {
+			fetchMock.mockRestore();
+			restoreEmailEnv(previous);
+		}
+	});
+
+	it('reports Mailjet API delivery failures without leaking credentials', async () => {
+		const previous = captureEmailEnv();
+		const fetchMock = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(new Response('unauthorized', { status: 401 }));
+
+		try {
+			clearEmailEnv();
+			privateEnv.EMAIL_PROVIDER = 'mailjet';
+			privateEnv.MAILJET_API_KEY = 'mailjet-key';
+			privateEnv.MAILJET_SECRET_KEY = 'mailjet-secret';
+			privateEnv.MAILJET_FROM = 'Expense Manager <no-reply@example.com>';
+
+			await expect(
+				sendMail({
+					to: 'admin@example.com',
+					subject: 'Budget alert',
+					text: 'Budget usage is above the alert threshold.'
+				})
+			).rejects.toThrow('Mailjet API failed with HTTP 401: unauthorized');
+		} finally {
+			fetchMock.mockRestore();
+			restoreEmailEnv(previous);
+		}
+	});
+
 	it('reports Sender API delivery failures without leaking the token', async () => {
 		const previous = captureEmailEnv();
 		const fetchMock = vi
@@ -289,6 +402,10 @@ describe('email helpers', () => {
 function captureEmailEnv() {
 	return {
 		EMAIL_DELIVERY: privateEnv.EMAIL_DELIVERY,
+		EMAIL_PROVIDER: privateEnv.EMAIL_PROVIDER,
+		MAILJET_API_KEY: privateEnv.MAILJET_API_KEY,
+		MAILJET_SECRET_KEY: privateEnv.MAILJET_SECRET_KEY,
+		MAILJET_FROM: privateEnv.MAILJET_FROM,
 		SMTP_HOST: privateEnv.SMTP_HOST,
 		SMTP_PORT: privateEnv.SMTP_PORT,
 		SMTP_SECURE: privateEnv.SMTP_SECURE,
@@ -302,6 +419,10 @@ function captureEmailEnv() {
 
 function clearEmailEnv() {
 	delete privateEnv.EMAIL_DELIVERY;
+	delete privateEnv.EMAIL_PROVIDER;
+	delete privateEnv.MAILJET_API_KEY;
+	delete privateEnv.MAILJET_SECRET_KEY;
+	delete privateEnv.MAILJET_FROM;
 	delete privateEnv.SMTP_HOST;
 	delete privateEnv.SMTP_PORT;
 	delete privateEnv.SMTP_SECURE;

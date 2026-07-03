@@ -8,6 +8,11 @@
 	function t(key: string) {
 		return translate(data.locale, key);
 	}
+
+	function submitLocaleForm(event: Event) {
+		const select = event.currentTarget as HTMLSelectElement;
+		select.form?.requestSubmit();
+	}
 </script>
 
 <svelte:head>
@@ -21,16 +26,20 @@
 			<form class="locale-form" method="post" action={resolve('/locale')}>
 				<input type="hidden" name="returnTo" value={data.returnTo} />
 				<label class="screen-reader-label" for="login-locale">{t('Language')}</label>
-				<select id="login-locale" name="locale" aria-label={t('Language')}>
+				<select
+					id="login-locale"
+					name="locale"
+					aria-label={t('Language')}
+					onchange={submitLocaleForm}
+				>
 					<option value="system" selected={data.localePreference === 'system'}>
-						{t('Device language')}
+						🌐 {t('Device language')}
 					</option>
-					<option value="en" selected={data.localePreference === 'en'}>{t('English')}</option>
+					<option value="en" selected={data.localePreference === 'en'}>🇺🇸 {t('English')}</option>
 					<option value="pt-BR" selected={data.localePreference === 'pt-BR'}>
-						{t('Portuguese (Brazil)')}
+						🇧🇷 {t('Portuguese (Brazil)')}
 					</option>
 				</select>
-				<button class="button secondary locale-submit" type="submit">{t('Apply')}</button>
 			</form>
 		</div>
 		<h1>{t('Login')}</h1>
