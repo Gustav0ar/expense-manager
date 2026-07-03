@@ -53,9 +53,9 @@ describe('rate limit client IP resolution', () => {
 		it('trims whitespace from the extracted IP', () => {
 			process.env.TRUST_PROXY_HEADERS = 'true';
 
-			expect(
-				getClientIp(requestWithHeaders({ 'x-forwarded-for': '1.2.3.4,  10.0.0.20  ' }))
-			).toBe('10.0.0.20');
+			expect(getClientIp(requestWithHeaders({ 'x-forwarded-for': '1.2.3.4,  10.0.0.20  ' }))).toBe(
+				'10.0.0.20'
+			);
 		});
 
 		it('falls back to getClientAddress when forwarded header is empty', () => {

@@ -408,7 +408,8 @@ export async function updateExpense(context: WorkspaceContext, id: number, input
 		)
 		.returning({ id: expense.id });
 
-	if (!updated) throw error(409, translate(context.locale, 'Expense was modified. Reload and try again.'));
+	if (!updated)
+		throw error(409, translate(context.locale, 'Expense was modified. Reload and try again.'));
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,
@@ -584,23 +585,16 @@ export async function getDashboard(context: WorkspaceContext, from?: string, to?
 	const previous = previousPeriod(from, to);
 	const currentFilters = { from, to };
 
-	const [
-		currentTotal,
-		previousTotal,
-		byCategory,
-		byWeek,
-		byMonth,
-		byPaymentMethod,
-		budgetSummary
-	] = await Promise.all([
-		getTotal(context.workspaceId, from, to),
-		getTotal(context.workspaceId, previous.from, previous.to),
-		getTotalsByCategory(context.workspaceId, currentFilters),
-		getTotalsByPeriod(context.workspaceId, currentFilters, 'week', context.weekStartsOn),
-		getTotalsByPeriod(context.workspaceId, currentFilters, 'month', context.weekStartsOn),
-		getTotalsByPaymentMethod(context.workspaceId, currentFilters),
-		getBudgetSummary(context, startOfMonth(from))
-	]);
+	const [currentTotal, previousTotal, byCategory, byWeek, byMonth, byPaymentMethod, budgetSummary] =
+		await Promise.all([
+			getTotal(context.workspaceId, from, to),
+			getTotal(context.workspaceId, previous.from, previous.to),
+			getTotalsByCategory(context.workspaceId, currentFilters),
+			getTotalsByPeriod(context.workspaceId, currentFilters, 'week', context.weekStartsOn),
+			getTotalsByPeriod(context.workspaceId, currentFilters, 'month', context.weekStartsOn),
+			getTotalsByPaymentMethod(context.workspaceId, currentFilters),
+			getBudgetSummary(context, startOfMonth(from))
+		]);
 
 	const deltaPct =
 		previousTotal > 0 ? ((currentTotal - previousTotal) / previousTotal) * 100 : null;

@@ -81,4 +81,3 @@ describe('TOTP counter derivation (replay prevention contract)', () => {
 		expect(verifyTotpCode(secret, '1234567', { timestamp })).toBe(false); // 7 digits
 	});
 });
-

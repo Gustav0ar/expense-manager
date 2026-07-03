@@ -91,30 +91,24 @@ export async function pruneExpiredUnverifiedRegistrations(now = new Date()) {
 			.select({ userId: emailVerificationThrottle.userId })
 			.from(emailVerificationThrottle)
 			.innerJoin(user, eq(user.id, emailVerificationThrottle.userId))
-			.where(
-				and(eq(user.emailVerified, false), lte(emailVerificationThrottle.deleteAfter, now))
-			);
+			.where(and(eq(user.emailVerified, false), lte(emailVerificationThrottle.deleteAfter, now)));
 
 		const userIds = expiredRows.map((row) => row.userId);
 		if (userIds.length === 0) return { deletedUsers: 0 };
 
 		// Only delete workspaces for users that are still unverified right now.
 		// Uses a NOT EXISTS subquery so a user who just verified keeps their workspace.
-		await tx
-			.delete(workspace)
-			.where(
-				and(
-					inArray(workspace.createdByUserId, userIds),
-					notExists(
-						tx
-							.select({ id: user.id })
-							.from(user)
-							.where(
-								and(eq(user.id, workspace.createdByUserId), eq(user.emailVerified, true))
-							)
-					)
+		await tx.delete(workspace).where(
+			and(
+				inArray(workspace.createdByUserId, userIds),
+				notExists(
+					tx
+						.select({ id: user.id })
+						.from(user)
+						.where(and(eq(user.id, workspace.createdByUserId), eq(user.emailVerified, true)))
 				)
-			);
+			)
+		);
 
 		const deleted = await tx
 			.delete(user)
