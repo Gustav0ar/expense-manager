@@ -9,7 +9,6 @@ import {
 	isNull,
 	lte,
 	lt,
-	ne,
 	or,
 	sql,
 	type SQL
@@ -459,11 +458,6 @@ export async function reviewExpense(
 			and(
 				eq(expense.id, id),
 				eq(expense.workspaceId, context.workspaceId),
-				// Block rejecting a reconciled expense: reconciled = closed books,
-				// wiping paidAt/reconciledAt on a reconciled entry is data corruption.
-				// Approved+unpaid or approved+paid can still be recalled/rejected.
-				// Rejected and pending expenses can always be re-reviewed.
-				input.reviewStatus === 'rejected' ? ne(expense.paymentStatus, 'reconciled') : sql`true`,
 				isNull(expense.deletedAt)
 			)
 		)
