@@ -59,4 +59,15 @@ describe('origin security helpers', () => {
 			})
 		).toBe(false);
 	});
+
+	it('handles an invalid baseURL gracefully — builds trusted set from extra origins only', () => {
+		// When baseURL cannot be parsed, normalizeOrigin returns null and the
+		// if (baseOrigin) branch on origin.ts:18 is false — this covers that path.
+		expect(
+			buildTrustedOrigins({
+				baseURL: 'not-a-url',
+				trustedOrigins: 'http://100.64.0.1:5173'
+			})
+		).toEqual(['http://100.64.0.1:5173']);
+	});
 });

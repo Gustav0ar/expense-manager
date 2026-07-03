@@ -14,6 +14,8 @@ describe('format helpers', () => {
 		expect(formatPercent(null)).toBe('No baseline');
 		expect(formatPercent(null, 'pt-BR')).toBe('Sem base');
 		expect(formatPercent(null, ['pt-BR'])).toBe('Sem base');
+		// Passing undefined falls through to defaultLocale in the ternary chain
+		expect(formatPercent(null, undefined)).toBe('No baseline');
 	});
 
 	it('formats ISO dates with the provided Intl locale', () => {
