@@ -163,6 +163,7 @@
 						</option>
 					</select>
 				</label>
+				<button class="button primary" type="submit">{t('Save language')}</button>
 			</form>
 		</section>
 

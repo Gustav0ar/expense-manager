@@ -201,6 +201,7 @@ export const ptBrMessages = {
 	Role: 'Papel',
 	Rules: 'Regras',
 	Save: 'Salvar',
+	'Save language': 'Salvar idioma',
 	'Save payment': 'Salvar pagamento',
 	'Save password': 'Salvar senha',
 	'Save theme': 'Salvar tema',
