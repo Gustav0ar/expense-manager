@@ -23,10 +23,14 @@ services:
       PUBLIC_APP_NAME: ${PUBLIC_APP_NAME:-Expense Manager}
       ORIGIN: ${ORIGIN:?set ORIGIN}
       TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
-      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET}
+      BETTER_AUTH_SECRET_FILE: /run/secrets/better_auth_secret
       REQUIRE_EMAIL_VERIFICATION: ${REQUIRE_EMAIL_VERIFICATION:-true}
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
-      DATABASE_URL: postgres://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       DB_POOL_MAX: ${DB_POOL_MAX:-5}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
       UPLOAD_DIR: /app/uploads
@@ -52,6 +56,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    secrets:
+      - better_auth_secret
+      - postgres_password
     volumes:
       - uploads:/app/uploads
     tmpfs:
@@ -101,10 +108,16 @@ services:
       - no-new-privileges:true
     profiles: ['tools']
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     depends_on:
       postgres:
         condition: service_healthy
+    secrets:
+      - postgres_password
     tmpfs:
       - /tmp:size=64m,mode=1777
     networks:
@@ -121,7 +134,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     command:
       - postgres
       - -c
@@ -135,6 +148,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    secrets:
+      - postgres_password
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 10s
@@ -160,9 +175,9 @@ services:
       BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-}
-      RESTIC_PASSWORD: ${RESTIC_PASSWORD:-}
+      RESTIC_PASSWORD_FILE: /run/secrets/restic_password
       RESTIC_HOST: ${RESTIC_HOST:-expense-manager}
       RESTIC_INIT_REPOSITORY: ${RESTIC_INIT_REPOSITORY:-true}
       RESTIC_KEEP_DAILY: ${RESTIC_KEEP_DAILY:-7}
@@ -174,6 +189,9 @@ services:
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
     volumes:
       - uploads:/app/uploads:ro
+    secrets:
+      - postgres_password
+      - restic_password
     tmpfs:
       - /tmp:size=512m,mode=1777
     entrypoint: ['/bin/sh', '-c']
@@ -197,3 +215,11 @@ networks:
   traefik:
     name: ${TRAEFIK_NETWORK:-web}
     external: true
+
+secrets:
+  better_auth_secret:
+    environment: BETTER_AUTH_SECRET
+  postgres_password:
+    environment: POSTGRES_PASSWORD
+  restic_password:
+    environment: RESTIC_PASSWORD

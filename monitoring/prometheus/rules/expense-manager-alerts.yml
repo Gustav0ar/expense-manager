@@ -1,0 +1,173 @@
+groups:
+  - name: expense-manager-operations
+    interval: 30s
+    rules:
+      - alert: ExpenseManagerMonitoringBackupFailed
+        expr: expense_manager_monitoring_backup_last_status{job="node"} == 0
+        for: 15m
+        labels:
+          severity: warning
+          service: backup
+        annotations:
+          summary: 'Expense Manager monitoring backup failed'
+          description: 'The last encrypted monitoring backup attempt failed. Check the systemd service and NAS connectivity.'
+
+      - alert: ExpenseManagerMonitoringBackupStale
+        expr: time() - expense_manager_monitoring_backup_last_success_timestamp_seconds{job="node"} > 129600
+        for: 10m
+        labels:
+          severity: critical
+          service: backup
+        annotations:
+          summary: 'Expense Manager monitoring backup is stale'
+          description: 'The last successful monitoring backup is older than 36 hours.'
+
+      - alert: ExpenseManagerMonitoringRestoreTestFailed
+        expr: expense_manager_monitoring_restore_test_last_status{job="node"} == 0
+        for: 15m
+        labels:
+          severity: warning
+          service: backup
+        annotations:
+          summary: 'Expense Manager monitoring restore test failed'
+          description: 'The latest restore test from the encrypted monitoring backup failed.'
+
+      - alert: ExpenseManagerMonitoringRestoreTestStale
+        expr: time() - expense_manager_monitoring_restore_test_last_success_timestamp_seconds{job="node"} > 777600
+        for: 30m
+        labels:
+          severity: warning
+          service: backup
+        annotations:
+          summary: 'Expense Manager monitoring restore test is stale'
+          description: 'No successful monitoring backup restore test has completed in more than 9 days.'
+
+      - alert: ExpenseManagerNasResticCheckFailed
+        expr: expense_manager_nas_restic_check_last_status{job="node"} == 0
+        for: 15m
+        labels:
+          severity: warning
+          service: backup
+        annotations:
+          summary: 'Expense Manager NAS restic check failed'
+          description: 'The latest structural check of the encrypted application backup repository failed.'
+
+      - alert: ExpenseManagerNasResticCheckStale
+        expr: time() - expense_manager_nas_restic_check_last_success_timestamp_seconds{job="node"} > 3456000
+        for: 30m
+        labels:
+          severity: warning
+          service: backup
+        annotations:
+          summary: 'Expense Manager NAS restic check is stale'
+          description: 'No successful structural check of the application backup repository has completed in more than 40 days.'
+
+      - alert: ExpenseManagerMonitoringResticCheckFailed
+        expr: expense_manager_monitoring_restic_check_last_status{job="node"} == 0
+        for: 15m
+        labels:
+          severity: warning
+          service: backup
+        annotations:
+          summary: 'Expense Manager monitoring restic check failed'
+          description: 'The latest structural check of the encrypted monitoring backup repository failed.'
+
+      - alert: ExpenseManagerMonitoringResticCheckStale
+        expr: time() - expense_manager_monitoring_restic_check_last_success_timestamp_seconds{job="node"} > 3456000
+        for: 30m
+        labels:
+          severity: warning
+          service: backup
+        annotations:
+          summary: 'Expense Manager monitoring restic check is stale'
+          description: 'No successful structural check of the monitoring backup repository has completed in more than 40 days.'
+
+      - alert: ExpenseManagerAlertFireDrillFailed
+        expr: expense_manager_alert_fire_drill_last_status{job="node"} == 0
+        for: 15m
+        labels:
+          severity: warning
+          service: monitoring
+        annotations:
+          summary: 'Expense Manager alert fire drill failed'
+          description: 'The latest synthetic alert delivery fire drill failed. Verify Alertmanager and notification delivery.'
+
+      - alert: ExpenseManagerAlertFireDrillStale
+        expr: time() - expense_manager_alert_fire_drill_last_success_timestamp_seconds{job="node"} > 777600
+        for: 30m
+        labels:
+          severity: warning
+          service: monitoring
+        annotations:
+          summary: 'Expense Manager alert fire drill is stale'
+          description: 'No successful synthetic alert delivery fire drill has completed in more than 9 days.'
+
+      - alert: ExpenseManagerPostRebootHealthcheckFailed
+        expr: expense_manager_post_reboot_healthcheck_last_status{job="node"} == 0 or expense_manager_post_reboot_healthcheck_checks_failed{job="node"} > 0
+        for: 15m
+        labels:
+          severity: warning
+          service: monitoring
+        annotations:
+          summary: 'Expense Manager post-reboot healthcheck failed'
+          description: 'The post-reboot healthcheck found one or more failed checks. Review textfile metrics and systemd logs.'
+
+      - alert: ExpenseManagerRecoveryDrillFailed
+        expr: expense_manager_recovery_drill_last_status{job="node"} == 0 or expense_manager_recovery_drill_checks_failed{job="node"} > 0
+        for: 15m
+        labels:
+          severity: warning
+          service: backup
+        annotations:
+          summary: 'Expense Manager recovery drill failed'
+          description: 'The latest recovery drill failed. Validate backup restore tests, health checks and alert delivery.'
+
+      - alert: ExpenseManagerRecoveryDrillStale
+        expr: time() - expense_manager_recovery_drill_last_success_timestamp_seconds{job="node"} > 8640000
+        for: 30m
+        labels:
+          severity: warning
+          service: backup
+        annotations:
+          summary: 'Expense Manager recovery drill is stale'
+          description: 'No successful recovery drill has completed in more than 100 days.'
+
+      - alert: ExpenseManagerTlsCertificateExpiring
+        expr: (probe_ssl_earliest_cert_expiry{app="expenses",check=~"public_site|public_health"} - time()) < 1209600
+        for: 30m
+        labels:
+          severity: warning
+          service: expense-manager
+        annotations:
+          summary: 'Expense Manager TLS certificate expires soon'
+          description: 'The TLS certificate for {{ $labels.instance }} expires in less than 14 days.'
+
+      - alert: ExpenseManagerDnsLookupFailing
+        expr: probe_success{app="expenses",check="public_dns"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          service: expense-manager
+        annotations:
+          summary: 'Expense Manager DNS lookup is failing'
+          description: 'The DNS probe for the public Expense Manager hostname is failing.'
+
+      - alert: TraefikContainerMissing
+        expr: absent(container_last_seen{job="cadvisor",name="traefik"})
+        for: 2m
+        labels:
+          severity: critical
+          service: traefik
+        annotations:
+          summary: 'Traefik container metrics are missing'
+          description: 'cAdvisor has not reported the Traefik container. Public routing may be down.'
+
+      - alert: TraefikContainerRestartLoop
+        expr: changes(container_start_time_seconds{job="cadvisor",name="traefik"}[15m]) > 1
+        for: 1m
+        labels:
+          severity: warning
+          service: traefik
+        annotations:
+          summary: 'Traefik restart loop detected'
+          description: 'The Traefik container restarted more than once in 15 minutes.'

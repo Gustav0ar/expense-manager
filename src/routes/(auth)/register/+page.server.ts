@@ -20,6 +20,7 @@ export const load: PageServerLoad = async (event) => {
 	const next = safeNext(event.url.searchParams.get('next') || '/app');
 	return {
 		next,
+		returnTo: `${event.url.pathname}${event.url.search}`,
 		registrationEnabled: await canRegisterFromNext(next)
 	};
 };

@@ -478,5 +478,14 @@ export const ptBrMessages = {
 		'Alertas de orçamento para {workspace} em {period}:',
 	'Budget alerts - {workspace}': 'Alertas de orçamento - {workspace}',
 	'{spent} of {budget}': '{spent} de {budget}',
-	'No baseline': 'Sem base'
+	'No baseline': 'Sem base',
+	// lowercase time/grammar units used in planning and budget contexts
+	contains: 'contém',
+	month: 'mês',
+	months: 'meses',
+	of: 'de',
+	week: 'semana',
+	weeks: 'semanas',
+	year: 'ano',
+	years: 'anos'
 } as const;

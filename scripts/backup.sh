@@ -30,6 +30,24 @@ require_env() {
 	fi
 }
 
+load_secret_file() {
+	name="$1"
+	eval "value=\${$name:-}"
+	eval "file=\${${name}_FILE:-}"
+	if [ -n "$value" ] || [ -z "$file" ]; then
+		return 0
+	fi
+	if [ ! -f "$file" ]; then
+		echo "${name}_FILE does not exist: $file" >&2
+		exit 1
+	fi
+	value="$(sed -e 's/\r$//' "$file" | head -n 1)"
+	export "$name=$value"
+}
+
+load_secret_file POSTGRES_PASSWORD
+load_secret_file RESTIC_PASSWORD
+
 require_env POSTGRES_DB
 require_env POSTGRES_USER
 require_env POSTGRES_PASSWORD

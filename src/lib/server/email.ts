@@ -1,6 +1,6 @@
 import { dev } from '$app/environment';
-import { env } from '$env/dynamic/private';
 import { defaultLocale, translate, type SupportedLocale } from '$lib/i18n';
+import { getPrivateEnv, getPrivateSecret } from '$lib/server/config';
 import nodemailer from 'nodemailer';
 
 type MailInput = {
@@ -13,7 +13,7 @@ type MailInput = {
 type MailProvider = 'auto' | 'mailjet' | 'sender' | 'smtp' | 'log';
 
 function configuredProvider(): MailProvider {
-	const provider = (env.EMAIL_PROVIDER || 'auto').trim().toLowerCase();
+	const provider = (getPrivateEnv('EMAIL_PROVIDER') || 'auto').trim().toLowerCase();
 	if (
 		provider === 'mailjet' ||
 		provider === 'sender' ||
@@ -26,11 +26,15 @@ function configuredProvider(): MailProvider {
 }
 
 function mailjetApiConfigured() {
-	return Boolean(env.MAILJET_API_KEY && env.MAILJET_SECRET_KEY && env.MAILJET_FROM);
+	return Boolean(
+		getPrivateSecret('MAILJET_API_KEY') &&
+		getPrivateSecret('MAILJET_SECRET_KEY') &&
+		getPrivateEnv('MAILJET_FROM')
+	);
 }
 
 function senderApiConfigured() {
-	return Boolean(env.SENDER_API_TOKEN && env.SENDER_FROM);
+	return Boolean(getPrivateSecret('SENDER_API_TOKEN') && getPrivateEnv('SENDER_FROM'));
 }
 
 export async function sendMail(input: MailInput) {
@@ -75,9 +79,9 @@ export async function sendMail(input: MailInput) {
 }
 
 async function sendSmtpMail(input: MailInput, provider: MailProvider) {
-	const smtpHost = env.SMTP_HOST;
-	const smtpPort = env.SMTP_PORT;
-	const smtpFrom = env.SMTP_FROM;
+	const smtpHost = getPrivateEnv('SMTP_HOST');
+	const smtpPort = getPrivateEnv('SMTP_PORT');
+	const smtpFrom = getPrivateEnv('SMTP_FROM');
 
 	if (!smtpHost || !smtpPort || !smtpFrom) {
 		if (provider === 'smtp') {
@@ -86,7 +90,7 @@ async function sendSmtpMail(input: MailInput, provider: MailProvider) {
 			);
 		}
 
-		if (dev || env.EMAIL_DELIVERY === 'log') {
+		if (dev || getPrivateEnv('EMAIL_DELIVERY') === 'log') {
 			logEmail(input);
 			return;
 		}
@@ -99,12 +103,12 @@ async function sendSmtpMail(input: MailInput, provider: MailProvider) {
 	const transporter = nodemailer.createTransport({
 		host: smtpHost,
 		port: Number.parseInt(smtpPort, 10),
-		secure: env.SMTP_SECURE === 'true',
+		secure: getPrivateEnv('SMTP_SECURE') === 'true',
 		auth:
-			env.SMTP_USER && env.SMTP_PASSWORD
+			getPrivateEnv('SMTP_USER') && getPrivateSecret('SMTP_PASSWORD')
 				? {
-						user: env.SMTP_USER,
-						pass: env.SMTP_PASSWORD
+						user: getPrivateEnv('SMTP_USER'),
+						pass: getPrivateSecret('SMTP_PASSWORD')
 					}
 				: undefined
 	});
@@ -127,10 +131,10 @@ function logEmail(input: MailInput) {
 }
 
 async function sendMailjetApiMail(input: MailInput) {
-	const from = parseMailbox(env.MAILJET_FROM || '');
-	const authorization = Buffer.from(`${env.MAILJET_API_KEY}:${env.MAILJET_SECRET_KEY}`).toString(
-		'base64'
-	);
+	const from = parseMailbox(getPrivateEnv('MAILJET_FROM') || '');
+	const authorization = Buffer.from(
+		`${getPrivateSecret('MAILJET_API_KEY')}:${getPrivateSecret('MAILJET_SECRET_KEY')}`
+	).toString('base64');
 	const response = await fetch('https://api.mailjet.com/v3.1/send', {
 		method: 'POST',
 		headers: {
@@ -158,12 +162,12 @@ async function sendMailjetApiMail(input: MailInput) {
 }
 
 async function sendSenderApiMail(input: MailInput) {
-	const from = parseMailbox(env.SENDER_FROM || '');
+	const from = parseMailbox(getPrivateEnv('SENDER_FROM') || '');
 	const response = await fetch('https://api.sender.net/v2/message/send', {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			Authorization: `Bearer ${env.SENDER_API_TOKEN}`,
+			Authorization: `Bearer ${getPrivateSecret('SENDER_API_TOKEN')}`,
 			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
