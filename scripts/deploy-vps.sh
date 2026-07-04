@@ -209,7 +209,10 @@ write_compose_secret_file() {
 	mkdir -p secrets
 	chmod 700 secrets
 	printf '%s' "${value}" > "secrets/${secret_name}"
-	chmod 600 "secrets/${secret_name}"
+	# Docker Compose file secrets are bind mounts in standalone mode. Keep the
+	# directory private on the host, but make mounted files readable to
+	# cap-dropped/non-root containers.
+	chmod 444 "secrets/${secret_name}"
 }
 
 write_compose_secret_files() {
