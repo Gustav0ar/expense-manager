@@ -69,7 +69,14 @@ export const actions: Actions = {
 		if (!parsed.success)
 			return fail(400, { message: translate(event.locals.locale, 'Check expense data.') });
 
-		await createExpense(context, parsed.data);
+		try {
+			await createExpense(context, parsed.data);
+		} catch (err) {
+			if (isHttpError(err) && err.status < 500) {
+				return fail(err.status, { message: err.body.message });
+			}
+			throw err;
+		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
 	createCatalog: async (event) => {
@@ -161,7 +168,14 @@ export const actions: Actions = {
 		if (!parsed.success)
 			return fail(400, { message: translate(event.locals.locale, 'Check review data.') });
 
-		await reviewExpense(context, parsed.data.id, parsed.data);
+		try {
+			await reviewExpense(context, parsed.data.id, parsed.data);
+		} catch (err) {
+			if (isHttpError(err) && err.status < 500) {
+				return fail(err.status, { message: err.body.message });
+			}
+			throw err;
+		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
 	payment: async (event) => {
@@ -171,7 +185,14 @@ export const actions: Actions = {
 		if (!parsed.success)
 			return fail(400, { message: translate(event.locals.locale, 'Check payment data.') });
 
-		await updateExpensePaymentStatus(context, parsed.data.id, parsed.data);
+		try {
+			await updateExpensePaymentStatus(context, parsed.data.id, parsed.data);
+		} catch (err) {
+			if (isHttpError(err) && err.status < 500) {
+				return fail(err.status, { message: err.body.message });
+			}
+			throw err;
+		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
 	attach: async (event) => {
@@ -183,7 +204,14 @@ export const actions: Actions = {
 			return fail(400, { message: translate(event.locals.locale, 'Invalid attachment.') });
 		}
 
-		await saveExpenseAttachment(context, id.data, file);
+		try {
+			await saveExpenseAttachment(context, id.data, file);
+		} catch (err) {
+			if (isHttpError(err) && err.status < 500) {
+				return fail(err.status, { message: err.body.message });
+			}
+			throw err;
+		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	}
 };

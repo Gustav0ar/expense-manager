@@ -147,7 +147,7 @@ export async function removeExpenseCatalogItem(
 		const recurringCount = Number(usage.recurring_count ?? 0);
 		const rows = await executeCatalogRows(
 			tx,
-			expenseCount > 0
+			expenseCount > 0 || recurringCount > 0
 				? archiveCatalogSql(input.kind, context.workspaceId, input.id)
 				: deleteCatalogSql(input.kind, context.workspaceId, input.id)
 		);
@@ -166,7 +166,7 @@ export async function removeExpenseCatalogItem(
 				expenseCount,
 				recurringCount
 			},
-			mode: expenseCount > 0 ? ('archived' as const) : ('deleted' as const)
+			mode: expenseCount > 0 || recurringCount > 0 ? ('archived' as const) : ('deleted' as const)
 		};
 	});
 
@@ -316,7 +316,7 @@ async function listPaymentMethods(workspaceId: number, includeArchived: boolean)
 			count(distinct e.id)::int as expense_count,
 			count(distinct re.id)::int as recurring_count
 		from payment_method pm
-		left join expense e on e.workspace_id = pm.workspace_id and e.payment_method_id = pm.id
+		left join expense e on e.workspace_id = pm.workspace_id and e.payment_method_id = pm.id and e.deleted_at is null
 		left join recurring_expense re on re.workspace_id = pm.workspace_id and re.payment_method_id = pm.id
 		where pm.workspace_id = ${workspaceId}
 			${includeArchived ? sql`` : sql`and pm.is_archived = false`}
@@ -336,7 +336,7 @@ async function listVendors(workspaceId: number, includeArchived: boolean) {
 			count(distinct e.id)::int as expense_count,
 			0::int as recurring_count
 		from vendor v
-		left join expense e on e.workspace_id = v.workspace_id and e.vendor_id = v.id
+		left join expense e on e.workspace_id = v.workspace_id and e.vendor_id = v.id and e.deleted_at is null
 		where v.workspace_id = ${workspaceId}
 			${includeArchived ? sql`` : sql`and v.is_archived = false`}
 		group by v.id, v.name, v.is_archived, v.created_at
@@ -355,7 +355,7 @@ async function listCostCenters(workspaceId: number, includeArchived: boolean) {
 			count(distinct e.id)::int as expense_count,
 			0::int as recurring_count
 		from cost_center cc
-		left join expense e on e.workspace_id = cc.workspace_id and e.cost_center_id = cc.id
+		left join expense e on e.workspace_id = cc.workspace_id and e.cost_center_id = cc.id and e.deleted_at is null
 		where cc.workspace_id = ${workspaceId}
 			${includeArchived ? sql`` : sql`and cc.is_archived = false`}
 		group by cc.id, cc.name, cc.is_archived, cc.created_at
@@ -569,7 +569,7 @@ function selectCatalogUsageSql(kind: ExpenseCatalogKind, workspaceId: number, id
 				count(distinct e.id)::int as expense_count,
 				count(distinct re.id)::int as recurring_count
 			from payment_method pm
-			left join expense e on e.workspace_id = pm.workspace_id and e.payment_method_id = pm.id
+			left join expense e on e.workspace_id = pm.workspace_id and e.payment_method_id = pm.id and e.deleted_at is null
 			left join recurring_expense re on re.workspace_id = pm.workspace_id and re.payment_method_id = pm.id
 			where pm.workspace_id = ${workspaceId} and pm.id = ${id}
 			group by pm.id, pm.name, pm.is_archived, pm.created_at
@@ -586,7 +586,7 @@ function selectCatalogUsageSql(kind: ExpenseCatalogKind, workspaceId: number, id
 				count(distinct e.id)::int as expense_count,
 				0::int as recurring_count
 			from vendor v
-			left join expense e on e.workspace_id = v.workspace_id and e.vendor_id = v.id
+			left join expense e on e.workspace_id = v.workspace_id and e.vendor_id = v.id and e.deleted_at is null
 			where v.workspace_id = ${workspaceId} and v.id = ${id}
 			group by v.id, v.name, v.is_archived, v.created_at
 			limit 1
@@ -601,7 +601,7 @@ function selectCatalogUsageSql(kind: ExpenseCatalogKind, workspaceId: number, id
 			count(distinct e.id)::int as expense_count,
 			0::int as recurring_count
 		from cost_center cc
-		left join expense e on e.workspace_id = cc.workspace_id and e.cost_center_id = cc.id
+		left join expense e on e.workspace_id = cc.workspace_id and e.cost_center_id = cc.id and e.deleted_at is null
 		where cc.workspace_id = ${workspaceId} and cc.id = ${id}
 		group by cc.id, cc.name, cc.is_archived, cc.created_at
 		limit 1

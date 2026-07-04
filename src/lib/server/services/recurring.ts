@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { and, asc, eq, gte, lte, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import {
 	auditEvent,
@@ -131,6 +131,20 @@ export async function materializeDueRecurringExpenses(
 ) {
 	if (!canWriteExpenses(context.role)) throw error(403, 'Permission denied.');
 
+	// Pause schedules whose endDate has already passed nextRunDate but were
+	// never selected by the main query (because they aren't due). Without this,
+	// they remain status='active' indefinitely.
+	await db
+		.update(recurringExpense)
+		.set({ status: 'paused' })
+		.where(
+			and(
+				eq(recurringExpense.workspaceId, context.workspaceId),
+				eq(recurringExpense.status, 'active'),
+				lt(recurringExpense.endDate, recurringExpense.nextRunDate)
+			)
+		);
+
 	const schedules = await db
 		.select()
 		.from(recurringExpense)
@@ -171,30 +185,51 @@ export async function materializeDueRecurringExpenses(
 			}
 
 			if (dates.length > 0) {
-				const inserted = await tx
-					.insert(expense)
-					.values(
-						dates.map((expenseDate) => ({
-							workspaceId: schedule.workspaceId,
-							categoryId: schedule.categoryId,
-							createdByUserId: schedule.createdByUserId,
-							description: schedule.description,
-							amountCents: schedule.amountCents,
-							currency: schedule.currency,
-							expenseDate,
-							paymentMethodId: schedule.paymentMethodId,
-							paymentMethod: schedule.paymentMethod,
-							notes: schedule.notes,
-							sourceRecurringExpenseId: schedule.id,
-							reviewStatus,
-							reviewedByUserId,
-							reviewedAt
-						}))
-					)
-					.onConflictDoNothing()
-					.returning({ id: expense.id });
+				// Filter out dates that already have a non-deleted materialized expense
+				// for this schedule. The unique index is partial on deleted_at IS NULL,
+				// so onConflictDoNothing cannot detect a soft-deleted duplicate. We
+				// handle this explicitly to prevent accidental re-insertion when
+				// nextRunDate is reset, while still allowing intentional re-creation
+				// after a user deletes a specific occurrence.
+				const existing = await tx
+					.select({ expenseDate: expense.expenseDate })
+					.from(expense)
+					.where(
+						and(
+							eq(expense.sourceRecurringExpenseId, schedule.id),
+							inArray(expense.expenseDate, dates),
+							isNull(expense.deletedAt)
+						)
+					);
+				const existingDates = new Set(existing.map((r) => r.expenseDate));
+				const datesToInsert = dates.filter((d) => !existingDates.has(d));
 
-				createdCount += inserted.length;
+				if (datesToInsert.length > 0) {
+					const inserted = await tx
+						.insert(expense)
+						.values(
+							datesToInsert.map((expenseDate) => ({
+								workspaceId: schedule.workspaceId,
+								categoryId: schedule.categoryId,
+								createdByUserId: schedule.createdByUserId,
+								description: schedule.description,
+								amountCents: schedule.amountCents,
+								currency: schedule.currency,
+								expenseDate,
+								paymentMethodId: schedule.paymentMethodId,
+								paymentMethod: schedule.paymentMethod,
+								notes: schedule.notes,
+								sourceRecurringExpenseId: schedule.id,
+								reviewStatus,
+								reviewedByUserId,
+								reviewedAt
+							}))
+						)
+						.onConflictDoNothing()
+						.returning({ id: expense.id });
+
+					createdCount += inserted.length;
+				}
 			}
 
 			const shouldPause = schedule.endDate != null && nextRunDate > schedule.endDate;
