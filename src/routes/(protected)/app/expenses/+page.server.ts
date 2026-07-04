@@ -124,7 +124,14 @@ export const actions: Actions = {
 		if (!id.success || !parsed.success)
 			return fail(400, { message: translate(event.locals.locale, 'Check expense data.') });
 
-		await updateExpense(context, id.data, parsed.data);
+		try {
+			await updateExpense(context, id.data, parsed.data);
+		} catch (err) {
+			if (isHttpError(err) && err.status < 500) {
+				return fail(err.status, { message: err.body.message });
+			}
+			throw err;
+		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
 	delete: async (event) => {
@@ -134,7 +141,14 @@ export const actions: Actions = {
 		if (!id.success)
 			return fail(400, { message: translate(event.locals.locale, 'Invalid expense.') });
 
-		await deleteExpense(context, id.data);
+		try {
+			await deleteExpense(context, id.data);
+		} catch (err) {
+			if (isHttpError(err) && err.status < 500) {
+				return fail(err.status, { message: err.body.message });
+			}
+			throw err;
+		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
 	review: async (event) => {
