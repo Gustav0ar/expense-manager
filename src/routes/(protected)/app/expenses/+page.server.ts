@@ -127,8 +127,11 @@ export const actions: Actions = {
 		try {
 			await updateExpense(context, id.data, parsed.data);
 		} catch (err) {
-			if (isHttpError(err) && err.status < 500) {
-				return fail(err.status, { message: err.body.message });
+			// 409 means a concurrent modification was detected between the SELECT
+			// and the UPDATE; surface it as an inline form message so the user can
+			// reload and retry without losing context.
+			if (isHttpError(err) && err.status === 409) {
+				return fail(409, { message: err.body.message });
 			}
 			throw err;
 		}
@@ -144,8 +147,8 @@ export const actions: Actions = {
 		try {
 			await deleteExpense(context, id.data);
 		} catch (err) {
-			if (isHttpError(err) && err.status < 500) {
-				return fail(err.status, { message: err.body.message });
+			if (isHttpError(err) && err.status === 409) {
+				return fail(409, { message: err.body.message });
 			}
 			throw err;
 		}
