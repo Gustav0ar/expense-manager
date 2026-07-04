@@ -63,6 +63,9 @@ rollback_images() {
 
 	echo "Reverting containers from ${IMAGE_TAG} to ${previous_image_tag}."
 	upsert_env_var IMAGE_TAG "${previous_image_tag}"
+	ensure_legacy_auth_secret
+	ensure_legacy_database_url
+	write_compose_secret_files
 	export IMAGE_TAG="${previous_image_tag}"
 
 	rollback_services=(app)
@@ -127,6 +130,14 @@ upsert_env_var() {
 	rm -f "${tmp_file}"
 }
 
+delete_env_var() {
+	key="$1"
+	tmp_file="$(mktemp)"
+	grep -v -E "^${key}=" .env > "${tmp_file}" || true
+	cat "${tmp_file}" > .env
+	rm -f "${tmp_file}"
+}
+
 read_env_var() {
 	key="$1"
 	grep -E "^${key}=" .env | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//' || true
@@ -182,6 +193,61 @@ ensure_compose_secret_defaults() {
 			upsert_env_var "${key}" ""
 		fi
 	done
+}
+
+write_compose_secret_file() {
+	secret_name="$1"
+	env_key="$2"
+	required="$3"
+	value="$(read_env_var "${env_key}")"
+
+	if [ "${required}" = "required" ] && [ -z "${value}" ]; then
+		echo "${env_key} is required to create Compose secret ${secret_name}."
+		exit 1
+	fi
+
+	mkdir -p secrets
+	chmod 700 secrets
+	printf '%s' "${value}" > "secrets/${secret_name}"
+	chmod 600 "secrets/${secret_name}"
+}
+
+write_compose_secret_files() {
+	write_compose_secret_file better_auth_secret BETTER_AUTH_SECRET required
+	write_compose_secret_file postgres_password POSTGRES_PASSWORD required
+	write_compose_secret_file restic_password RESTIC_PASSWORD optional
+}
+
+ensure_legacy_auth_secret() {
+	auth_secret="$(read_env_var BETTER_AUTH_SECRET)"
+	if [ -z "${auth_secret}" ]; then
+		echo "BETTER_AUTH_SECRET is required to build legacy auth compatibility settings."
+		exit 1
+	fi
+
+	upsert_env_var BETTER_AUTH_SECRET_COMPAT "${auth_secret}"
+}
+
+ensure_legacy_database_url() {
+	postgres_user="$(read_env_var POSTGRES_USER)"
+	postgres_db="$(read_env_var POSTGRES_DB)"
+	postgres_password="$(read_env_var POSTGRES_PASSWORD)"
+	if [ -z "${postgres_user}" ] || [ -z "${postgres_db}" ] || [ -z "${postgres_password}" ]; then
+		echo "POSTGRES_USER, POSTGRES_DB and POSTGRES_PASSWORD are required to build legacy DATABASE_URL."
+		exit 1
+	fi
+
+	database_url="$(POSTGRES_USER="${postgres_user}" POSTGRES_PASSWORD="${postgres_password}" POSTGRES_DB="${postgres_db}" python3 - <<'PY'
+import os
+from urllib.parse import quote
+
+user = quote(os.environ["POSTGRES_USER"], safe="")
+password = quote(os.environ["POSTGRES_PASSWORD"], safe="")
+database = quote(os.environ["POSTGRES_DB"], safe="")
+print(f"postgresql://{user}:{password}@postgres:5432/{database}")
+PY
+)"
+	upsert_env_var DATABASE_URL "${database_url}"
 }
 
 cleanup_old_application_images() {
@@ -347,6 +413,9 @@ fi
 chmod 600 .env
 normalize_domain_name
 ensure_compose_secret_defaults
+write_compose_secret_files
+delete_env_var BETTER_AUTH_SECRET_COMPAT
+delete_env_var DATABASE_URL
 
 previous_image_tag="$(read_env_var IMAGE_TAG)"
 if [ -n "${previous_image_tag}" ] && [ "${previous_image_tag}" != "${IMAGE_TAG}" ]; then

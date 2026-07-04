@@ -55,12 +55,12 @@ describe('private server configuration', () => {
 		expect(getPrivateSecret('POSTGRES_PASSWORD')).toBe('secret-from-file');
 	});
 
-	it('prefers direct environment values over *_FILE values', () => {
+	it('prefers *_FILE values over direct compatibility environment values', () => {
 		const secretFile = writeTempSecret('postgres-password', 'secret-from-file\n');
 		privateEnv.POSTGRES_PASSWORD = 'direct-secret';
 		privateEnv.POSTGRES_PASSWORD_FILE = secretFile;
 
-		expect(getPrivateSecret('POSTGRES_PASSWORD')).toBe('direct-secret');
+		expect(getPrivateSecret('POSTGRES_PASSWORD')).toBe('secret-from-file');
 	});
 
 	it('builds an encoded Postgres URL from split connection settings and a secret file', () => {
