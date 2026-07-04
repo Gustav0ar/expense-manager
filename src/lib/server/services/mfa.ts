@@ -1,7 +1,7 @@
 import { error } from '@sveltejs/kit';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { env } from '$env/dynamic/private';
 import { and, eq, gt, isNull, lte, or, sql } from 'drizzle-orm';
+import { getPrivateEnv, getPrivateSecret } from '$lib/server/config';
 import { db } from '$lib/server/db';
 import { auditEvent, mfaSession, userMfaConfig } from '$lib/server/db/schema';
 import { safeEqual, sha256 } from '$lib/server/utils/crypto';
@@ -34,7 +34,7 @@ export async function beginMfaSetup(input: { email: string }) {
 	return {
 		secret,
 		otpAuthUri: buildOtpAuthUri({
-			issuer: env.PUBLIC_APP_NAME || 'Expense Manager',
+			issuer: getPrivateEnv('PUBLIC_APP_NAME') || 'Expense Manager',
 			account: input.email,
 			secret
 		})
@@ -276,8 +276,9 @@ function decryptSecret(payload: string) {
 }
 
 function encryptionKey() {
-	if (!env.BETTER_AUTH_SECRET) throw error(500, 'BETTER_AUTH_SECRET is not configured.');
-	return createHash('sha256').update(env.BETTER_AUTH_SECRET).digest();
+	const secret = getPrivateSecret('BETTER_AUTH_SECRET');
+	if (!secret) throw error(500, 'BETTER_AUTH_SECRET is not configured.');
+	return createHash('sha256').update(secret).digest();
 }
 
 function generateRecoveryCodes() {

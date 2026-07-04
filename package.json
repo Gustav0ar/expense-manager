@@ -25,6 +25,7 @@
 		"test:performance": "playwright test --config playwright.performance.config.ts",
 		"test:infrastructure": "pnpm build && playwright test --config playwright.infrastructure.config.ts",
 		"test:smoke": "playwright test --config playwright.smoke.config.ts",
+		"test:prometheus-rules": "scripts/ops/test-prometheus-rules.sh",
 		"test:quality": "pnpm test:visual && pnpm test:performance && pnpm test:infrastructure && pnpm test:smoke",
 		"verify": "pnpm check && pnpm lint && pnpm test:coverage && pnpm build && pnpm test:e2e && pnpm test:quality",
 		"db:push": "drizzle-kit push",

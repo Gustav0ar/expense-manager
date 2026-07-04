@@ -221,6 +221,7 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
           REGISTRY: ${{ vars.REGISTRY || 'ghcr.io' }}
           IMAGE_OWNER_LOWERCASE: ${{ vars.IMAGE_OWNER_LOWERCASE }}
+          IMAGE_CLEANUP_ENABLED: ${{ vars.IMAGE_CLEANUP_ENABLED || 'true' }}
           TRAEFIK_NETWORK: ${{ vars.TRAEFIK_NETWORK || 'web' }}
           TRAEFIK_HTTP_ENTRYPOINT: ${{ vars.TRAEFIK_HTTP_ENTRYPOINT || 'web' }}
           TRAEFIK_ENTRYPOINT: ${{ vars.TRAEFIK_ENTRYPOINT || 'websecure' }}
@@ -365,6 +366,7 @@ jobs:
             write_env_var AWS_DEFAULT_REGION "${AWS_DEFAULT_REGION}"
             write_env_var REGISTRY "${REGISTRY}"
             write_env_var IMAGE_OWNER_LOWERCASE "${IMAGE_OWNER_LOWERCASE}"
+            write_env_var IMAGE_CLEANUP_ENABLED "${IMAGE_CLEANUP_ENABLED}"
             write_env_var TRAEFIK_NETWORK "${TRAEFIK_NETWORK}"
             write_env_var TRAEFIK_HTTP_ENTRYPOINT "${TRAEFIK_HTTP_ENTRYPOINT}"
             write_env_var TRAEFIK_ENTRYPOINT "${TRAEFIK_ENTRYPOINT}"

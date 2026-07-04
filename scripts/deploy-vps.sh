@@ -143,6 +143,17 @@ backup_enabled() {
 	esac
 }
 
+image_cleanup_enabled() {
+	case "$(read_env_var IMAGE_CLEANUP_ENABLED | tr '[:upper:]' '[:lower:]')" in
+		"" | true | 1 | yes | on) return 0 ;;
+		false | 0 | no | off) return 1 ;;
+		*)
+			echo "IMAGE_CLEANUP_ENABLED must be true or false."
+			exit 1
+			;;
+	esac
+}
+
 normalize_domain_name() {
 	raw_domain="$(read_env_var DOMAIN_NAME)"
 	normalized_domain="$(printf '%s' "${raw_domain}" \
@@ -163,6 +174,57 @@ normalize_domain_name() {
 		echo "ORIGIN is missing; setting it from DOMAIN_NAME."
 		upsert_env_var ORIGIN "https://${normalized_domain}"
 	fi
+}
+
+ensure_compose_secret_defaults() {
+	for key in RESTIC_PASSWORD; do
+		if ! grep -Eq "^${key}=" .env; then
+			upsert_env_var "${key}" ""
+		fi
+	done
+}
+
+cleanup_old_application_images() {
+	if ! image_cleanup_enabled; then
+		echo "Image cleanup disabled by IMAGE_CLEANUP_ENABLED=false."
+		return 0
+	fi
+
+	keep_tags=(
+		"${IMAGE_TAG}"
+		"$(read_env_var PREVIOUS_IMAGE_TAG)"
+		"$(read_env_var LAST_SUCCESSFUL_IMAGE_TAG)"
+		"$(read_env_var LAST_ROLLBACK_IMAGE_TAG)"
+		latest
+	)
+
+	echo "Cleaning old Expense Manager image tags."
+	for suffix in app migrate backup; do
+		repository="${REGISTRY}/${IMAGE_OWNER}/expense-manager-${suffix}"
+		"${CONTAINER_CLI}" image ls --format '{{.Repository}} {{.Tag}} {{.ID}}' "${repository}" |
+			while read -r image_repository image_tag image_id; do
+				[ -n "${image_repository}" ] || continue
+				[ "${image_tag}" != "<none>" ] || continue
+
+				keep_image=false
+				for keep_tag in "${keep_tags[@]}"; do
+					if [ -n "${keep_tag}" ] && [ "${image_tag}" = "${keep_tag}" ]; then
+						keep_image=true
+						break
+					fi
+				done
+
+				if [ "${keep_image}" = true ]; then
+					continue
+				fi
+
+				if "${CONTAINER_CLI}" image rm "${image_repository}:${image_tag}" >/dev/null 2>&1; then
+					echo "Removed old image tag ${image_repository}:${image_tag} (${image_id})."
+				else
+					echo "Skipped image tag ${image_repository}:${image_tag}; it may still be in use."
+				fi
+			done
+	done
 }
 
 curl_public_route() {
@@ -284,6 +346,7 @@ if [ ! -f .env ]; then
 fi
 chmod 600 .env
 normalize_domain_name
+ensure_compose_secret_defaults
 
 previous_image_tag="$(read_env_var IMAGE_TAG)"
 if [ -n "${previous_image_tag}" ] && [ "${previous_image_tag}" != "${IMAGE_TAG}" ]; then
@@ -324,3 +387,4 @@ verify_public_routes || rollback_images "Public route smoke check failed"
 
 upsert_env_var LAST_SUCCESSFUL_IMAGE_TAG "${IMAGE_TAG}"
 upsert_env_var LAST_SUCCESSFUL_DEPLOY_SHA "${HEAD_SHA}"
+cleanup_old_application_images

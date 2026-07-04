@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
   packages: write
 
 env:
@@ -46,7 +48,8 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push app image
+      - id: build-app
+        name: Build and push app image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -54,11 +57,19 @@ jobs:
           target: runner
           push: true
           platforms: ${{ env.CONTAINER_PLATFORMS }}
-          provenance: false
+          provenance: mode=max
+          sbom: true
           labels: ${{ steps.meta-app.outputs.labels }}
           tags: ${{ steps.meta-app.outputs.tags }}
           cache-from: type=gha,scope=app
           cache-to: type=gha,mode=max,scope=app
+
+      - name: Attest app image provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ steps.image-prefix.outputs.value }}-app
+          subject-digest: ${{ steps.build-app.outputs.digest }}
+          push-to-registry: true
 
       - id: meta-migrate
         uses: docker/metadata-action@v5
@@ -70,7 +81,8 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push migration image
+      - id: build-migrate
+        name: Build and push migration image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -78,11 +90,19 @@ jobs:
           target: migrator
           push: true
           platforms: ${{ env.CONTAINER_PLATFORMS }}
-          provenance: false
+          provenance: mode=max
+          sbom: true
           labels: ${{ steps.meta-migrate.outputs.labels }}
           tags: ${{ steps.meta-migrate.outputs.tags }}
           cache-from: type=gha,scope=migrate
           cache-to: type=gha,mode=max,scope=migrate
+
+      - name: Attest migration image provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ steps.image-prefix.outputs.value }}-migrate
+          subject-digest: ${{ steps.build-migrate.outputs.digest }}
+          push-to-registry: true
 
       - id: meta-backup
         uses: docker/metadata-action@v5
@@ -94,7 +114,8 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push backup image
+      - id: build-backup
+        name: Build and push backup image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -102,8 +123,16 @@ jobs:
           target: backup
           push: true
           platforms: ${{ env.CONTAINER_PLATFORMS }}
-          provenance: false
+          provenance: mode=max
+          sbom: true
           labels: ${{ steps.meta-backup.outputs.labels }}
           tags: ${{ steps.meta-backup.outputs.tags }}
           cache-from: type=gha,scope=backup
           cache-to: type=gha,mode=max,scope=backup
+
+      - name: Attest backup image provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ steps.image-prefix.outputs.value }}-backup
+          subject-digest: ${{ steps.build-backup.outputs.digest }}
+          push-to-registry: true

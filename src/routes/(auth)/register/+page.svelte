@@ -11,6 +11,11 @@
 	function t(key: string) {
 		return translate(data.locale, key);
 	}
+
+	function submitLocaleForm(event: Event) {
+		const select = event.currentTarget as HTMLSelectElement;
+		select.form?.requestSubmit();
+	}
 </script>
 
 <svelte:head>
@@ -19,7 +24,27 @@
 
 <main class="auth-page">
 	<section class="auth-panel">
-		<a class="brand" href={resolve('/')}>Expense Manager</a>
+		<div class="auth-header">
+			<a class="brand" href={resolve('/')}>Expense Manager</a>
+			<form class="locale-form" method="post" action={resolve('/locale')}>
+				<input type="hidden" name="returnTo" value={data.returnTo} />
+				<label class="screen-reader-label" for="register-locale">{t('Language')}</label>
+				<select
+					id="register-locale"
+					name="locale"
+					aria-label={t('Language')}
+					onchange={submitLocaleForm}
+				>
+					<option value="system" selected={data.localePreference === 'system'}>
+						🌐 {t('Device language')}
+					</option>
+					<option value="en" selected={data.localePreference === 'en'}>🇺🇸 {t('English')}</option>
+					<option value="pt-BR" selected={data.localePreference === 'pt-BR'}>
+						🇧🇷 {t('Portuguese (Brazil)')}
+					</option>
+				</select>
+			</form>
+		</div>
 		<h1>{t('Create account')}</h1>
 
 		{#if form?.message}

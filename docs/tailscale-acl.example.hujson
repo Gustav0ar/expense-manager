@@ -1,0 +1,105 @@
+// Example Tailscale ACL policy for a private VPS + NAS setup.
+// Replace users, groups and tags with your tailnet conventions before applying
+// this in the Tailscale admin console. This file is intentionally generic and
+// must not contain real device IPs, personal domains or secrets.
+{
+  "groups": {
+    "group:infra-admins": ["admin@example.com"],
+  },
+
+  "tagOwners": {
+    "tag:expenses-vps": ["group:infra-admins"],
+    "tag:home-nas": ["group:infra-admins"],
+    "tag:admin-device": ["group:infra-admins"],
+  },
+
+  "acls": [
+    // Admin devices can reach private management UIs over the tailnet.
+    {
+      "action": "accept",
+      "src": ["tag:admin-device"],
+      "dst": [
+        "tag:expenses-vps:3001,3002,3003,3004",
+        "tag:home-nas:3003",
+      ],
+    },
+
+    // The VPS can push encrypted backups to the NAS over SSH/SFTP and scrape
+    // NAS health/log collector metrics.
+    {
+      "action": "accept",
+      "src": ["tag:expenses-vps"],
+      "dst": [
+        "tag:home-nas:2202",
+        "tag:home-nas:8081",
+        "tag:home-nas:9100",
+        "tag:home-nas:12345",
+        "tag:home-nas:3003",
+      ],
+    },
+
+    // The NAS log collector can push Docker logs to the private Loki endpoint
+    // on the VPS.
+    {
+      "action": "accept",
+      "src": ["tag:home-nas"],
+      "dst": ["tag:expenses-vps:3100"],
+    },
+  ],
+
+  "ssh": [
+    // Keep interactive SSH restricted to infra admins. The backup SSH key on
+    // the NAS should still be restricted in authorized_keys.
+    {
+      "action": "accept",
+      "src": ["group:infra-admins"],
+      "dst": ["tag:expenses-vps", "tag:home-nas"],
+      "users": ["autogroup:nonroot", "root"],
+    },
+  ],
+
+  "tests": [
+    {
+      "src": "tag:admin-device",
+      "accept": [
+        "tag:expenses-vps:3001",
+        "tag:expenses-vps:3002",
+        "tag:expenses-vps:3003",
+        "tag:expenses-vps:3004",
+        "tag:home-nas:3003",
+      ],
+      "deny": [
+        "tag:expenses-vps:9090",
+        "tag:expenses-vps:9093",
+        "tag:expenses-vps:3100",
+        "tag:home-nas:9100",
+      ],
+    },
+    {
+      "src": "tag:expenses-vps",
+      "accept": [
+        "tag:home-nas:2202",
+        "tag:home-nas:8081",
+        "tag:home-nas:9100",
+        "tag:home-nas:12345",
+        "tag:home-nas:3003",
+      ],
+      "deny": [
+        "tag:home-nas:22",
+        "tag:expenses-vps:3002",
+      ],
+    },
+    {
+      "src": "tag:home-nas",
+      "accept": [
+        "tag:expenses-vps:3100",
+      ],
+      "deny": [
+        "tag:expenses-vps:3002",
+        "tag:expenses-vps:3004",
+        "tag:expenses-vps:9090",
+        "tag:expenses-vps:9093",
+      ],
+    },
+  ],
+}

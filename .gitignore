@@ -13,6 +13,10 @@ node_modules
 .DS_Store
 Thumbs.db
 
+# Agent scratch/worktree directories
+.claude/
+.codex/
+
 # Env
 .env
 .env.*
