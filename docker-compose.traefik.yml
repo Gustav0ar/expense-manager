@@ -24,6 +24,7 @@ services:
       ORIGIN: ${ORIGIN:?set ORIGIN}
       TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
       BETTER_AUTH_SECRET_FILE: /run/secrets/better_auth_secret
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET_COMPAT:-}
       REQUIRE_EMAIL_VERIFICATION: ${REQUIRE_EMAIL_VERIFICATION:-true}
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
       POSTGRES_HOST: postgres
@@ -31,6 +32,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      DATABASE_URL: ${DATABASE_URL:-}
       DB_POOL_MAX: ${DB_POOL_MAX:-5}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
       UPLOAD_DIR: /app/uploads
@@ -218,8 +220,8 @@ networks:
 
 secrets:
   better_auth_secret:
-    environment: BETTER_AUTH_SECRET
+    file: ${BETTER_AUTH_SECRET_SOURCE_FILE:-./secrets/better_auth_secret}
   postgres_password:
-    environment: POSTGRES_PASSWORD
+    file: ${POSTGRES_PASSWORD_SOURCE_FILE:-./secrets/postgres_password}
   restic_password:
-    environment: RESTIC_PASSWORD
+    file: ${RESTIC_PASSWORD_SOURCE_FILE:-./secrets/restic_password}

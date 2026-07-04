@@ -9,10 +9,12 @@ export function getPrivateEnv(key: string) {
 }
 
 export function getPrivateSecret(key: string) {
+	const fileValue = readSecretFile(key);
+	if (fileValue) return fileValue;
+
 	const directValue = getPrivateEnv(key);
 	if (directValue) return directValue;
-
-	return readSecretFile(key);
+	return undefined;
 }
 
 export function getDatabaseUrl() {
