@@ -187,7 +187,19 @@ async function markVerificationLimit(userId: string, now: Date, deleteAfter: Dat
 
 async function deleteUnverifiedUser(userId: string) {
 	await db.transaction(async (tx) => {
-		await tx.delete(workspace).where(eq(workspace.createdByUserId, userId));
+		// Guard workspace deletion: a user who verified their email between the
+		// throttle check and this call must keep their workspace.
+		await tx.delete(workspace).where(
+			and(
+				eq(workspace.createdByUserId, userId),
+				notExists(
+					tx
+						.select({ id: user.id })
+						.from(user)
+						.where(and(eq(user.id, userId), eq(user.emailVerified, true)))
+				)
+			)
+		);
 		await tx.delete(user).where(and(eq(user.id, userId), eq(user.emailVerified, false)));
 	});
 }

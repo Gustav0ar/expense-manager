@@ -1321,7 +1321,12 @@ test('covers MFA setup, challenge and invalid code handling', async ({ page }) =
 	await page.goto(invitePath);
 	await expect(page).toHaveURL(/\/mfa/);
 	expect(page.url()).toContain(`next=${encodeURIComponent(invitePath)}`);
-	await page.getByLabel('Código do autenticador ou recovery code').fill(generateTotpCode(secret!));
+	// Generate a code one step ahead of the enrollment code so it is guaranteed
+	// to be a different counter value — the enrollment code was already claimed
+	// as lastUsedTotpCounter and cannot be reused within the same step.
+	await page
+		.getByLabel('Código do autenticador ou recovery code')
+		.fill(generateTotpCode(secret!, Date.now() + 31_000));
 	await page.getByRole('button', { name: 'Verificar' }).click();
 	await expect(page).toHaveURL(/\/invite\//);
 	await expect(page.getByRole('button', { name: 'Aceitar convite' })).toBeVisible();

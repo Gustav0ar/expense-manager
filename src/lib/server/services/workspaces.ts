@@ -291,7 +291,24 @@ export async function changeMemberRole(
 		)
 		.returning({ id: workspaceMember.id, userId: workspaceMember.userId });
 
-	if (!member) throw error(404, translate(context.locale, 'Member not found.'));
+	if (!member) {
+		// Check whether the update failed because the actor targeted their own
+		// membership — that's now blocked by the ne(userId) guard and needs a
+		// clearer message than the generic "not found."
+		const [self] = await db
+			.select({ id: workspaceMember.id })
+			.from(workspaceMember)
+			.where(
+				and(
+					eq(workspaceMember.id, memberId),
+					eq(workspaceMember.workspaceId, context.workspaceId),
+					eq(workspaceMember.userId, context.userId)
+				)
+			)
+			.limit(1);
+		if (self) throw error(403, translate(context.locale, 'You cannot change your own role.'));
+		throw error(404, translate(context.locale, 'Member not found.'));
+	}
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,
@@ -320,7 +337,21 @@ export async function removeMember(context: WorkspaceContext, memberId: number) 
 		)
 		.returning({ id: workspaceMember.id });
 
-	if (!member) throw error(404, translate(context.locale, 'Member not found.'));
+	if (!member) {
+		const [self] = await db
+			.select({ id: workspaceMember.id })
+			.from(workspaceMember)
+			.where(
+				and(
+					eq(workspaceMember.id, memberId),
+					eq(workspaceMember.workspaceId, context.workspaceId),
+					eq(workspaceMember.userId, context.userId)
+				)
+			)
+			.limit(1);
+		if (self) throw error(403, translate(context.locale, 'You cannot remove yourself.'));
+		throw error(404, translate(context.locale, 'Member not found.'));
+	}
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,

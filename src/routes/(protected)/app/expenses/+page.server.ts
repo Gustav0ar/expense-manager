@@ -124,7 +124,17 @@ export const actions: Actions = {
 		if (!id.success || !parsed.success)
 			return fail(400, { message: translate(event.locals.locale, 'Check expense data.') });
 
-		await updateExpense(context, id.data, parsed.data);
+		try {
+			await updateExpense(context, id.data, parsed.data);
+		} catch (err) {
+			// 409 means a concurrent modification was detected between the SELECT
+			// and the UPDATE; surface it as an inline form message so the user can
+			// reload and retry without losing context.
+			if (isHttpError(err) && err.status === 409) {
+				return fail(409, { message: err.body.message });
+			}
+			throw err;
+		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
 	delete: async (event) => {
@@ -134,7 +144,14 @@ export const actions: Actions = {
 		if (!id.success)
 			return fail(400, { message: translate(event.locals.locale, 'Invalid expense.') });
 
-		await deleteExpense(context, id.data);
+		try {
+			await deleteExpense(context, id.data);
+		} catch (err) {
+			if (isHttpError(err) && err.status === 409) {
+				return fail(409, { message: err.body.message });
+			}
+			throw err;
+		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
 	review: async (event) => {
