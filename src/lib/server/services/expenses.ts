@@ -535,10 +535,11 @@ export async function updateExpensePaymentStatus(
 
 	if (!current) throw error(404, translate(context.locale, 'Approved expense not found.'));
 
-	// Enforce valid state-machine transitions.
-	if (input.paymentStatus === 'reconciled' && current.paymentStatus === 'unpaid') {
-		throw error(400, translate(context.locale, 'Cannot reconcile an unpaid expense.'));
-	}
+	// Enforce valid state-machine transitions. Downgrading a reconciled expense
+	// back to 'paid' is blocked — reconciliation is a terminal financial state
+	// that should not be silently reversed. All other transitions are allowed,
+	// including unpaid → reconciled (a valid shortcut when reconciling from a
+	// bank import without a separate 'mark as paid' step).
 	if (input.paymentStatus === 'paid' && current.paymentStatus === 'reconciled') {
 		throw error(
 			400,

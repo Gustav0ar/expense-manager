@@ -481,7 +481,6 @@ export const ptBrMessages = {
 	'No baseline': 'Sem base',
 	'Cannot reject a paid or reconciled expense.':
 		'Não é possível rejeitar uma despesa paga ou conciliada.',
-	'Cannot reconcile an unpaid expense.': 'Não é possível conciliar uma despesa não paga.',
 	'Cannot change payment status of a reconciled expense.':
 		'Não é possível alterar o status de pagamento de uma despesa conciliada.',
 	'Review status has changed. Reload and try again.':
