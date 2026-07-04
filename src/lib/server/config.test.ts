@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const privateEnv = vi.hoisted(() => ({}) as Record<string, string | undefined>);
 
@@ -19,15 +19,31 @@ vi.mock('$env/dynamic/private', () => ({
 import { getDatabaseUrl, getPrivateSecret } from './config';
 
 const tempDirs: string[] = [];
-const originalDatabaseUrl = process.env.DATABASE_URL;
+const processEnvKeys = [
+	'DATABASE_URL',
+	'POSTGRES_HOST',
+	'POSTGRES_PORT',
+	'POSTGRES_DB',
+	'POSTGRES_USER',
+	'POSTGRES_PASSWORD',
+	'POSTGRES_PASSWORD_FILE'
+] as const;
+const originalProcessEnv = Object.fromEntries(processEnvKeys.map((key) => [key, process.env[key]]));
 
 describe('private server configuration', () => {
+	beforeEach(() => {
+		for (const key of processEnvKeys) delete process.env[key];
+	});
+
 	afterEach(() => {
 		for (const key of Object.keys(privateEnv)) delete privateEnv[key];
-		if (originalDatabaseUrl === undefined) {
-			delete process.env.DATABASE_URL;
-		} else {
-			process.env.DATABASE_URL = originalDatabaseUrl;
+		for (const key of processEnvKeys) {
+			const originalValue = originalProcessEnv[key];
+			if (originalValue === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = originalValue;
+			}
 		}
 		for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 	});
@@ -48,8 +64,6 @@ describe('private server configuration', () => {
 	});
 
 	it('builds an encoded Postgres URL from split connection settings and a secret file', () => {
-		delete process.env.DATABASE_URL;
-
 		const secretFile = writeTempSecret('postgres-password', 'p@ss word/with:symbols\n');
 		privateEnv.POSTGRES_HOST = 'postgres';
 		privateEnv.POSTGRES_PORT = '5432';
