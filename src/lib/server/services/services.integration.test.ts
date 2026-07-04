@@ -1034,15 +1034,15 @@ describe('server service integration', () => {
 				id: recurringOnlyPayment.id
 			})
 		).resolves.toMatchObject({
-			mode: 'deleted',
+			mode: 'archived',
 			item: expect.objectContaining({ expenseCount: 0, recurringCount: 1 })
 		});
 		await expect(
 			db
-				.select({ id: paymentMethod.id })
+				.select({ id: paymentMethod.id, isArchived: paymentMethod.isArchived })
 				.from(paymentMethod)
 				.where(eq(paymentMethod.id, recurringOnlyPayment.id))
-		).resolves.toEqual([]);
+		).resolves.toEqual([{ id: recurringOnlyPayment.id, isArchived: true }]);
 		const [recurringAfterCatalogDelete] = await db
 			.select({
 				paymentMethodId: recurringExpense.paymentMethodId,
@@ -1051,7 +1051,7 @@ describe('server service integration', () => {
 			.from(recurringExpense)
 			.where(eq(recurringExpense.id, recurringOnlySchedule.id));
 		expect(recurringAfterCatalogDelete).toEqual({
-			paymentMethodId: null,
+			paymentMethodId: recurringOnlyPayment.id,
 			paymentMethod: 'Cartão recorrente'
 		});
 

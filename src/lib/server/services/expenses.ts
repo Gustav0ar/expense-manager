@@ -830,8 +830,8 @@ async function getTotalsByPaymentMethod(workspaceId: number, filters: GroupedRep
 
 async function getTotal(workspaceId: number, from: string, to: string) {
 	const result = await db.execute<{ total_cents: string | number | null }>(sql`
-		select coalesce(sum(amount_cents), 0)::bigint as total_cents
-		from expense
+		select coalesce(sum(e.amount_cents), 0)::bigint as total_cents
+		from expense e
 		where ${baseReportConditionsSql(workspaceId, { from, to })}
 	`);
 
