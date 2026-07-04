@@ -3,7 +3,7 @@
 	import type { ActionData } from './$types';
 	import type { LayoutData } from '../../$types';
 	import { ClipboardList, Monitor, Moon, ShieldCheck, Sun } from '@lucide/svelte';
-	import { commonCurrencyCodes, translate } from '$lib/i18n';
+	import { commonCurrencyCodes, defaultCurrencyForLocale, translate } from '$lib/i18n';
 
 	let { data, form } = $props<{ data: LayoutData; form: ActionData }>();
 
@@ -205,7 +205,7 @@
 					list="currency-options"
 					maxlength="3"
 					pattern={'[A-Za-z]{3}'}
-					value={data.locale === 'pt-BR' ? 'BRL' : 'USD'}
+					value={defaultCurrencyForLocale(data.locale)}
 					required
 				/>
 			</label>
