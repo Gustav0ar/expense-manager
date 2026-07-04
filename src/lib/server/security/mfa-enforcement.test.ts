@@ -15,6 +15,9 @@ function shouldEnforceMfa(pathname: string): boolean {
 		pathname === '/api/auth/sign-out' ||
 		pathname === '/api/auth/get-session' ||
 		pathname === '/api/auth/verify-email' ||
+		pathname === '/api/auth/send-verification-email' ||
+		pathname === '/api/auth/update-session' ||
+		pathname === '/api/auth/list-sessions' ||
 		pathname.startsWith('/api/auth/reset-password') ||
 		pathname.startsWith('/api/auth/forget-password') ||
 		pathname.startsWith('/api/auth/callback') ||
@@ -64,6 +67,15 @@ describe('MFA enforcement rules', () => {
 
 		it('exempts email verification', () => {
 			expect(shouldEnforceMfa('/api/auth/verify-email')).toBe(false);
+		});
+
+		it('exempts send-verification-email (needed during email-change flow before MFA is completed)', () => {
+			expect(shouldEnforceMfa('/api/auth/send-verification-email')).toBe(false);
+		});
+
+		it('exempts update-session and list-sessions (session management prior to MFA completion)', () => {
+			expect(shouldEnforceMfa('/api/auth/update-session')).toBe(false);
+			expect(shouldEnforceMfa('/api/auth/list-sessions')).toBe(false);
 		});
 
 		it('exempts password reset flows', () => {

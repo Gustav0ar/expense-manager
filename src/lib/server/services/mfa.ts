@@ -5,12 +5,7 @@ import { and, eq, gt, isNull, lte, or, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { auditEvent, mfaSession, userMfaConfig } from '$lib/server/db/schema';
 import { safeEqual, sha256 } from '$lib/server/utils/crypto';
-import {
-	buildOtpAuthUri,
-	generateTotpCode,
-	generateTotpSecret,
-	verifyTotpCode
-} from '$lib/server/utils/totp';
+import { buildOtpAuthUri, generateTotpCode, generateTotpSecret } from '$lib/server/utils/totp';
 
 const mfaSessionTtlMs = 12 * 60 * 60 * 1000;
 const cleanupIntervalMs = 60 * 60 * 1000;
@@ -53,7 +48,10 @@ export async function enableMfa(input: {
 	code: string;
 	sessionId?: string;
 }) {
-	if (!verifyTotpCode(input.secret, input.code)) throw error(400, 'Invalid MFA code.');
+	// Use findAcceptedTotpCounter so we capture the matched counter and can
+	// record it immediately, preventing replay of the enrollment code.
+	const enrollCounter = findAcceptedTotpCounter(input.secret, input.code);
+	if (enrollCounter === null) throw error(400, 'Invalid MFA code.');
 
 	const recoveryCodes = generateRecoveryCodes();
 	const recoveryCodeHashes = recoveryCodes.map(hashRecoveryCode);
@@ -64,13 +62,15 @@ export async function enableMfa(input: {
 			.values({
 				userId: input.userId,
 				encryptedSecret: encryptSecret(input.secret),
-				recoveryCodeHashes
+				recoveryCodeHashes,
+				lastUsedTotpCounter: enrollCounter
 			})
 			.onConflictDoUpdate({
 				target: userMfaConfig.userId,
 				set: {
 					encryptedSecret: encryptSecret(input.secret),
 					recoveryCodeHashes,
+					lastUsedTotpCounter: enrollCounter,
 					enabledAt: new Date(),
 					updatedAt: new Date()
 				}

@@ -1,4 +1,5 @@
 import { fail, redirect } from '@sveltejs/kit';
+import { isHttpError } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import {
 	changeMemberRole,
@@ -37,7 +38,14 @@ export const actions: Actions = {
 		if (!id.success || !role.success)
 			return fail(400, { message: translate(event.locals.locale, 'Check member and role.') });
 
-		await changeMemberRole(context, id.data, role.data);
+		try {
+			await changeMemberRole(context, id.data, role.data);
+		} catch (err) {
+			if (isHttpError(err) && err.status < 500) {
+				return fail(err.status, { message: err.body.message });
+			}
+			throw err;
+		}
 		throw redirect(303, '/app/settings/users');
 	},
 	remove: async (event) => {
@@ -46,7 +54,14 @@ export const actions: Actions = {
 		if (!id.success)
 			return fail(400, { message: translate(event.locals.locale, 'Invalid member.') });
 
-		await removeMember(context, id.data);
+		try {
+			await removeMember(context, id.data);
+		} catch (err) {
+			if (isHttpError(err) && err.status < 500) {
+				return fail(err.status, { message: err.body.message });
+			}
+			throw err;
+		}
 		throw redirect(303, '/app/settings/users');
 	}
 };
