@@ -144,6 +144,9 @@ function shouldEnforceMfa(pathname: string) {
 		pathname === '/api/auth/sign-out' ||
 		pathname === '/api/auth/get-session' ||
 		pathname === '/api/auth/verify-email' ||
+		pathname === '/api/auth/send-verification-email' ||
+		pathname === '/api/auth/update-session' ||
+		pathname === '/api/auth/list-sessions' ||
 		pathname.startsWith('/api/auth/reset-password') ||
 		pathname.startsWith('/api/auth/forget-password') ||
 		pathname.startsWith('/api/auth/callback') ||
