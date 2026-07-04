@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { commonCurrencyCodes, translate } from '$lib/i18n';
+	import { commonCurrencyCodes, defaultCurrencyForLocale, translate } from '$lib/i18n';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form } = $props<{ data: PageData; form: ActionData }>();
@@ -44,7 +44,7 @@
 					list="currency-options"
 					maxlength="3"
 					pattern={'[A-Za-z]{3}'}
-					value={data.locale === 'pt-BR' ? 'BRL' : 'USD'}
+					value={defaultCurrencyForLocale(data.locale)}
 					required
 				/>
 				<datalist id="currency-options">
