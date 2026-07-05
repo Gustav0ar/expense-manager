@@ -2644,7 +2644,6 @@ th {
 	.expense-table-header {
 		display: none;
 	}
-
 	.expense-table-row {
 		grid-template-columns: minmax(0, 1fr) auto;
 		gap: 0.45rem 0.7rem;
@@ -2711,6 +2710,12 @@ th {
 	.expense-table-delete {
 		top: 0.75rem;
 		right: 0.7rem;
+	}
+
+	/* Hide labelled button text in panel headings at this breakpoint to prevent
+	   overflow when translated strings are longer than their English originals. */
+	.hide-compact {
+		display: none;
 	}
 }
 
