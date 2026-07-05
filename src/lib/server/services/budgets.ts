@@ -9,6 +9,7 @@ import { startOfMonth } from '$lib/server/utils/date';
 import { parseCurrencyToCents } from '$lib/server/utils/money';
 import { formatCents } from '$lib/utils/format';
 import { assertCategoryInWorkspace } from '$lib/server/utils/category';
+import { translate } from '$lib/i18n';
 import type { WorkspaceContext } from './workspaces';
 
 export type BudgetInput = {
@@ -107,7 +108,8 @@ export async function getBudgetSummary(context: WorkspaceContext, periodMonth: s
 }
 
 export async function upsertBudget(context: WorkspaceContext, input: BudgetInput) {
-	if (!canManageBudgets(context.role)) throw error(403, 'Permission denied.');
+	if (!canManageBudgets(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
 
 	const periodMonth = startOfMonth(input.periodMonth);
@@ -148,14 +150,15 @@ export async function upsertBudget(context: WorkspaceContext, input: BudgetInput
 }
 
 export async function deleteBudget(context: WorkspaceContext, id: number) {
-	if (!canManageBudgets(context.role)) throw error(403, 'Permission denied.');
+	if (!canManageBudgets(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const [deleted] = await db
 		.delete(categoryBudget)
 		.where(and(eq(categoryBudget.id, id), eq(categoryBudget.workspaceId, context.workspaceId)))
 		.returning({ id: categoryBudget.id, categoryId: categoryBudget.categoryId });
 
-	if (!deleted) throw error(404, 'Budget not found.');
+	if (!deleted) throw error(404, translate(context.locale, 'Budget not found.'));
 
 	await db.insert(auditEvent).values({
 		workspaceId: context.workspaceId,
@@ -168,7 +171,8 @@ export async function deleteBudget(context: WorkspaceContext, id: number) {
 }
 
 export async function sendBudgetAlerts(context: WorkspaceContext, periodMonth: string) {
-	if (!canManageBudgets(context.role)) throw error(403, 'Permission denied.');
+	if (!canManageBudgets(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const month = startOfMonth(periodMonth);
 	const summary = await getBudgetSummary(context, month);

@@ -178,19 +178,22 @@ export async function importExpenses(context: WorkspaceContext, input: ImportExp
 					tx,
 					context.workspaceId,
 					'paymentMethod',
-					validRows.map((row) => row.paymentMethod)
+					validRows.map((row) => row.paymentMethod),
+					context.locale
 				),
 				buildCatalogLookup(
 					tx,
 					context.workspaceId,
 					'vendor',
-					validRows.map((row) => row.vendor)
+					validRows.map((row) => row.vendor),
+					context.locale
 				),
 				buildCatalogLookup(
 					tx,
 					context.workspaceId,
 					'costCenter',
-					validRows.map((row) => row.costCenter)
+					validRows.map((row) => row.costCenter),
+					context.locale
 				)
 			]);
 
@@ -268,13 +271,14 @@ async function buildCatalogLookup(
 	executor: Parameters<typeof getOrCreateCatalogItem>[0],
 	workspaceId: number,
 	kind: ExpenseCatalogKind,
-	names: Array<string | undefined>
+	names: Array<string | undefined>,
+	locale: string = 'en'
 ) {
 	const lookup = new Map<string, ExpenseCatalogItem>();
 	const uniqueNames = Array.from(new Set(names.filter(Boolean) as string[]));
 
 	for (const name of uniqueNames) {
-		const item = await getOrCreateCatalogItem(executor, workspaceId, kind, name);
+		const item = await getOrCreateCatalogItem(executor, workspaceId, kind, name, locale);
 		lookup.set(catalogLookupKey(name), item);
 	}
 

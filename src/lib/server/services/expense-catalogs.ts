@@ -57,7 +57,13 @@ export async function createExpenseCatalogItem(
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
-	const item = await getOrCreateCatalogItem(db, context.workspaceId, input.kind, input.name);
+	const item = await getOrCreateCatalogItem(
+		db,
+		context.workspaceId,
+		input.kind,
+		input.name,
+		context.locale
+	);
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,
@@ -79,7 +85,7 @@ export async function updateExpenseCatalogItem(
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const normalized = normalizeCatalogName(input.name);
-	assertCatalogName(input.kind, normalized);
+	assertCatalogName(input.kind, normalized, context.locale);
 
 	const item = await db.transaction(async (tx) => {
 		try {
@@ -260,14 +266,16 @@ export async function getOrCreateCatalogItem(
 	executor: CatalogExecutor,
 	workspaceId: number,
 	kind: ExpenseCatalogKind,
-	name: string
+	name: string,
+	locale: string = 'en'
 ) {
 	const normalized = normalizeCatalogName(name);
-	assertCatalogName(kind, normalized);
+	assertCatalogName(kind, normalized, locale);
 
 	const rows = await executeCatalogRows(executor, upsertCatalogSql(kind, workspaceId, normalized));
 	const item = toCatalogItem(rows[0]);
-	if (!item) throw error(500, 'Could not save the catalog.');
+	if (!item)
+		throw error(500, translate(locale, 'Could not save the catalog.'));
 
 	return item;
 }
@@ -280,16 +288,31 @@ export function catalogLookupKey(name: string) {
 	return normalizeCatalogName(name).toLowerCase();
 }
 
-export function assertCatalogName(kind: ExpenseCatalogKind, name: string) {
-	if (name.length < 2) throw error(400, `${catalogKindLabel(kind)} must be at least 2 characters.`);
+export function assertCatalogName(
+	kind: ExpenseCatalogKind,
+	name: string,
+	locale: string = 'en'
+) {
+	const kindLabel = translate(locale, catalogKindLabel(kind));
+	if (name.length < 2)
+		throw error(
+			400,
+			translate(locale, '{kind} must be at least 2 characters.', { kind: kindLabel })
+		);
 	if (name.length > catalogNameMax(kind)) {
 		throw error(
 			400,
-			`${catalogKindLabel(kind)} must be at most ${catalogNameMax(kind)} characters.`
+			translate(locale, '{kind} must be at most {count} characters.', {
+				kind: kindLabel,
+				count: catalogNameMax(kind)
+			})
 		);
 	}
 	if (hasControlCharacters(name)) {
-		throw error(400, `${catalogKindLabel(kind)} contains invalid characters.`);
+		throw error(
+			400,
+			translate(locale, '{kind} contains invalid characters.', { kind: kindLabel })
+		);
 	}
 }
 

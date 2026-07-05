@@ -12,6 +12,7 @@ import { canReviewExpenses, canWriteExpenses } from '$lib/server/security/roles'
 import { advanceDate, todayIso } from '$lib/server/utils/date';
 import { parseCurrencyToCents } from '$lib/server/utils/money';
 import { assertCategoryInWorkspace } from '$lib/server/utils/category';
+import { translate } from '$lib/i18n';
 import type { WorkspaceContext } from './workspaces';
 import { resolveExpenseCatalogSelection } from './expense-catalogs';
 
@@ -60,7 +61,8 @@ export async function createRecurringExpense(
 	context: WorkspaceContext,
 	input: RecurringExpenseInput
 ) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permission denied.');
+	if (!canWriteExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
 
 	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
@@ -106,7 +108,8 @@ export async function setRecurringExpenseStatus(
 	id: number,
 	status: 'active' | 'paused'
 ) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permission denied.');
+	if (!canWriteExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const [updated] = await db
 		.update(recurringExpense)
@@ -114,7 +117,7 @@ export async function setRecurringExpenseStatus(
 		.where(and(eq(recurringExpense.id, id), eq(recurringExpense.workspaceId, context.workspaceId)))
 		.returning({ id: recurringExpense.id });
 
-	if (!updated) throw error(404, 'Recurring expense not found.');
+	if (!updated) throw error(404, translate(context.locale, 'Recurring expense not found.'));
 
 	await db.insert(auditEvent).values({
 		workspaceId: context.workspaceId,
@@ -129,7 +132,8 @@ export async function materializeDueRecurringExpenses(
 	context: WorkspaceContext,
 	asOf = todayIso()
 ) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permission denied.');
+	if (!canWriteExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	// Pause schedules whose endDate has already passed nextRunDate but were
 	// never selected by the main query (because they aren't due). Without this,

@@ -3,6 +3,8 @@ import { and, eq, gt } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { auditEvent, workspace, workspaceInvitation, workspaceMember } from '$lib/server/db/schema';
 import { safeEqual, sha256 } from '$lib/server/utils/crypto';
+import { translate } from '$lib/i18n';
+import type { SupportedLocale } from '$lib/i18n';
 
 export async function getPendingInvitation(token: string) {
 	const tokenHash = sha256(token);
@@ -29,7 +31,12 @@ export async function getPendingInvitation(token: string) {
 	return invitation ?? null;
 }
 
-export async function acceptInvitation(token: string, userId: string, userEmail: string) {
+export async function acceptInvitation(
+	token: string,
+	userId: string,
+	userEmail: string,
+	locale: SupportedLocale = 'en'
+) {
 	const tokenHash = sha256(token);
 
 	const workspaceId = await db.transaction(async (tx) => {
@@ -50,9 +57,9 @@ export async function acceptInvitation(token: string, userId: string, userEmail:
 			)
 			.limit(1);
 
-		if (!invitation) throw error(404, 'Invalid invite or expired.');
+		if (!invitation) throw error(404, translate(locale, 'Invalid invite or expired.'));
 		if (!safeEqual(invitation.email.toLowerCase(), userEmail.toLowerCase())) {
-			throw error(403, 'This invite belongs to another email.');
+			throw error(403, translate(locale, 'This invite belongs to another email.'));
 		}
 
 		const [accepted] = await tx
@@ -67,7 +74,7 @@ export async function acceptInvitation(token: string, userId: string, userEmail:
 			)
 			.returning({ id: workspaceInvitation.id });
 
-		if (!accepted) throw error(404, 'Invalid invite or expired.');
+		if (!accepted) throw error(404, translate(locale, 'Invalid invite or expired.'));
 
 		await tx
 			.insert(workspaceMember)

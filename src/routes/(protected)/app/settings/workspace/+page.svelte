@@ -80,7 +80,7 @@
 			</div>
 			<form method="post" action="?/switchWorkspace" class="stack">
 				<label>
-					<span>Workspace</span>
+					<span>{t('Workspace')}</span>
 					<select name="workspaceId">
 						{#each data.memberships as membership (membership.workspaceId)}
 							<option
