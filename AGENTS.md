@@ -16,11 +16,12 @@ Always wrap text through the local `t()` helper, which is defined in each page a
 
 ```ts
 function t(key: string, params?: Record<string, string | number | null | undefined>) {
-  return translate(data.locale, key, params);
+	return translate(data.locale, key, params);
 }
 ```
 
 This applies to:
+
 - Template text content: `{t('Save')}` not `Save`
 - HTML attributes: `placeholder={t('Search')}`, `aria-label={t('Close')}`, `title={t('Edit')}`
 - `<option>` labels: `<option value="member">{t('Member')}</option>` not `Member`
@@ -59,8 +60,8 @@ When a service function does not receive a `WorkspaceContext`, add a `locale: Su
 ### Checking your work
 
 After any change that introduces user-visible text, search for bare English strings in your diff:
+
 - In `.svelte` templates, any visible text not inside `{t('...')}` is a bug
 - In server `.ts` files, any `throw error(N, 'English string')` without `translate()` is a bug
 
 The build does not enforce translation coverage, so this must be done by code review.
-
