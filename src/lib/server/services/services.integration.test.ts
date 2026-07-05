@@ -771,6 +771,7 @@ describe('server service integration', () => {
 	it('guards payment state-machine transitions and preserves paidAt when reconciling', async () => {
 		const fixture = await createWorkspaceFixture();
 		const memberContext = await createMemberContext(fixture, 'member');
+		const viewerContext = await createMemberContext(fixture, 'viewer');
 
 		// Create as a member so the expense starts in 'pending' review state
 		const created = await createExpense(memberContext, {
@@ -786,6 +787,14 @@ describe('server service integration', () => {
 			updateExpensePaymentStatus(fixture.context, id, { paymentStatus: 'paid' })
 		).rejects.toMatchObject({ status: 404 });
 
+		// Member lacks reconcile rights — 403 on any payment status change
+		await expect(
+			updateExpensePaymentStatus(memberContext, id, { paymentStatus: 'paid' })
+		).rejects.toMatchObject({ status: 403 });
+
+		// Viewer cannot delete an expense
+		await expect(deleteExpense(viewerContext, id)).rejects.toMatchObject({ status: 403 });
+
 		// Cannot reject a reconciled expense without reconcile rights (member role)
 		await reviewExpense(fixture.context, id, { reviewStatus: 'approved' });
 		await updateExpensePaymentStatus(fixture.context, id, {
@@ -795,6 +804,9 @@ describe('server service integration', () => {
 		await expect(
 			reviewExpense(memberContext, id, { reviewStatus: 'rejected', reason: 'Teste' })
 		).rejects.toMatchObject({ status: 403 });
+
+		// Member cannot delete an approved+paid expense (paymentStatus !== 'unpaid' guard)
+		await expect(deleteExpense(memberContext, id)).rejects.toMatchObject({ status: 403 });
 
 		// Cannot downgrade reconciled → paid
 		await expect(
