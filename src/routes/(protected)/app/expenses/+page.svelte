@@ -4,6 +4,7 @@
 	import SearchableSelect from '$lib/components/SearchableSelect.svelte';
 	import { translate } from '$lib/i18n';
 	import { formatCents } from '$lib/utils/format';
+	import { reviewLabel, reviewClass, paymentLabel, paymentClass } from '$lib/utils/status';
 	import {
 		CheckCircle2,
 		ChevronLeft,
@@ -81,6 +82,18 @@
 		vendor: 1,
 		costCenter: 1
 	});
+	let selectedIds = $state(new Set<number>());
+
+	function toggleSelect(id: number) {
+		const next = new Set(selectedIds);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		selectedIds = next;
+	}
+
+	function clearSelection() {
+		selectedIds = new Set();
+	}
 	let activeCatalogMeta = $derived(
 		supportCatalogTabs.find((tab) => tab.kind === supportCatalogTab) ?? supportCatalogTabs[0]
 	);
@@ -167,30 +180,6 @@
 			data.filters.paymentStatus ||
 			data.filters.q
 		);
-	}
-
-	function reviewLabel(value: string) {
-		if (value === 'pending') return t('Pending');
-		if (value === 'rejected') return t('Rejected');
-		return t('Approved');
-	}
-
-	function reviewClass(value: string) {
-		if (value === 'pending') return 'status-pill warning';
-		if (value === 'rejected') return 'status-pill danger';
-		return 'status-pill success';
-	}
-
-	function paymentLabel(value: string) {
-		if (value === 'paid') return t('Paid');
-		if (value === 'reconciled') return t('Reconciled');
-		return t('Open');
-	}
-
-	function paymentClass(value: string) {
-		if (value === 'paid') return 'status-pill info';
-		if (value === 'reconciled') return 'status-pill success';
-		return 'status-pill neutral';
 	}
 
 	function openDeleteDialog(expense: PageData['expenses']['items'][number]) {
@@ -319,7 +308,7 @@
 	</div>
 
 	{#if form?.message}
-		<p class="notice danger">{form.message}</p>
+		<p class="notice danger" role="alert">{form.message}</p>
 	{/if}
 
 	<section class="panel expense-create-panel">
@@ -339,27 +328,66 @@
 			<input type="hidden" name="returnTo" value={data.returnTo} />
 			<label class="expense-field description-field">
 				<span>{t('Description')}</span>
-				<input name="description" required maxlength="160" />
+				<input
+					name="description"
+					required
+					maxlength="160"
+					value={form?.values?.description ?? ''}
+					aria-invalid={!!form?.fieldErrors?.description}
+					aria-describedby={form?.fieldErrors?.description ? 'err-description' : undefined}
+				/>
+				{#if form?.fieldErrors?.description}
+					<span id="err-description" class="field-error">{form.fieldErrors.description}</span>
+				{/if}
 			</label>
 
 			<label class="expense-field amount-field">
 				<span>{t('Installment amount')}</span>
-				<input name="amount" inputmode="decimal" placeholder={amountPlaceholder} required />
+				<input
+					name="amount"
+					inputmode="decimal"
+					placeholder={amountPlaceholder}
+					required
+					value={form?.values?.amount ?? ''}
+					aria-invalid={!!form?.fieldErrors?.amount}
+					aria-describedby={form?.fieldErrors?.amount ? 'err-amount' : undefined}
+				/>
+				{#if form?.fieldErrors?.amount}
+					<span id="err-amount" class="field-error">{form.fieldErrors.amount}</span>
+				{/if}
 			</label>
 
 			<label class="expense-field">
 				<span>{t('Date')}</span>
-				<input name="expenseDate" type="date" required />
+				<input
+					name="expenseDate"
+					type="date"
+					required
+					value={form?.values?.expenseDate ?? ''}
+					aria-invalid={!!form?.fieldErrors?.expenseDate}
+					aria-describedby={form?.fieldErrors?.expenseDate ? 'err-expenseDate' : undefined}
+				/>
+				{#if form?.fieldErrors?.expenseDate}
+					<span id="err-expenseDate" class="field-error">{form.fieldErrors.expenseDate}</span>
+				{/if}
 			</label>
 
 			<label class="expense-field">
 				<span>{t('Category')}</span>
-				<select name="categoryId" required>
+				<select
+					name="categoryId"
+					required
+					aria-invalid={!!form?.fieldErrors?.categoryId}
+					aria-describedby={form?.fieldErrors?.categoryId ? 'err-categoryId' : undefined}
+				>
 					<option value="">{t('Select')}</option>
 					{#each data.categories as category (category.id)}
-						<option value={category.id}>{category.icon ?? '💼'} {category.name}</option>
+						<option value={category.id} selected={category.id.toString() === (form?.values?.categoryId ?? '')}>{category.icon ?? '💼'} {category.name}</option>
 					{/each}
 				</select>
+				{#if form?.fieldErrors?.categoryId}
+					<span id="err-categoryId" class="field-error">{form.fieldErrors.categoryId}</span>
+				{/if}
 			</label>
 
 			<label class="expense-field">
@@ -367,7 +395,7 @@
 				<select name="paymentMethodId">
 					<option value="">{t('Select')}</option>
 					{#each data.catalogs.paymentMethods as paymentMethod (paymentMethod.id)}
-						<option value={paymentMethod.id}>{paymentMethod.name}</option>
+						<option value={paymentMethod.id} selected={paymentMethod.id.toString() === (form?.values?.paymentMethodId ?? '')}>{paymentMethod.name}</option>
 					{/each}
 				</select>
 			</label>
@@ -377,6 +405,7 @@
 				name="vendorId"
 				label={t('Vendor')}
 				options={catalogOptions(data.catalogs.vendors)}
+				selectedId={form?.values?.vendorId}
 				placeholder={t('Search {item}', { item: lower(t('Vendor')) })}
 				empty={t('No vendor found.')}
 				wrapperClass="expense-field"
@@ -388,6 +417,7 @@
 				name="costCenterId"
 				label={t('Cost center')}
 				options={catalogOptions(data.catalogs.costCenters)}
+				selectedId={form?.values?.costCenterId}
 				placeholder={t('Search {item}', { item: lower(t('Cost center')) })}
 				empty={t('No cost center found.')}
 				wrapperClass="expense-field"
@@ -396,17 +426,17 @@
 
 			<label class="expense-field">
 				<span>{t('Competency')}</span>
-				<input name="competencyMonth" type="month" />
+				<input name="competencyMonth" type="month" value={form?.values?.competencyMonth ?? ''} />
 			</label>
 
 			<label class="expense-field">
 				<span>{t('Installments')}</span>
-				<input name="installments" type="number" min="1" max="120" value="1" />
+				<input name="installments" type="number" min="1" max="120" value={form?.values?.installments ?? '1'} />
 			</label>
 
 			<label class="expense-field notes-field">
 				<span>{t('Notes')}</span>
-				<input name="notes" maxlength="1000" />
+				<input name="notes" maxlength="1000" value={form?.values?.notes ?? ''} />
 			</label>
 
 			<button class="button primary expense-submit" type="submit">
@@ -720,6 +750,7 @@
 		{:else}
 			<div class="expense-table" aria-label={t('Expenses registered')}>
 				<div class="expense-table-header" aria-hidden="true">
+					{#if data.permissions.canReview}<span></span>{/if}
 					<span>{t('Date')}</span>
 					<span>{t('Description')}</span>
 					<span>{t('Category')}</span>
@@ -731,6 +762,18 @@
 
 				{#each data.expenses.items as expense (expense.id)}
 					<article class="expense-table-item">
+						{#if data.permissions.canReview && expense.reviewStatus === 'pending'}
+							<label class="expense-select-label" aria-label={t('Select {description}', { description: expense.description })}>
+								<input
+									type="checkbox"
+									class="expense-select-checkbox"
+									checked={selectedIds.has(expense.id)}
+									onchange={() => toggleSelect(expense.id)}
+								/>
+							</label>
+						{:else if data.permissions.canReview}
+							<span class="expense-select-placeholder"></span>
+						{/if}
 						<details
 							class="expense-table-details"
 							ontoggle={(event) => prepareExpenseDetails(expense.id, event)}
@@ -751,7 +794,7 @@
 										</small>
 									{/if}
 									<span class={reviewClass(expense.reviewStatus)}
-										>{reviewLabel(expense.reviewStatus)}</span
+										>{reviewLabel(expense.reviewStatus, t)}</span
 									>
 								</span>
 								<span
@@ -764,7 +807,7 @@
 								<span class="expense-table-muted expense-table-payment">
 									{expense.paymentMethod || '-'}
 									<span class={paymentClass(expense.paymentStatus)}
-										>{paymentLabel(expense.paymentStatus)}</span
+										>{paymentLabel(expense.paymentStatus, t)}</span
 									>
 								</span>
 								<span class="expense-table-muted expense-table-note">
@@ -886,10 +929,10 @@
 									<div class="expense-workflow-panel">
 										<div class="workflow-summary">
 											<span class={reviewClass(expense.reviewStatus)}>
-												{reviewLabel(expense.reviewStatus)}
+												{reviewLabel(expense.reviewStatus, t)}
 											</span>
 											<span class={paymentClass(expense.paymentStatus)}>
-												{paymentLabel(expense.paymentStatus)}
+												{paymentLabel(expense.paymentStatus, t)}
 											</span>
 										</div>
 										{#if data.permissions.canReview}
@@ -963,13 +1006,32 @@
 								<div class="attachment-panel">
 									<div class="attachment-list">
 										{#each expense.attachments as attachment (attachment.id)}
-											<a
-												class="attachment-chip"
-												href={resolve(`/app/expenses/attachments/${attachment.id}`)}
-											>
-												<Paperclip size={15} />
-												<span>{attachment.originalName}</span>
-											</a>
+											<div class="attachment-chip-row">
+												<a
+													class="attachment-chip"
+													href={resolve(`/app/expenses/attachments/${attachment.id}`)}
+												>
+													<Paperclip size={15} />
+													<span>{attachment.originalName}</span>
+												</a>
+												<form
+													method="post"
+													action="?/deleteAttachment"
+													onsubmit={(e) => {
+														if (!window.confirm(t('Delete attachment?'))) e.preventDefault();
+													}}
+												>
+													<input type="hidden" name="id" value={attachment.id} />
+													<input type="hidden" name="returnTo" value={data.returnTo} />
+													<button
+														class="icon-button danger"
+														type="submit"
+														aria-label={`${t('Delete')} ${attachment.originalName}`}
+													>
+														<Trash2 size={14} />
+													</button>
+												</form>
+											</div>
 										{:else}
 											<span class="empty">{t('No attachments added.')}</span>
 										{/each}
@@ -1015,6 +1077,37 @@
 			<a class="button secondary" href={nextPageHref()}>{t('Next page')}</a>
 		{/if}
 	</section>
+
+	{#if selectedIds.size > 0}
+		<div class="bulk-action-bar" role="region" aria-label={t('Bulk actions')}>
+			<span class="bulk-action-count">{t('{count} selected', { count: selectedIds.size })}</span>
+			<form method="post" action="?/bulkReview" class="bulk-action-form">
+				<input type="hidden" name="returnTo" value={data.returnTo} />
+				<input type="hidden" name="decision" value="approved" />
+				{#each [...selectedIds] as id (id)}
+					<input type="hidden" name="id" value={id} />
+				{/each}
+				<button class="button secondary" type="submit">
+					<CheckCircle2 size={16} />
+					<span>{t('Approve')}</span>
+				</button>
+			</form>
+			<form method="post" action="?/bulkReview" class="bulk-action-form">
+				<input type="hidden" name="returnTo" value={data.returnTo} />
+				<input type="hidden" name="decision" value="rejected" />
+				{#each [...selectedIds] as id (id)}
+					<input type="hidden" name="id" value={id} />
+				{/each}
+				<button class="button secondary danger" type="submit">
+					<XCircle size={16} />
+					<span>{t('Reject')}</span>
+				</button>
+			</form>
+			<button class="button secondary" type="button" onclick={clearSelection}>
+				{t('Clear')}
+			</button>
+		</div>
+	{/if}
 
 	<dialog
 		{@attach captureDeleteDialog}

@@ -117,9 +117,9 @@ async function inviteUser(page: Page, email: string, role: 'admin' | 'member' | 
 	await form.getByLabel('Papel').selectOption(role);
 	await form.getByRole('button', { name: 'Convidar' }).click();
 
-	const inviteNotice = page.locator('.notice.success').filter({ hasText: 'Convite criado:' });
-	await expect(inviteNotice).toBeVisible();
-	const inviteUrl = (await inviteNotice.textContent())?.replace('Convite criado:', '').trim();
+	const inviteUrlRow = page.locator('.invite-url-row');
+	await expect(inviteUrlRow).toBeVisible();
+	const inviteUrl = (await inviteUrlRow.locator('.invite-url-code').textContent())?.trim();
 	expect(inviteUrl).toBeTruthy();
 
 	// Role and status are now displayed as translated labels (pt-BR locale in tests).
@@ -169,6 +169,10 @@ async function removeMember(page: Page, email: string) {
 	await page.goto('/app/settings/users');
 	const row = await memberRow(page, email);
 	await row.getByRole('button', { name: 'Remover' }).click();
+	// Confirm in the removal dialog
+	const dialog = page.locator('dialog[aria-labelledby="remove-member-title"]');
+	await expect(dialog).toBeVisible();
+	await dialog.getByRole('button', { name: 'Remover' }).click();
 	await expect(page).toHaveURL(/\/app\/settings\/users/);
 	await expect(memberRows(page, email)).toHaveCount(0);
 }

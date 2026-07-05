@@ -1,4 +1,4 @@
-import { fail, redirect } from '@sveltejs/kit';
+import { fail, isHttpError, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import {
 	createWorkspace,
@@ -29,7 +29,16 @@ export const actions: Actions = {
 		if (!parsed.success)
 			return fail(400, { message: translate(event.locals.locale, 'Check workspace data.') });
 
-		await updateWorkspace(context, parsed.data);
+		try {
+			await updateWorkspace(context, parsed.data);
+		} catch (e) {
+			// Re-throw 4xx errors that should propagate as real HTTP responses (e.g. 403 Permission denied)
+			// Only intercept 422 (currency guard) to surface as a form failure message
+			if (isHttpError(e) && e.status === 422) {
+				return fail(422, { message: e.body?.message ?? 'Update failed.' });
+			}
+			throw e;
+		}
 		throw redirect(303, '/app/settings/workspace');
 	},
 	updateTheme: async (event) => {

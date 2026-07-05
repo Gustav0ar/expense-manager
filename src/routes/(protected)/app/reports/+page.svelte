@@ -5,6 +5,7 @@
 	import SearchableSelect from '$lib/components/SearchableSelect.svelte';
 	import { translate } from '$lib/i18n';
 	import { formatCents } from '$lib/utils/format';
+	import { reviewLabel, reviewClass, paymentLabel, paymentClass } from '$lib/utils/status';
 	import type { PageData } from './$types';
 
 	type Analytics = NonNullable<PageData['analytics']>;
@@ -14,14 +15,13 @@
 	const exportPath = resolve('/app/reports/export.csv');
 	const currency = $derived(data.currentWorkspace?.currency ?? 'USD');
 	const isAnalytical = $derived(data.filters.groupBy === 'expense');
-	const analytics = $derived(data.analytics);
-	const reportPeriod = $derived(
+	const isPeriod = $derived(
 		data.filters.groupBy === 'week' ||
 			data.filters.groupBy === 'month' ||
 			data.filters.groupBy === 'year'
-			? data.filters.groupBy
-			: undefined
 	);
+	const analytics = $derived(data.analytics);
+	const reportPeriod = $derived(isPeriod ? (data.filters.groupBy as 'week' | 'month' | 'year') : undefined);
 	const exportUrl = $derived(createExportUrl(data.filters));
 
 	function createExportUrl(filters: PageData['filters']) {
@@ -31,6 +31,8 @@
 			queryParam('groupBy', filters.groupBy)
 		];
 
+		if (filters.dateField && filters.dateField !== 'expenseDate')
+			params.push(queryParam('dateField', filters.dateField));
 		if (filters.categoryId) params.push(queryParam('categoryId', String(filters.categoryId)));
 		if (filters.vendorId) params.push(queryParam('vendorId', String(filters.vendorId)));
 		if (filters.costCenterId) params.push(queryParam('costCenterId', String(filters.costCenterId)));
@@ -72,30 +74,6 @@
 			? `${row.installmentNumber}/${row.installmentsTotal}`
 			: '-';
 	}
-
-	function reviewLabel(value: AnalyticsRow['reviewStatus']) {
-		if (value === 'pending') return t('Pending');
-		if (value === 'rejected') return t('Rejected');
-		return t('Approved');
-	}
-
-	function reviewClass(value: AnalyticsRow['reviewStatus']) {
-		if (value === 'pending') return 'status-pill warning';
-		if (value === 'rejected') return 'status-pill danger';
-		return 'status-pill success';
-	}
-
-	function paymentLabel(value: AnalyticsRow['paymentStatus']) {
-		if (value === 'paid') return t('Paid');
-		if (value === 'reconciled') return t('Reconciled');
-		return t('Open');
-	}
-
-	function paymentClass(value: AnalyticsRow['paymentStatus']) {
-		if (value === 'paid') return 'status-pill info';
-		if (value === 'reconciled') return 'status-pill success';
-		return 'status-pill neutral';
-	}
 </script>
 
 <svelte:head>
@@ -134,11 +112,30 @@
 					<option value="payment" selected={data.filters.groupBy === 'payment'}
 						>{t('Payment')}</option
 					>
+					<option value="vendor" selected={data.filters.groupBy === 'vendor'}
+						>{t('Vendor')}</option
+					>
+					<option value="costCenter" selected={data.filters.groupBy === 'costCenter'}
+						>{t('Cost center')}</option
+					>
 					<option value="expense" selected={data.filters.groupBy === 'expense'}
 						>{t('Analytical')}</option
 					>
 				</select>
 			</label>
+			{#if isPeriod}
+				<label>
+					<span>{t('Date basis')}</span>
+					<select name="dateField">
+						<option value="expenseDate" selected={data.filters.dateField === 'expenseDate'}
+							>{t('Transaction date')}</option
+						>
+						<option value="competencyMonth" selected={data.filters.dateField === 'competencyMonth'}
+							>{t('Competency month')}</option
+						>
+					</select>
+				</label>
+			{/if}
 			<label>
 				<span>{t('Category')}</span>
 				<select name="categoryId">
@@ -298,12 +295,12 @@
 										<td data-label={t('Payment')}>{optionalValue(row.paymentMethod)}</td>
 										<td data-label={t('Review')}>
 											<span class={reviewClass(row.reviewStatus)}
-												>{reviewLabel(row.reviewStatus)}</span
+												>{reviewLabel(row.reviewStatus, t)}</span
 											>
 										</td>
 										<td data-label={t('Status')}>
 											<span class={paymentClass(row.paymentStatus)}
-												>{paymentLabel(row.paymentStatus)}</span
+												>{paymentLabel(row.paymentStatus, t)}</span
 											>
 										</td>
 										<td data-label={t('Installment')}>{installmentLabel(row)}</td>

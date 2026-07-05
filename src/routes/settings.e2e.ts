@@ -103,9 +103,9 @@ async function inviteUser(page: Page, email: string, role: 'admin' | 'member' | 
 	await form.getByLabel('Papel').selectOption(role);
 	await form.getByRole('button', { name: 'Convidar' }).click();
 
-	const inviteNotice = page.locator('.notice.success').filter({ hasText: 'Convite criado:' });
-	await expect(inviteNotice).toBeVisible();
-	const inviteUrl = (await inviteNotice.textContent())?.replace('Convite criado:', '').trim();
+	const inviteUrlRow = page.locator('.invite-url-row');
+	await expect(inviteUrlRow).toBeVisible();
+	const inviteUrl = (await inviteUrlRow.locator('.invite-url-code').textContent())?.trim();
 	expect(inviteUrl).toBeTruthy();
 	return inviteUrl!;
 }

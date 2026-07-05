@@ -85,6 +85,7 @@
 				{currency}
 				locale={data.locale}
 				totalLabel={t('Total')}
+				othersLabel={t('Others')}
 			/>
 		</section>
 

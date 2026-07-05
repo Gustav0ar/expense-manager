@@ -4,6 +4,7 @@ import { beginMfaSetup, disableMfa, enableMfa, getMfaStatus } from '$lib/server/
 import { requireWorkspaceContext } from '$lib/server/services/workspaces';
 import { mfaCodeSchema, parseForm } from '$lib/server/validation';
 import { translate } from '$lib/i18n';
+import { assertRateLimit } from '$lib/server/security/rate-limit';
 
 export const load: PageServerLoad = async (event) => {
 	await requireWorkspaceContext(event);
@@ -30,6 +31,13 @@ export const actions: Actions = {
 	enable: async (event) => {
 		await requireWorkspaceContext(event);
 		if (!event.locals.user) throw redirect(303, '/login');
+
+		await assertRateLimit(event, {
+			scope: 'mfa-enable',
+			identifier: event.locals.user.id,
+			windowSeconds: 300,
+			max: 5
+		});
 
 		const formData = await event.request.formData();
 		const code = parseForm(formData, mfaCodeSchema);
@@ -61,6 +69,13 @@ export const actions: Actions = {
 	disable: async (event) => {
 		await requireWorkspaceContext(event);
 		if (!event.locals.user) throw redirect(303, '/login');
+
+		await assertRateLimit(event, {
+			scope: 'mfa-disable',
+			identifier: event.locals.user.id,
+			windowSeconds: 300,
+			max: 5
+		});
 
 		const parsed = parseForm(await event.request.formData(), mfaCodeSchema);
 		if (!parsed.success)

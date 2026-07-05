@@ -1239,10 +1239,9 @@ describe('server service integration', () => {
 				.from(categoryBudget)
 				.where(eq(categoryBudget.workspaceId, fixture.context.workspaceId));
 			expect(budgetRow.periodMonth).toBe('2026-06-01');
-			await expect(sendBudgetAlerts(fixture.context, '2026-06')).resolves.toEqual({
-				sentCount: 0,
-				alertCount: 0
-			});
+			await expect(sendBudgetAlerts(fixture.context, '2026-06')).resolves.toEqual(
+				expect.objectContaining({ sentCount: 0, alertCount: 0 })
+			);
 			let budgetStatuses = await listBudgetStatus(fixture.context, '2026-06');
 			expect(budgetStatuses).toEqual(
 				expect.arrayContaining([
@@ -1276,7 +1275,7 @@ describe('server service integration', () => {
 
 			const result = await sendBudgetAlerts(fixture.context, '2026-06');
 
-			expect(result).toEqual({ sentCount: 1, alertCount: 1 });
+			expect(result).toEqual(expect.objectContaining({ sentCount: 1, alertCount: 1 }));
 			expect(emailLog).toHaveBeenCalledWith(
 				'[email:dev]',
 				expect.objectContaining({

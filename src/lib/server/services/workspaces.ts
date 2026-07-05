@@ -1,8 +1,9 @@
 import { error, redirect, type Cookies, type RequestEvent } from '@sveltejs/kit';
-import { and, desc, eq, ne, sql } from 'drizzle-orm';
+import { and, count, desc, eq, isNull, ne, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import {
 	auditEvent,
+	expense,
 	workspace,
 	workspaceInvitation,
 	workspaceMember,
@@ -142,6 +143,24 @@ export async function updateWorkspace(
 ) {
 	if (!canManageWorkspace(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
+
+	if (input.currency && input.currency.toUpperCase() !== context.currency.toUpperCase()) {
+		const [{ value: expenseCount }] = await db
+			.select({ value: count() })
+			.from(expense)
+			.where(and(eq(expense.workspaceId, context.workspaceId), isNull(expense.deletedAt)));
+
+		if (expenseCount > 0) {
+			throw error(
+				422,
+				translate(
+					context.locale,
+					'Cannot change currency: this workspace has {count} expense(s). Delete all expenses first.',
+					{ count: expenseCount }
+				)
+			);
+		}
+	}
 
 	const [updated] = await db
 		.update(workspace)

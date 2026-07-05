@@ -13,7 +13,8 @@
 		empty = 'No data',
 		currency = 'USD',
 		locale,
-		totalLabel = 'Total'
+		totalLabel = 'Total',
+		othersLabel = 'Others'
 	}: {
 		items: Item[];
 		label: string;
@@ -21,12 +22,20 @@
 		currency?: string;
 		locale?: string;
 		totalLabel?: string;
+		othersLabel?: string;
 	} = $props();
 
 	const radius = 42;
 	const circumference = 2 * Math.PI * radius;
 	const total = $derived(items.reduce((sum, item) => sum + item.totalCents, 0));
-	const chartItems = $derived(items.filter((item) => item.totalCents > 0).slice(0, 6));
+	const MAX_SLICES = 6;
+	const visibleItems = $derived(items.filter((item) => item.totalCents > 0));
+	const chartItems = $derived.by(() => {
+		if (visibleItems.length <= MAX_SLICES) return visibleItems;
+		const top = visibleItems.slice(0, MAX_SLICES - 1);
+		const othersTotal = visibleItems.slice(MAX_SLICES - 1).reduce((sum, item) => sum + item.totalCents, 0);
+		return [...top, { label: othersLabel, totalCents: othersTotal, color: '#94a3b8', isOthers: true as const }];
+	});
 	const fallbackColors = ['#0f766e', '#2563eb', '#f97316', '#7c3aed', '#dc2626', '#0891b2'];
 	const segments = $derived.by(() => {
 		let offset = 0;
@@ -52,7 +61,7 @@
 	<div class="donut-chart">
 		<svg viewBox="0 0 120 120" role="img" aria-label={label}>
 			<circle class="donut-base" cx="60" cy="60" r={radius}></circle>
-			{#each segments as segment (segment.label)}
+			{#each segments as segment (segment.isOthers ? '__others__' : segment.label)}
 				<circle
 					class="donut-segment"
 					cx="60"
@@ -70,7 +79,7 @@
 		</svg>
 
 		<div class="chart-legend">
-			{#each segments as segment (segment.label)}
+			{#each segments as segment (segment.isOthers ? '__others__' : segment.label)}
 				<div class="chart-legend-item">
 					<span class="legend-dot" style={`--legend-color:${segment.color}`}></span>
 					<span>{segment.label}</span>
