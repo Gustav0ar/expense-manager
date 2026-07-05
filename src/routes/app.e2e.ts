@@ -496,22 +496,7 @@ test.describe('english locale defaults', () => {
 		await categoryForm.locator('select[name="icon"]').selectOption('💼');
 		await categoryForm.getByRole('button', { name: 'Create' }).click();
 
-		await page.goto('/app/expenses');
-		const expenseForm = page.locator('form.expense-create-form');
-		await expenseForm.getByLabel('Description').fill('Office supplies');
-		await expenseForm.getByLabel('Installment amount').fill('123.45');
-		await expenseForm.getByLabel('Date', { exact: true }).fill('2026-06-25');
-		await expenseForm.getByLabel('Category').selectOption({ label: '💼 Operations' });
-		await expenseForm.getByRole('button', { name: 'Add' }).click();
-		await expect(
-			page.locator('.expense-table-item').filter({ hasText: 'Office supplies' })
-		).toContainText('$123.45');
-
-		await page.goto('/app/dashboard?from=2026-06-01&to=2026-06-30');
-		await expect(page.locator('.metric-card').filter({ hasText: 'Total' })).toContainText(
-			'$123.45'
-		);
-
+		// Change locale and currency BEFORE creating expenses (currency guard blocks changes after)
 		await page.goto('/app/settings/workspace');
 		await page
 			.locator('form[action="?/updateLocale"]')
@@ -524,6 +509,17 @@ test.describe('english locale defaults', () => {
 		const updateForm = page.locator('form[action="?/update"]');
 		await updateForm.getByLabel('Moeda').fill('BRL');
 		await updateForm.getByRole('button', { name: 'Salvar' }).click();
+
+		await page.goto('/app/expenses');
+		const expenseForm = page.locator('form.expense-create-form');
+		await expenseForm.getByLabel('Descrição').fill('Office supplies');
+		await expenseForm.getByLabel('Valor da parcela').fill('123,45');
+		await expenseForm.getByLabel('Data', { exact: true }).fill('2026-06-25');
+		await expenseForm.getByLabel('Categoria').selectOption({ label: '💼 Operations' });
+		await expenseForm.getByRole('button', { name: 'Adicionar' }).click();
+		await expect(
+			page.locator('.expense-table-item').filter({ hasText: 'Office supplies' })
+		).toContainText('R$ 123,45');
 
 		await page.goto('/app/dashboard?from=2026-06-01&to=2026-06-30');
 		await expect(page.locator('.metric-card').filter({ hasText: 'Total' })).toContainText(
