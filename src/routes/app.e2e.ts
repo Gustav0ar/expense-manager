@@ -946,7 +946,7 @@ test('covers workspace settings, theme, invitations and workspace switching', as
 	await inviteForm.getByLabel('Email').fill(uniqueEmail('invite'));
 	await inviteForm.getByLabel('Papel').selectOption('viewer');
 	await inviteForm.getByRole('button', { name: 'Convidar' }).click();
-	await expect(page.getByText('Convite criado:')).toBeVisible();
+	await expect(page.locator('.invite-url-row')).toBeVisible();
 	await expect(page.getByRole('cell', { name: 'Visualizador' })).toBeVisible();
 
 	await page.goto('/invite/token-invalido');
@@ -1118,9 +1118,9 @@ test('enforces review-sensitive business rules for members, recurrences and impo
 	await inviteForm.getByLabel('Email').fill(memberEmail);
 	await inviteForm.getByLabel('Papel').selectOption('member');
 	await inviteForm.getByRole('button', { name: 'Convidar' }).click();
-	const inviteNotice = page.locator('.notice.success').filter({ hasText: 'Convite criado:' });
-	await expect(inviteNotice).toBeVisible();
-	const inviteUrl = (await inviteNotice.textContent())?.replace('Convite criado:', '').trim();
+	const inviteUrlRow1 = page.locator('.invite-url-row');
+	await expect(inviteUrlRow1).toBeVisible();
+	const inviteUrl = (await inviteUrlRow1.locator('.invite-url-code').textContent())?.trim();
 	expect(inviteUrl).toBeTruthy();
 
 	const memberSession = await acceptInviteAsUser(browser, inviteUrl!, memberEmail);
@@ -1285,9 +1285,9 @@ test('covers MFA setup, challenge and invalid code handling', async ({ page }) =
 	await inviteForm.getByLabel('Email').fill(invitedEmail);
 	await inviteForm.getByLabel('Papel').selectOption('viewer');
 	await inviteForm.getByRole('button', { name: 'Convidar' }).click();
-	const inviteNotice = page.locator('.notice.success').filter({ hasText: 'Convite criado:' });
-	await expect(inviteNotice).toBeVisible();
-	const inviteUrl = (await inviteNotice.textContent())?.replace('Convite criado:', '').trim();
+	const inviteUrlRow2 = page.locator('.invite-url-row');
+	await expect(inviteUrlRow2).toBeVisible();
+	const inviteUrl = (await inviteUrlRow2.locator('.invite-url-code').textContent())?.trim();
 	expect(inviteUrl).toBeTruthy();
 	const invitePath = new URL(inviteUrl!, 'http://localhost:4173').pathname;
 
