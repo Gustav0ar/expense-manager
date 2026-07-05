@@ -11,6 +11,7 @@ import { translate } from '$lib/i18n';
 import { randomUUID } from 'node:crypto';
 import { isMfaEnabled, isMfaSessionVerified } from '$lib/server/services/mfa';
 import { pruneExpiredUnverifiedRegistrations } from '$lib/server/services/email-verification';
+import { runRecurringExpenseScheduler } from '$lib/server/services/recurring';
 import { isTrustedOrigin } from '$lib/server/security/origin';
 import { isRegistrationEnabled } from '$lib/server/registration';
 import { traceRequest } from '$lib/server/observability/tracing';
@@ -19,6 +20,10 @@ const unsafeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const verificationCleanupIntervalMs = 60_000;
 let nextVerificationCleanupAt = 0;
 let verificationCleanupPromise: Promise<unknown> | null = null;
+
+const recurringSchedulerIntervalMs = 5 * 60 * 1000; // 5 minutes
+let nextRecurringSchedulerAt = 0;
+let recurringSchedulerPromise: Promise<void> | null = null;
 
 function setSecurityHeaders(response: Response) {
 	response.headers.set('X-Content-Type-Options', 'nosniff');
@@ -45,6 +50,7 @@ const handleBetterAuth: Handle = async ({ event, resolve }) => {
 	event.locals.locale = locale;
 	event.locals.localePreference = localePreference;
 	cleanupExpiredUnverifiedRegistrations();
+	triggerRecurringExpenseScheduler();
 	const themedResolve: typeof resolve = (resolveEvent, options) =>
 		resolve(resolveEvent, {
 			...options,
@@ -126,6 +132,22 @@ function cleanupExpiredUnverifiedRegistrations() {
 		})
 		.finally(() => {
 			verificationCleanupPromise = null;
+		});
+}
+
+function triggerRecurringExpenseScheduler() {
+	if (building) return;
+
+	const now = Date.now();
+	if (recurringSchedulerPromise || now < nextRecurringSchedulerAt) return;
+
+	nextRecurringSchedulerAt = now + recurringSchedulerIntervalMs;
+	recurringSchedulerPromise = runRecurringExpenseScheduler()
+		.catch((err) => {
+			console.error('Recurring expense scheduler failed.', err);
+		})
+		.finally(() => {
+			recurringSchedulerPromise = null;
 		});
 }
 

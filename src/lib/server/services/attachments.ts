@@ -145,16 +145,69 @@ export async function getAttachmentForDownload(context: WorkspaceContext, id: nu
 	};
 }
 
+export async function deleteExpenseAttachment(context: WorkspaceContext, attachmentId: number) {
+	if (!canWriteExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
+
+	const [attachment] = await db
+		.select({
+			id: expenseAttachment.id,
+			expenseId: expenseAttachment.expenseId,
+			storageKey: expenseAttachment.storageKey,
+			sizeBytes: expenseAttachment.sizeBytes,
+			contentType: expenseAttachment.contentType
+		})
+		.from(expenseAttachment)
+		.innerJoin(expense, eq(expense.id, expenseAttachment.expenseId))
+		.where(
+			and(
+				eq(expenseAttachment.id, attachmentId),
+				eq(expenseAttachment.workspaceId, context.workspaceId),
+				eq(expense.workspaceId, context.workspaceId)
+				// Intentionally no isNull(expense.deletedAt): we must be able to
+				// clean up attachments on soft-deleted expenses too.
+			)
+		)
+		.limit(1);
+
+	if (!attachment) throw error(404, translate(context.locale, 'Attachment not found.'));
+
+	const filePath = safeStoragePath(getUploadDir(), attachment.storageKey);
+
+	await db.transaction(async (tx) => {
+		await tx
+			.delete(expenseAttachment)
+			.where(eq(expenseAttachment.id, attachment.id));
+
+		await tx.insert(auditEvent).values({
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: 'expense_attachment.deleted',
+			entityType: 'expense_attachment',
+			entityId: String(attachment.id),
+			metadata: {
+				expenseId: attachment.expenseId,
+				sizeBytes: attachment.sizeBytes,
+				contentType: attachment.contentType
+			}
+		});
+	});
+
+	// Remove the file from disk after the DB transaction succeeds.
+	// Failure here leaves an orphaned file but won't corrupt DB state.
+	await rm(filePath, { force: true }).catch(() => {});
+}
+
 export function attachmentContentDisposition(fileName: string) {
 	const sanitized = sanitizeFileName(fileName).replace(/"/g, '');
 	return `attachment; filename="${sanitized}"`;
 }
 
-function getUploadDir() {
+export function getUploadDir() {
 	return process.env.UPLOAD_DIR || env.UPLOAD_DIR || path.join(process.cwd(), 'uploads');
 }
 
-function safeStoragePath(root: string, storageKey: string) {
+export function safeStoragePath(root: string, storageKey: string) {
 	const resolvedRoot = path.resolve(root);
 	const resolvedPath = path.resolve(resolvedRoot, storageKey);
 	if (!resolvedPath.startsWith(`${resolvedRoot}${path.sep}`)) {
