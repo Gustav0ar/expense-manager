@@ -23,7 +23,7 @@ let verificationCleanupPromise: Promise<unknown> | null = null;
 
 const recurringSchedulerIntervalMs = 5 * 60 * 1000; // 5 minutes
 let nextRecurringSchedulerAt = 0;
-let recurringSchedulerPromise: Promise<void> | null = null;
+let recurringSchedulerPromise: Promise<unknown> | null = null;
 
 function setSecurityHeaders(response: Response) {
 	response.headers.set('X-Content-Type-Options', 'nosniff');

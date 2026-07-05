@@ -43,7 +43,9 @@
 			const value = total ? item.totalCents / total : 0;
 			const length = value * circumference;
 			const segment = {
-				...item,
+				label: item.label,
+				totalCents: item.totalCents,
+				isOthers: 'isOthers' in item && item.isOthers === true,
 				color: item.color ?? fallbackColors[index % fallbackColors.length],
 				dasharray: `${length} ${circumference - length}`,
 				dashoffset: -offset,
