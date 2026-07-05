@@ -3077,6 +3077,14 @@ th {
 	.workflow-form .button {
 		width: 100%;
 	}
+
+	.hide-compact {
+		display: none;
+	}
+
+	.panel-heading-wrap {
+		flex-wrap: wrap;
+	}
 }
 
 @media (max-width: 360px) {
