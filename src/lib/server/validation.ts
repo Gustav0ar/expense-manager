@@ -62,11 +62,15 @@ const monthSchema = z.preprocess((value) => {
 	if (typeof value === 'string' && /^\d{4}-\d{2}$/.test(value)) return `${value}-01`;
 	return value;
 }, isoDateSchema);
-const optionalMonthSchema = z.preprocess((value) => {
-	if (value === '') return undefined;
-	if (typeof value === 'string' && /^\d{4}-\d{2}$/.test(value)) return `${value}-01`;
-	return value;
-}, isoDateSchema.optional());
+const optionalMonthSchema = z
+	.preprocess((value) => {
+		if (value === '') return undefined;
+		if (typeof value === 'string' && /^\d{4}-\d{2}$/.test(value)) return `${value}-01`;
+		return value;
+	}, isoDateSchema.optional())
+	.refine((v) => v === undefined || v.endsWith('-01'), {
+		message: 'Must be the first day of a month (YYYY-MM or YYYY-MM-01).'
+	});
 
 function validateDateRange(values: { from?: string; to?: string }, context: z.RefinementCtx) {
 	if (values.from && values.to && values.from > values.to) {
