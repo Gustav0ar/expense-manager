@@ -72,8 +72,8 @@ export const actions: Actions = {
 		try {
 			await createExpense(context, parsed.data);
 		} catch (err) {
-			if (isHttpError(err) && err.status < 500) {
-				return fail(err.status, { message: err.body.message });
+			if (isHttpError(err) && err.status === 409) {
+				return fail(409, { message: err.body.message });
 			}
 			throw err;
 		}
@@ -171,8 +171,8 @@ export const actions: Actions = {
 		try {
 			await reviewExpense(context, parsed.data.id, parsed.data);
 		} catch (err) {
-			if (isHttpError(err) && err.status < 500) {
-				return fail(err.status, { message: err.body.message });
+			if (isHttpError(err) && err.status === 409) {
+				return fail(409, { message: err.body.message });
 			}
 			throw err;
 		}
@@ -188,8 +188,8 @@ export const actions: Actions = {
 		try {
 			await updateExpensePaymentStatus(context, parsed.data.id, parsed.data);
 		} catch (err) {
-			if (isHttpError(err) && err.status < 500) {
-				return fail(err.status, { message: err.body.message });
+			if (isHttpError(err) && err.status === 409) {
+				return fail(409, { message: err.body.message });
 			}
 			throw err;
 		}
@@ -207,8 +207,8 @@ export const actions: Actions = {
 		try {
 			await saveExpenseAttachment(context, id.data, file);
 		} catch (err) {
-			if (isHttpError(err) && err.status < 500) {
-				return fail(err.status, { message: err.body.message });
+			if (isHttpError(err) && err.status === 409) {
+				return fail(409, { message: err.body.message });
 			}
 			throw err;
 		}
