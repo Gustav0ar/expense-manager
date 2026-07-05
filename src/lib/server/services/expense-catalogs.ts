@@ -274,8 +274,7 @@ export async function getOrCreateCatalogItem(
 
 	const rows = await executeCatalogRows(executor, upsertCatalogSql(kind, workspaceId, normalized));
 	const item = toCatalogItem(rows[0]);
-	if (!item)
-		throw error(500, translate(locale, 'Could not save the catalog.'));
+	if (!item) throw error(500, translate(locale, 'Could not save the catalog.'));
 
 	return item;
 }
@@ -288,11 +287,7 @@ export function catalogLookupKey(name: string) {
 	return normalizeCatalogName(name).toLowerCase();
 }
 
-export function assertCatalogName(
-	kind: ExpenseCatalogKind,
-	name: string,
-	locale: string = 'en'
-) {
+export function assertCatalogName(kind: ExpenseCatalogKind, name: string, locale: string = 'en') {
 	const kindLabel = translate(locale, catalogKindLabel(kind));
 	if (name.length < 2)
 		throw error(
@@ -309,10 +304,7 @@ export function assertCatalogName(
 		);
 	}
 	if (hasControlCharacters(name)) {
-		throw error(
-			400,
-			translate(locale, '{kind} contains invalid characters.', { kind: kindLabel })
-		);
+		throw error(400, translate(locale, '{kind} contains invalid characters.', { kind: kindLabel }));
 	}
 }
 

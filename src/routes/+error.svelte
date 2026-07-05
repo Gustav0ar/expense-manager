@@ -7,7 +7,7 @@
 	// The root layout exposes locale; fall back to 'en' if unavailable.
 	// We use $page.data for robustness since layout data may not always be set
 	// on error boundaries.
-	const locale = $derived((($page.data as LayoutData | null)?.locale) ?? 'en');
+	const locale = $derived(($page.data as LayoutData | null)?.locale ?? 'en');
 
 	function t(key: string) {
 		return translate(locale, key);
