@@ -122,8 +122,14 @@ async function inviteUser(page: Page, email: string, role: 'admin' | 'member' | 
 	const inviteUrl = (await inviteNotice.textContent())?.replace('Convite criado:', '').trim();
 	expect(inviteUrl).toBeTruthy();
 
+	// Role and status are now displayed as translated labels (pt-BR locale in tests).
+	const roleLabel: Record<typeof role, string> = {
+		admin: 'Administrador',
+		member: 'Membro',
+		viewer: 'Visualizador'
+	};
 	const row = await invitationRow(page, email);
-	await expect(row.locator('td').nth(1)).toHaveText(role);
+	await expect(row.locator('td').nth(1)).toHaveText(roleLabel[role]);
 	await expect(row.locator('td').nth(2)).toHaveText('Pendente');
 	return inviteUrl!;
 }
