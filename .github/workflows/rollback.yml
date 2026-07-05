@@ -85,7 +85,7 @@ jobs:
             true
 
       - name: SSH and roll back
-        uses: appleboy/ssh-action@v1.2.2
+        uses: appleboy/ssh-action@v1.2.5
         env:
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/expense-manager' }}
           COMPOSE_CMD: ${{ vars.COMPOSE_COMMAND || 'docker compose' }}
