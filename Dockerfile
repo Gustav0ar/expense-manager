@@ -17,7 +17,7 @@ ENTRYPOINT ["/usr/local/bin/backup.sh"]
 
 FROM node:24-alpine AS build
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
+RUN npm install -g corepack && corepack enable && corepack prepare pnpm@11.9.0 --activate
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NODE_ENV=production
