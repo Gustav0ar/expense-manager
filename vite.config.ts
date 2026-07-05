@@ -67,7 +67,6 @@ export default defineConfig({
 				'src/lib/server/services/expenses.ts',
 				'src/lib/server/services/imports.ts',
 				'src/lib/server/services/invitations.ts',
-				'src/lib/server/services/mfa.ts',
 				'src/lib/server/utils/*.ts',
 				'src/lib/server/utils/import.ts',
 				'src/lib/server/utils/totp.ts',
