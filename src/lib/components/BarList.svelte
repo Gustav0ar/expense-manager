@@ -56,7 +56,7 @@
 				<div class="bar-track" aria-hidden="true">
 					<div
 						class="bar-fill"
-						style={`width: ${max ? Math.max(4, (item.totalCents / max) * 100) : 0}%; background: ${item.color ?? '#2563eb'}`}
+						style={`width: ${max ? Math.max(4, (item.totalCents / max) * 100) : 0}%; background: ${item.color ?? 'var(--color-primary)'}`}
 					></div>
 				</div>
 			</div>

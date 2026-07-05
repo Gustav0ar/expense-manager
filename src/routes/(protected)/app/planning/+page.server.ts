@@ -86,6 +86,14 @@ export const actions: Actions = {
 			return fail(400, { message: translate(event.locals.locale, 'Invalid alert month.') });
 
 		const result = await sendBudgetAlerts(context, parsed.data.periodMonth);
+
+		if (result.alreadySent) {
+			return {
+				tone: 'success',
+				message: translate(event.locals.locale, 'Budget alert email already sent for this month.')
+			};
+		}
+
 		return {
 			tone: 'success',
 			message:
@@ -166,14 +174,26 @@ export const actions: Actions = {
 		}
 
 		const result = await importExpenses(context, { ...parsed.data, file });
+		const parts: string[] = [];
+		if (result.importedCount > 0) {
+			parts.push(
+				translate(event.locals.locale, '{count} expenses imported.', {
+					count: result.importedCount
+				})
+			);
+		}
+		if (result.duplicateCount > 0) {
+			parts.push(
+				translate(event.locals.locale, '{count} duplicates skipped.', {
+					count: result.duplicateCount
+				})
+			);
+		}
+		const isSuccess = result.importedCount > 0 || result.duplicateCount > 0;
 		return {
-			message:
-				result.importedCount > 0
-					? translate(event.locals.locale, '{count} expenses imported.', {
-							count: result.importedCount
-						})
-					: translate(event.locals.locale, 'No expenses imported.'),
-			importResult: result
+			message: parts.length > 0 ? parts.join(' ') : translate(event.locals.locale, 'No expenses imported.'),
+			importResult: result,
+			tone: isSuccess ? 'success' : 'danger'
 		};
 	}
 };

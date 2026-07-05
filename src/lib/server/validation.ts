@@ -202,8 +202,9 @@ export const reportFilterSchema = z
 		from: isoDateSchema,
 		to: isoDateSchema,
 		groupBy: z
-			.enum(['category', 'week', 'month', 'year', 'payment', 'expense'])
+			.enum(['category', 'week', 'month', 'year', 'payment', 'vendor', 'costCenter', 'expense'])
 			.default('category'),
+		dateField: z.enum(['expenseDate', 'competencyMonth']).default('expenseDate'),
 		categoryId: optionalIdSchema,
 		vendorId: optionalIdSchema,
 		costCenterId: optionalIdSchema,

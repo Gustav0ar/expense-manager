@@ -87,9 +87,9 @@ async function inviteUser(page: Page, email: string, role: AssignableRole) {
 	await form.getByLabel('Role').selectOption(role);
 	await form.getByRole('button', { name: 'Invite' }).click();
 
-	const inviteNotice = page.locator('.notice.success').filter({ hasText: 'Invite created:' });
-	await expect(inviteNotice).toBeVisible();
-	const inviteUrl = (await inviteNotice.textContent())?.replace('Invite created:', '').trim();
+	const inviteUrlRow = page.locator('.invite-url-row');
+	await expect(inviteUrlRow).toBeVisible();
+	const inviteUrl = (await inviteUrlRow.locator('.invite-url-code').textContent())?.trim();
 	expect(inviteUrl).toBeTruthy();
 	return inviteUrl!;
 }

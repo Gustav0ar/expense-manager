@@ -353,6 +353,7 @@ export const ptBrMessages = {
 	Travel: 'Viagem',
 	Documents: 'Documentos',
 	Other: 'Outros',
+	Others: 'Outros',
 
 	'Account created. Sign in to continue.': 'Conta criada. Entre para continuar.',
 	'Account created. Check your email to verify your account before signing in.':
@@ -456,6 +457,15 @@ export const ptBrMessages = {
 	'{count} due recurring expenses generated.': '{count} despesas recorrentes geradas.',
 	'{count} expenses imported.': '{count} despesas importadas.',
 	'Invite created: {url}': 'Convite criado: {url}',
+	'Invite link created': 'Link de convite criado',
+	'Copy link': 'Copiar link',
+	'Copy all': 'Copiar tudo',
+	'Copied!': 'Copiado!',
+	'Scan this QR code with your authenticator app': 'Escaneie este QR code com seu app autenticador',
+	'Disabling MFA will reduce your account security.': 'Desativar o MFA reduzirá a segurança da sua conta.',
+	'Remove member?': 'Remover membro?',
+	'Remove {name} from the workspace? They will lose access immediately.': 'Remover {name} do workspace? Eles perderão o acesso imediatamente.',
+	'Skip to main content': 'Pular para o conteúdo principal',
 	'You received an invite to access {workspace}. Open: {url}':
 		'Você recebeu um convite para acessar {workspace}. Acesse: {url}',
 	'Accept invite': 'Aceitar convite',
@@ -484,5 +494,16 @@ export const ptBrMessages = {
 	'Cannot change payment status of a reconciled expense.':
 		'Não é possível alterar o status de pagamento de uma despesa conciliada.',
 	'Review status has changed. Reload and try again.':
-		'Status de revisão alterado. Recarregue e tente novamente.'
+		'Status de revisão alterado. Recarregue e tente novamente.',
+	'{count} duplicates skipped.': '{count} duplicatas ignoradas.',
+	'Send budget alert email': 'Enviar alertas de orçamento por email',
+	'Budget alert email already sent for this month.': 'Alertas de orçamento já enviados para este mês.',
+	'Delete attachment?': 'Excluir comprovante?',
+	'Bulk actions': 'Ações em lote',
+	'{count} selected': '{count} selecionado(s)',
+	'Select {description}': 'Selecionar {description}',
+	'You cannot change your own role.': 'Você não pode alterar seu próprio papel.',
+	'You cannot remove yourself.': 'Você não pode remover a si mesmo.',
+	'Cannot change currency: this workspace has {count} expense(s). Delete all expenses first.':
+		'Não é possível alterar a moeda: este workspace tem {count} despesa(s). Exclua todas as despesas primeiro.'
 } as const;

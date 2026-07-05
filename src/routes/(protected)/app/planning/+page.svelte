@@ -63,9 +63,10 @@
 
 	{#if form?.message}
 		<p
-			class:success={form.tone === 'success' || form.importResult?.importedCount > 0}
-			class:danger={form.tone !== 'success' && !form.importResult?.importedCount}
+			class:success={form.tone === 'success' || (form.importResult?.importedCount ?? 0) > 0 || (form.importResult?.duplicateCount ?? 0) > 0}
+			class:danger={form.tone === 'danger' || (form.tone !== 'success' && !form.importResult?.importedCount && !form.importResult?.duplicateCount)}
 			class="notice"
+			role={form.tone === 'success' || (form.importResult?.importedCount ?? 0) > 0 || (form.importResult?.duplicateCount ?? 0) > 0 ? 'status' : 'alert'}
 		>
 			{form.message}
 		</p>
@@ -81,7 +82,7 @@
 						<input type="hidden" name="periodMonth" value={data.periodMonth} />
 						<button class="button secondary" type="submit">
 							<Bell size={16} />
-							<span>{t('Enable alerts')}</span>
+							<span>{t('Send budget alert email')}</span>
 						</button>
 					</form>
 				</div>

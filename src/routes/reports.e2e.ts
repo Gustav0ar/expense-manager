@@ -262,9 +262,9 @@ async function createPendingExpenseAsMember(ownerPage: Page, browser: Browser) {
 	await inviteForm.getByLabel('Email').fill(invitedEmail);
 	await inviteForm.getByLabel('Papel').selectOption('member');
 	await inviteForm.getByRole('button', { name: 'Convidar' }).click();
-	const inviteNotice = ownerPage.locator('.notice.success').filter({ hasText: 'Convite criado:' });
-	await expect(inviteNotice).toBeVisible();
-	const inviteUrl = (await inviteNotice.textContent())?.replace('Convite criado:', '').trim();
+	const inviteUrlRow = ownerPage.locator('.invite-url-row');
+	await expect(inviteUrlRow).toBeVisible();
+	const inviteUrl = (await inviteUrlRow.locator('.invite-url-code').textContent())?.trim();
 	expect(inviteUrl).toBeTruthy();
 	const invitePath = new URL(inviteUrl!, 'http://localhost:4173').pathname;
 

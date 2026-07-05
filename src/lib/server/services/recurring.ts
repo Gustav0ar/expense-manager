@@ -6,7 +6,9 @@ import {
 	category,
 	expense,
 	paymentMethod,
-	recurringExpense
+	recurringExpense,
+	workspace,
+	workspaceMember
 } from '$lib/server/db/schema';
 import { canReviewExpenses, canWriteExpenses } from '$lib/server/security/roles';
 import { advanceDate, todayIso } from '$lib/server/utils/date';
@@ -255,4 +257,115 @@ export async function materializeDueRecurringExpenses(
 	});
 
 	return { createdCount };
+}
+
+/**
+ * System-wide scheduler that materializes due recurring expenses across all
+ * workspaces. Runs without user authentication context — uses the workspace
+ * owner as the actor (for audit attribution) but synthesises a 'member' role
+ * so all generated expenses start as 'pending' and require explicit review.
+ * This is the safe policy for unattended background jobs.
+ */
+export async function runRecurringExpenseScheduler(): Promise<{
+	processed: number;
+	created: number;
+	errors: number;
+}> {
+	const asOf = todayIso();
+
+	// Find all workspace IDs that have at least one active recurring expense due.
+	// This leverages the recurring_expense_workspace_next_run_idx partial index.
+	const dueRows = await db
+		.selectDistinct({ workspaceId: recurringExpense.workspaceId })
+		.from(recurringExpense)
+		.where(
+			and(
+				eq(recurringExpense.status, 'active'),
+				lte(recurringExpense.nextRunDate, asOf)
+			)
+		);
+
+	if (dueRows.length === 0) {
+		return { processed: 0, created: 0, errors: 0 };
+	}
+
+	let totalCreated = 0;
+	let errorCount = 0;
+
+	for (const { workspaceId } of dueRows) {
+		try {
+			// Load workspace currency and its owner's user ID in a single query.
+			const [row] = await db
+				.select({
+					currency: workspace.currency,
+					workspaceName: workspace.name,
+					weekStartsOn: workspace.weekStartsOn,
+					userId: workspaceMember.userId
+				})
+				.from(workspace)
+				.innerJoin(
+					workspaceMember,
+					and(
+						eq(workspaceMember.workspaceId, workspace.id),
+						eq(workspaceMember.role, 'owner'),
+						eq(workspaceMember.status, 'active')
+					)
+				)
+				.where(eq(workspace.id, workspaceId))
+				.orderBy(asc(workspaceMember.createdAt))
+				.limit(1);
+
+			if (!row) {
+				// No active owner found — skip this workspace gracefully.
+				console.warn(
+					JSON.stringify({
+						level: 'warn',
+						message: 'recurring_scheduler: no active owner for workspace, skipping',
+						workspaceId
+					})
+				);
+				continue;
+			}
+
+			const context: WorkspaceContext = {
+				userId: row.userId,
+				workspaceId,
+				workspaceName: row.workspaceName,
+				currency: row.currency,
+				locale: 'en',
+				weekStartsOn: row.weekStartsOn,
+				// Use 'member' so the scheduler never auto-approves: only
+				// canWriteExpenses passes (rank 2 >= 2), while canReviewExpenses
+				// requires admin/owner (rank >= 3). All scheduler-generated expenses
+				// therefore start as 'pending' and require an explicit human review.
+				role: 'member'
+			};
+
+			const { createdCount } = await materializeDueRecurringExpenses(context, asOf);
+			totalCreated += createdCount;
+		} catch (err) {
+			errorCount++;
+			console.error(
+				JSON.stringify({
+					level: 'error',
+					message: 'recurring_scheduler: failed to process workspace',
+					workspaceId,
+					error: err instanceof Error ? err.message : String(err)
+				})
+			);
+		}
+	}
+
+	console.info(
+		JSON.stringify({
+			level: 'info',
+			message: 'recurring_scheduler: run complete',
+			processed: dueRows.length,
+			created: totalCreated,
+			errors: errorCount,
+			asOf
+		})
+	);
+
+	return { processed: dueRows.length, created: totalCreated, errors: errorCount };
 }

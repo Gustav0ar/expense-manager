@@ -171,11 +171,31 @@ export async function sendBudgetAlerts(context: WorkspaceContext, periodMonth: s
 	if (!canManageBudgets(context.role)) throw error(403, 'Permission denied.');
 
 	const month = startOfMonth(periodMonth);
+
+	// Guard: check whether alerts were already sent for this periodMonth in this workspace.
+	// We match on the periodMonth stored in the audit event metadata, not on createdAt,
+	// so the guard works correctly when alerts are sent for months other than the current one.
+	const [alreadySent] = await db
+		.select({ id: auditEvent.id })
+		.from(auditEvent)
+		.where(
+			and(
+				eq(auditEvent.workspaceId, context.workspaceId),
+				eq(auditEvent.action, 'budget.alerts_sent'),
+				sql`${auditEvent.metadata}->>'periodMonth' = ${month}`
+			)
+		)
+		.limit(1);
+
+	if (alreadySent) {
+		return { sentCount: 0, alertCount: 0, alreadySent: true };
+	}
+
 	const summary = await getBudgetSummary(context, month);
 	const alertItems = summary.items.filter(
 		(item) => item.status === 'warning' || item.status === 'over'
 	);
-	if (alertItems.length === 0) return { sentCount: 0, alertCount: 0 };
+	if (alertItems.length === 0) return { sentCount: 0, alertCount: 0, alreadySent: false };
 
 	const recipients = await db
 		.select({ email: user.email })
@@ -197,6 +217,21 @@ export async function sendBudgetAlerts(context: WorkspaceContext, periodMonth: s
 		status: item.status
 	}));
 
+	// Write audit record BEFORE sending emails.
+	// If email delivery fails, the guard still prevents re-sending to already-notified admins.
+	await db.insert(auditEvent).values({
+		workspaceId: context.workspaceId,
+		actorUserId: context.userId,
+		action: 'budget.alerts_sent',
+		entityType: 'budget',
+		entityId: String(context.workspaceId),
+		metadata: {
+			periodMonth: month,
+			alertCount: alertItems.length,
+			recipientCount: recipients.length
+		}
+	});
+
 	await Promise.all(
 		recipients.map((recipient) =>
 			sendBudgetAlertEmail(
@@ -209,17 +244,5 @@ export async function sendBudgetAlerts(context: WorkspaceContext, periodMonth: s
 		)
 	);
 
-	await db.insert(auditEvent).values({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: 'budget.alerts_sent',
-		entityType: 'category_budget',
-		metadata: {
-			periodMonth: month,
-			alertCount: alertItems.length,
-			recipientCount: recipients.length
-		}
-	});
-
-	return { sentCount: recipients.length, alertCount: alertItems.length };
+	return { sentCount: recipients.length, alertCount: alertItems.length, alreadySent: false };
 }

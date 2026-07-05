@@ -38,7 +38,7 @@
 	</div>
 
 	{#if form?.message}
-		<p class="notice danger">{form.message}</p>
+		<p class="notice danger" role="alert">{form.message}</p>
 	{/if}
 
 	<div class="content-grid two">
