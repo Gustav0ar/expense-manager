@@ -21,7 +21,7 @@ jobs:
     name: Build and push images
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - id: image-prefix
         name: Prepare image prefix
@@ -29,17 +29,17 @@ jobs:
           owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
           echo "value=${owner}/expense-manager" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - id: meta-app
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ steps.image-prefix.outputs.value }}-app
           tags: |
@@ -50,7 +50,7 @@ jobs:
 
       - id: build-app
         name: Build and push app image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -72,7 +72,7 @@ jobs:
           push-to-registry: true
 
       - id: meta-migrate
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ steps.image-prefix.outputs.value }}-migrate
           tags: |
@@ -83,7 +83,7 @@ jobs:
 
       - id: build-migrate
         name: Build and push migration image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -105,7 +105,7 @@ jobs:
           push-to-registry: true
 
       - id: meta-backup
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ steps.image-prefix.outputs.value }}-backup
           tags: |
@@ -116,7 +116,7 @@ jobs:
 
       - id: build-backup
         name: Build and push backup image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
