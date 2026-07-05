@@ -1,4 +1,4 @@
-FROM node:24-alpine AS deps
+FROM node:26-alpine AS deps
 WORKDIR /app
 RUN npm install -g corepack && corepack enable && corepack prepare pnpm@11.9.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
@@ -15,7 +15,7 @@ COPY scripts/backup.sh /usr/local/bin/backup.sh
 RUN chmod 755 /usr/local/bin/backup.sh
 ENTRYPOINT ["/usr/local/bin/backup.sh"]
 
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 RUN npm install -g corepack && corepack enable && corepack prepare pnpm@11.9.0 --activate
 COPY --from=deps /app/node_modules ./node_modules
@@ -27,7 +27,7 @@ RUN ORIGIN=http://localhost:3000 \
 	pnpm build
 RUN pnpm prune --prod --ignore-scripts
 
-FROM node:24-alpine AS runner
+FROM node:26-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
