@@ -478,5 +478,11 @@ export const ptBrMessages = {
 		'Alertas de orçamento para {workspace} em {period}:',
 	'Budget alerts - {workspace}': 'Alertas de orçamento - {workspace}',
 	'{spent} of {budget}': '{spent} de {budget}',
-	'No baseline': 'Sem base'
+	'No baseline': 'Sem base',
+	'Cannot reject a paid or reconciled expense.':
+		'Não é possível rejeitar uma despesa paga ou conciliada.',
+	'Cannot change payment status of a reconciled expense.':
+		'Não é possível alterar o status de pagamento de uma despesa conciliada.',
+	'Review status has changed. Reload and try again.':
+		'Status de revisão alterado. Recarregue e tente novamente.'
 } as const;

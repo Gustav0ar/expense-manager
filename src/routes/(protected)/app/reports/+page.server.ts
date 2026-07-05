@@ -40,7 +40,9 @@ export const load: PageServerLoad = async (event) => {
 					categoryId: filters.data.categoryId,
 					vendorId: filters.data.vendorId,
 					costCenterId: filters.data.costCenterId,
-					competencyMonth: filters.data.competencyMonth
+					competencyMonth: filters.data.competencyMonth,
+					reviewStatus: filters.data.reviewStatus,
+					paymentStatus: filters.data.paymentStatus
 				});
 	const analyticsPromise =
 		groupBy === 'expense'

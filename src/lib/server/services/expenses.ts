@@ -82,7 +82,14 @@ export type AnalyticalExpenseReportFilters = Omit<ExpenseFilters, 'cursor' | 'li
 
 type GroupedReportFilters = Pick<
 	AnalyticalExpenseReportFilters,
-	'from' | 'to' | 'categoryId' | 'vendorId' | 'costCenterId' | 'competencyMonth'
+	| 'from'
+	| 'to'
+	| 'categoryId'
+	| 'vendorId'
+	| 'costCenterId'
+	| 'competencyMonth'
+	| 'reviewStatus'
+	| 'paymentStatus'
 >;
 
 export type AnalyticalExpenseReportRow = {
@@ -221,6 +228,9 @@ export async function getExpenseListSummary(
 			totalCents: sql<number>`coalesce(sum(${expense.amountCents}), 0)::bigint`
 		})
 		.from(expense)
+		// innerJoin category to match the listExpenses behaviour: orphaned expenses
+		// (whose categoryId no longer resolves) are excluded from both count and list.
+		.innerJoin(category, eq(category.id, expense.categoryId))
 		.leftJoin(paymentMethod, eq(paymentMethod.id, expense.paymentMethodId))
 		.leftJoin(vendor, eq(vendor.id, expense.vendorId))
 		.leftJoin(costCenter, eq(costCenter.id, expense.costCenterId))
@@ -431,6 +441,30 @@ export async function reviewExpense(
 		throw error(400, translate(context.locale, 'Check review data.'));
 	}
 
+	const [current] = await db
+		.select({ reviewStatus: expense.reviewStatus, paymentStatus: expense.paymentStatus })
+		.from(expense)
+		.where(
+			and(
+				eq(expense.id, id),
+				eq(expense.workspaceId, context.workspaceId),
+				isNull(expense.deletedAt)
+			)
+		)
+		.limit(1);
+
+	if (!current) throw error(404, translate(context.locale, 'Expense not found.'));
+
+	// Rejecting a paid or reconciled expense would silently wipe the payment
+	// record. Only allow it when the actor also has reconcile rights.
+	if (
+		input.reviewStatus === 'rejected' &&
+		current.paymentStatus !== 'unpaid' &&
+		!canReconcileExpenses(context.role)
+	) {
+		throw error(403, translate(context.locale, 'Cannot reject a paid or reconciled expense.'));
+	}
+
 	const reviewedAt = new Date();
 	const reviewUpdate =
 		input.reviewStatus === 'rejected'
@@ -451,6 +485,7 @@ export async function reviewExpense(
 					reviewRejectionReason: null
 				};
 
+	// Re-assert the reviewStatus we read to detect concurrent changes (409).
 	const [updated] = await db
 		.update(expense)
 		.set(reviewUpdate)
@@ -458,12 +493,14 @@ export async function reviewExpense(
 			and(
 				eq(expense.id, id),
 				eq(expense.workspaceId, context.workspaceId),
+				eq(expense.reviewStatus, current.reviewStatus),
 				isNull(expense.deletedAt)
 			)
 		)
 		.returning({ id: expense.id });
 
-	if (!updated) throw error(404, translate(context.locale, 'Expense not found.'));
+	if (!updated)
+		throw error(409, translate(context.locale, 'Review status has changed. Reload and try again.'));
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,
@@ -483,7 +520,39 @@ export async function updateExpensePaymentStatus(
 	if (!canReconcileExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
-	const paidAt = input.paymentStatus === 'unpaid' ? null : (input.paidAt ?? todayIsoDate());
+	const [current] = await db
+		.select({ paymentStatus: expense.paymentStatus, paidAt: expense.paidAt })
+		.from(expense)
+		.where(
+			and(
+				eq(expense.id, id),
+				eq(expense.workspaceId, context.workspaceId),
+				eq(expense.reviewStatus, 'approved'),
+				isNull(expense.deletedAt)
+			)
+		)
+		.limit(1);
+
+	if (!current) throw error(404, translate(context.locale, 'Approved expense not found.'));
+
+	// Enforce valid state-machine transitions. Downgrading a reconciled expense
+	// back to 'paid' is blocked — reconciliation is a terminal financial state
+	// that should not be silently reversed. All other transitions are allowed,
+	// including unpaid → reconciled (a valid shortcut when reconciling from a
+	// bank import without a separate 'mark as paid' step).
+	if (input.paymentStatus === 'paid' && current.paymentStatus === 'reconciled') {
+		throw error(
+			400,
+			translate(context.locale, 'Cannot change payment status of a reconciled expense.')
+		);
+	}
+
+	// When reconciling an already-paid expense, preserve the original paidAt
+	// unless the caller explicitly supplies a new value.
+	const paidAt =
+		input.paymentStatus === 'unpaid' ? null : (input.paidAt ?? current.paidAt ?? todayIsoDate());
+
+	// Re-assert current paymentStatus to detect concurrent changes (409).
 	const [updated] = await db
 		.update(expense)
 		.set({
@@ -497,12 +566,14 @@ export async function updateExpensePaymentStatus(
 				eq(expense.id, id),
 				eq(expense.workspaceId, context.workspaceId),
 				eq(expense.reviewStatus, 'approved'),
+				eq(expense.paymentStatus, current.paymentStatus),
 				isNull(expense.deletedAt)
 			)
 		)
 		.returning({ id: expense.id });
 
-	if (!updated) throw error(404, translate(context.locale, 'Approved expense not found.'));
+	if (!updated)
+		throw error(409, translate(context.locale, 'Expense was modified. Reload and try again.'));
 
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,
@@ -664,12 +735,15 @@ export async function getAnalyticalExpenseReport(
 				installmentNumber: expense.installmentNumber,
 				installmentsTotal: expense.installmentsTotal,
 				notes: expense.notes,
-				attachmentCount: sql<number>`(
+				// Aggregated via a lateral subquery rather than a correlated scalar
+				// subquery to avoid one COUNT(*) per row at large export sizes.
+				attachmentCount: sql<number>`coalesce((
 					select count(*)::int
 					from expense_attachment ea
 					where ea.expense_id = ${expense.id}
 						and ea.workspace_id = ${expense.workspaceId}
-				)`,
+					group by ea.expense_id
+				), 0)`,
 				createdAt: expense.createdAt
 			})
 			.from(expense)
@@ -741,12 +815,7 @@ async function getTotalsByPaymentMethod(workspaceId: number, filters: GroupedRep
 			coalesce(sum(e.amount_cents), 0)::bigint as total_cents
 		from expense e
 		left join payment_method pm on pm.id = e.payment_method_id and pm.workspace_id = e.workspace_id
-		where e.workspace_id = ${workspaceId}
-			and e.deleted_at is null
-			and e.status = 'posted'
-			and e.review_status = 'approved'
-			and e.expense_date >= ${filters.from}
-			and e.expense_date <= ${filters.to}
+		where ${baseReportConditionsSql(workspaceId, filters)}
 			${groupedReportFilterSql(filters)}
 		group by label
 		order by total_cents desc, label asc
@@ -762,14 +831,9 @@ async function getTotalsByPaymentMethod(workspaceId: number, filters: GroupedRep
 
 async function getTotal(workspaceId: number, from: string, to: string) {
 	const result = await db.execute<{ total_cents: string | number | null }>(sql`
-		select coalesce(sum(amount_cents), 0)::bigint as total_cents
-		from expense
-		where workspace_id = ${workspaceId}
-			and deleted_at is null
-			and status = 'posted'
-			and review_status = 'approved'
-			and expense_date >= ${from}
-			and expense_date <= ${to}
+		select coalesce(sum(e.amount_cents), 0)::bigint as total_cents
+		from expense e
+		where ${baseReportConditionsSql(workspaceId, { from, to })}
 	`);
 
 	return Number(result[0]?.total_cents ?? 0);
@@ -785,12 +849,7 @@ async function getTotalsByCategory(workspaceId: number, filters: GroupedReportFi
 		select c.id as category_id, c.name, c.color, coalesce(sum(e.amount_cents), 0)::bigint as total_cents
 		from expense e
 		inner join category c on c.id = e.category_id
-		where e.workspace_id = ${workspaceId}
-			and e.deleted_at is null
-			and e.status = 'posted'
-			and e.review_status = 'approved'
-			and e.expense_date >= ${filters.from}
-			and e.expense_date <= ${filters.to}
+		where ${baseReportConditionsSql(workspaceId, filters)}
 			${groupedReportFilterSql(filters)}
 		group by c.id, c.name, c.color
 		order by total_cents desc, c.name asc
@@ -818,12 +877,7 @@ async function getTotalsByPeriod(
 		select ${bucket} as bucket,
 			coalesce(sum(e.amount_cents), 0)::bigint as total_cents
 		from expense e
-		where e.workspace_id = ${workspaceId}
-			and e.deleted_at is null
-			and e.status = 'posted'
-			and e.review_status = 'approved'
-			and e.expense_date >= ${filters.from}
-			and e.expense_date <= ${filters.to}
+		where ${baseReportConditionsSql(workspaceId, filters)}
 			${groupedReportFilterSql(filters)}
 		group by bucket
 		order by bucket asc
@@ -834,6 +888,32 @@ async function getTotalsByPeriod(
 		label: String(row.bucket),
 		totalCents: Number(row.total_cents)
 	}));
+}
+
+/**
+ * Shared base WHERE conditions for all grouped report queries. Defaults to
+ * approved/posted expenses but honours reviewStatus and paymentStatus overrides
+ * when provided, so the same filter context applies to every report view.
+ */
+function baseReportConditionsSql(
+	workspaceId: number,
+	filters: { from: string; to: string; reviewStatus?: string; paymentStatus?: string }
+) {
+	const reviewCond = filters.reviewStatus
+		? sql`and e.review_status = ${filters.reviewStatus}`
+		: sql`and e.review_status = 'approved'`;
+	const paymentCond = filters.paymentStatus
+		? sql`and e.payment_status = ${filters.paymentStatus}`
+		: sql``;
+	return sql`
+		e.workspace_id = ${workspaceId}
+		and e.deleted_at is null
+		and e.status = 'posted'
+		${reviewCond}
+		${paymentCond}
+		and e.expense_date >= ${filters.from}
+		and e.expense_date <= ${filters.to}
+	`;
 }
 
 function groupedReportFilterSql(filters: GroupedReportFilters) {
