@@ -302,7 +302,8 @@ describe('server service integration', () => {
 		expect(reimport.duplicateCount).toBe(1);
 
 		// Two identical rows in the same file: both should be imported (genuine duplicates)
-		const twoRows = 'Data;Descrição;Valor\n27/06/2026;Dois cafés;5,00\n27/06/2026;Dois cafés;5,00\n';
+		const twoRows =
+			'Data;Descrição;Valor\n27/06/2026;Dois cafés;5,00\n27/06/2026;Dois cafés;5,00\n';
 		const batchImport = await importExpenses(fixture.context, {
 			sourceType: 'csv',
 			defaultCategoryId: fixture.categoryId,
@@ -1712,14 +1713,14 @@ describe('server service integration', () => {
 		expect(rejected?.paymentStatus).toBe('unpaid');
 
 		// Member role cannot bulk review
-		await expect(
-			bulkReviewExpenses(memberContext, [e1.ids[0]], 'approved')
-		).rejects.toMatchObject({ status: 403 });
+		await expect(bulkReviewExpenses(memberContext, [e1.ids[0]], 'approved')).rejects.toMatchObject({
+			status: 403
+		});
 
 		// Empty ids list is rejected
-		await expect(
-			bulkReviewExpenses(fixture.context, [], 'approved')
-		).rejects.toMatchObject({ status: 400 });
+		await expect(bulkReviewExpenses(fixture.context, [], 'approved')).rejects.toMatchObject({
+			status: 400
+		});
 	});
 
 	it('rejects unsafe attachment inputs before writing files', async () => {
