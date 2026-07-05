@@ -10,7 +10,6 @@
 
 	function translateRole(role: string) {
 		const map: Record<string, string> = {
-			owner: t('Owner'),
 			admin: t('Admin'),
 			member: t('Member'),
 			viewer: t('Viewer')

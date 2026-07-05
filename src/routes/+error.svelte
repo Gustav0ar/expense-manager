@@ -12,6 +12,17 @@
 	function t(key: string) {
 		return translate(locale, key);
 	}
+
+	// SvelteKit replaces error.message with 'Internal Error' (English) in production
+	// for unhandled 500s. Only surface the message when it comes from an intentional
+	// app throw (i.e. the status is a client error or the message differs from the
+	// generic SvelteKit fallback strings).
+	const SVELTE_GENERIC_MESSAGES = new Set(['Internal Error', 'Not Found', 'Forbidden']);
+	const errorMessage = $derived(
+		$page.error?.message && !SVELTE_GENERIC_MESSAGES.has($page.error.message)
+			? $page.error.message
+			: t('Something went wrong.')
+	);
 </script>
 
 <svelte:head>
@@ -23,7 +34,7 @@
 		<a class="brand" href={resolve('/')}>Expense Manager</a>
 		<h1>{$page.status}</h1>
 		<p class="notice danger">
-			{$page.error?.message ?? t('Something went wrong.')}
+			{errorMessage}
 		</p>
 		<a class="button primary" href={resolve('/app/dashboard')}>{t('Go to dashboard')}</a>
 	</section>
