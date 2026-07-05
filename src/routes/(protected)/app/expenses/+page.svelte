@@ -34,7 +34,7 @@
 			label: t('Payments'),
 			singular: lower(t('Payment')),
 			createLabel: t('New payment'),
-			placeholder: 'Pix',
+			placeholder: t('Example payment'),
 			maxLength: 80,
 			empty: t('No payment method found.')
 		},
@@ -43,7 +43,7 @@
 			label: t('Vendors'),
 			singular: lower(t('Vendor')),
 			createLabel: t('New vendor'),
-			placeholder: 'ACME Services',
+			placeholder: t('Example vendor'),
 			maxLength: 120,
 			empty: t('No vendor found.')
 		},
@@ -52,7 +52,7 @@
 			label: t('Cost centers'),
 			singular: lower(t('Cost center')),
 			createLabel: t('New cost center'),
-			placeholder: 'Operations',
+			placeholder: t('Example cost center'),
 			maxLength: 120,
 			empty: t('No cost center found.')
 		}
@@ -144,6 +144,8 @@
 	function t(key: string, params?: Record<string, string | number | null | undefined>) {
 		return translate(data.locale, key, params);
 	}
+
+	const amountPlaceholder = $derived(data.locale === 'pt-BR' ? '0,00' : '0.00');
 
 	function money(cents: number) {
 		return formatCents(cents, currency, data.locale);
@@ -342,7 +344,7 @@
 
 			<label class="expense-field amount-field">
 				<span>{t('Installment amount')}</span>
-				<input name="amount" inputmode="decimal" placeholder="0,00" required />
+				<input name="amount" inputmode="decimal" placeholder={amountPlaceholder} required />
 			</label>
 
 			<label class="expense-field">

@@ -36,7 +36,8 @@ export const actions: Actions = {
 		const workspaceId = await acceptInvitation(
 			event.params.token,
 			event.locals.user.id,
-			event.locals.user.email
+			event.locals.user.email,
+			event.locals.locale
 		);
 		setWorkspaceCookie(event.cookies, workspaceId);
 		throw redirect(303, '/app/dashboard');

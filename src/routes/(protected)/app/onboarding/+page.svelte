@@ -26,7 +26,7 @@
 		<form method="post" class="stack">
 			<label>
 				<span>{t('Name')}</span>
-				<input name="name" required minlength="2" maxlength="80" value="My expenses" />
+				<input name="name" required minlength="2" maxlength="80" value={t('My expenses')} />
 			</label>
 
 			<label>

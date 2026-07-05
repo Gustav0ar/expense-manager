@@ -23,7 +23,7 @@
 </script>
 
 <svelte:head>
-	<title>Dashboard | Expense Manager</title>
+	<title>{t('Dashboard')} | Expense Manager</title>
 </svelte:head>
 
 <section class="page-section">

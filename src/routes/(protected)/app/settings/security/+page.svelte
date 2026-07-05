@@ -76,11 +76,11 @@
 					<h3>{t('Enable MFA')}</h3>
 				</div>
 				<div class="setup-code">
-					<span>Secret</span>
+					<span>{t('Secret')}</span>
 					<strong>{form.setup.secret}</strong>
 				</div>
 				<div class="setup-uri">
-					<span>URI</span>
+					<span>{t('URI')}</span>
 					<code>{form.setup.otpAuthUri}</code>
 				</div>
 				<form method="post" action="?/enable" class="stack">
@@ -97,7 +97,7 @@
 		{#if form?.recoveryCodes}
 			<section class="panel recovery-panel">
 				<div class="panel-heading">
-					<h3>Recovery codes</h3>
+					<h3>{t('Recovery codes')}</h3>
 				</div>
 				<div class="recovery-grid">
 					{#each form.recoveryCodes as code (code)}

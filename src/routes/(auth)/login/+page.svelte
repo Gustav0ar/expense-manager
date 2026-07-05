@@ -71,7 +71,7 @@
 		<form method="post" class="stack">
 			<input type="hidden" name="next" value={data.next} />
 			<label>
-				<span>Email</span>
+				<span>{t('Email')}</span>
 				<input
 					name="email"
 					type="email"

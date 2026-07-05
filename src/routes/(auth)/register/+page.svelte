@@ -61,7 +61,7 @@
 				</label>
 
 				<label>
-					<span>Email</span>
+					<span>{t('Email')}</span>
 					<input
 						name="email"
 						type="email"

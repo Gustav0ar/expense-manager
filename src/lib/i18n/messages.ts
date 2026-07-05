@@ -484,5 +484,35 @@ export const ptBrMessages = {
 	'Cannot change payment status of a reconciled expense.':
 		'Não é possível alterar o status de pagamento de uma despesa conciliada.',
 	'Review status has changed. Reload and try again.':
-		'Status de revisão alterado. Recarregue e tente novamente.'
+		'Status de revisão alterado. Recarregue e tente novamente.',
+
+	// Role labels
+	Viewer: 'Visualizador',
+
+	// Invitation status labels
+	Accepted: 'Aceito',
+	Revoked: 'Revogado',
+	Expired: 'Expirado',
+
+	// Onboarding
+	'My expenses': 'Minhas despesas',
+
+	// Catalog placeholders (translatable hints, not user data)
+	'Example payment': 'Ex.: Pix',
+	'Example vendor': 'Ex.: ACME',
+	'Example cost center': 'Ex.: Operações',
+
+	// Native form validation message (used by setCustomValidity)
+	'Please fill out this field.': 'Por favor, preencha este campo.',
+
+	// Error page
+	'Something went wrong.': 'Algo deu errado.',
+	'Go to dashboard': 'Ir para o início',
+
+	// Recurring expense
+	'Recurring expense not found.': 'Recorrência não encontrada.',
+
+	// Payment status change (conflict)
+	'Expense was modified. Reload and try again.':
+		'Despesa foi alterada. Recarregue e tente novamente.'
 } as const;

@@ -28,7 +28,7 @@
 
 			<form method="post" class="stack">
 				<label>
-					<span>Email</span>
+					<span>{t('Email')}</span>
 					<input name="email" type="email" autocomplete="email" required />
 				</label>
 
