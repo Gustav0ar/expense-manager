@@ -42,6 +42,7 @@ import {
 import { acceptInvitation, getPendingInvitation } from './invitations';
 import {
 	createExpense,
+	bulkReviewExpenses,
 	deleteExpense,
 	getAnalyticalExpenseReport,
 	getDashboard,
@@ -278,6 +279,37 @@ describe('server service integration', () => {
 			.from(expense)
 			.where(eq(expense.importBatchId, result.importBatchId));
 		expect(createdExpenses).toEqual([{ description: 'Produto limpeza', amountCents: 3550 }]);
+	});
+
+	it('deduplicates rows against existing DB expenses but allows genuinely identical within-batch rows', async () => {
+		const fixture = await createWorkspaceFixture();
+
+		// Re-import a file: same row as an existing expense → duplicateCount 1
+		const csvRow = 'Data;Descrição;Valor\n26/06/2026;Café;10,00\n';
+		const firstImport = await importExpenses(fixture.context, {
+			sourceType: 'csv',
+			defaultCategoryId: fixture.categoryId,
+			file: new File([csvRow], 'first.csv', { type: 'text/csv' })
+		});
+		expect(firstImport.importedCount).toBe(1);
+
+		const reimport = await importExpenses(fixture.context, {
+			sourceType: 'csv',
+			defaultCategoryId: fixture.categoryId,
+			file: new File([csvRow], 'reimport.csv', { type: 'text/csv' })
+		});
+		expect(reimport.importedCount).toBe(0);
+		expect(reimport.duplicateCount).toBe(1);
+
+		// Two identical rows in the same file: both should be imported (genuine duplicates)
+		const twoRows = 'Data;Descrição;Valor\n27/06/2026;Dois cafés;5,00\n27/06/2026;Dois cafés;5,00\n';
+		const batchImport = await importExpenses(fixture.context, {
+			sourceType: 'csv',
+			defaultCategoryId: fixture.categoryId,
+			file: new File([twoRows], 'dois.csv', { type: 'text/csv' })
+		});
+		expect(batchImport.importedCount).toBe(2);
+		expect(batchImport.duplicateCount).toBe(0);
 	});
 
 	it('does not import positive OFX credits as expenses', async () => {
@@ -1008,6 +1040,68 @@ describe('server service integration', () => {
 		).resolves.toEqual([expect.objectContaining({ totalCents: 10_000 })]);
 	});
 
+	it('groups report by vendor and cost center', async () => {
+		const fixture = await createWorkspaceFixture();
+		await createExpense(fixture.context, {
+			description: 'Vendor test',
+			amount: '50,00',
+			expenseDate: '2026-06-15',
+			categoryId: fixture.categoryId
+		});
+
+		const byVendor = await getReport(fixture.context, {
+			from: '2026-01-01',
+			to: '2026-12-31',
+			groupBy: 'vendor'
+		});
+		expect(byVendor).toEqual([expect.objectContaining({ totalCents: 5_000 })]);
+
+		const byCostCenter = await getReport(fixture.context, {
+			from: '2026-01-01',
+			to: '2026-12-31',
+			groupBy: 'costCenter'
+		});
+		expect(byCostCenter).toEqual([expect.objectContaining({ totalCents: 5_000 })]);
+	});
+
+	it('bulk-reviews pending expenses and scopes by workspace', async () => {
+		const fixture = await createWorkspaceFixture();
+		// Create expenses as a member so reviewStatus is 'pending'
+		const memberContext = await createMemberContext(fixture, 'member');
+		const e1 = await createExpense(memberContext, {
+			description: 'Bulk one',
+			amount: '10,00',
+			expenseDate: '2026-06-01',
+			categoryId: fixture.categoryId
+		});
+		const e2 = await createExpense(memberContext, {
+			description: 'Bulk two',
+			amount: '20,00',
+			expenseDate: '2026-06-02',
+			categoryId: fixture.categoryId
+		});
+
+		const result = await bulkReviewExpenses(fixture.context, [e1.ids[0], e2.ids[0]], 'approved');
+		expect(result.count).toBe(2);
+
+		const listed = await listExpenses(fixture.context, {});
+		for (const exp of listed.items) {
+			expect(exp.reviewStatus).toBe('approved');
+		}
+
+		// IDs from another workspace must not be touched
+		const other = await createWorkspaceFixture();
+		const otherMember = await createMemberContext(other, 'member');
+		const e3 = await createExpense(otherMember, {
+			description: 'Other ws',
+			amount: '5,00',
+			expenseDate: '2026-06-03',
+			categoryId: other.categoryId
+		});
+		const crossResult = await bulkReviewExpenses(fixture.context, [e3.ids[0]], 'rejected');
+		expect(crossResult.count).toBe(0);
+	});
+
 	it('deduplicates controlled expense catalogs per workspace', async () => {
 		const fixture = await createWorkspaceFixture();
 		const otherFixture = await createWorkspaceFixture();
@@ -1559,8 +1653,81 @@ describe('server service integration', () => {
 		}
 	});
 
+	it('deletes attachments from DB and disk when expense is deleted', async () => {
+		const fixture = await createWorkspaceFixture();
+		const previousUploadDir = process.env.UPLOAD_DIR;
+		const uploadDir = await mkdtemp(path.join(tmpdir(), 'attach-delete-'));
+		process.env.UPLOAD_DIR = uploadDir;
+		try {
+			const [expenseRow] = await db
+				.insert(expense)
+				.values({
+					workspaceId: fixture.context.workspaceId,
+					categoryId: fixture.categoryId,
+					createdByUserId: fixture.context.userId,
+					description: 'To delete',
+					amountCents: 1_000,
+					expenseDate: '2026-06-26'
+				})
+				.returning({ id: expense.id });
+
+			const file = new File(['receipt'], 'receipt.txt', { type: 'text/plain' });
+			const att = await saveExpenseAttachment(fixture.context, expenseRow.id, file);
+			expect(att?.id).toBeGreaterThan(0);
+
+			// deleteExpense should clean up the attachment from DB and disk
+			await deleteExpense(fixture.context, expenseRow.id);
+
+			const remaining = await db
+				.select()
+				.from(expenseAttachment)
+				.where(eq(expenseAttachment.id, att!.id));
+			expect(remaining).toHaveLength(0);
+		} finally {
+			if (previousUploadDir === undefined) {
+				delete process.env.UPLOAD_DIR;
+			} else {
+				process.env.UPLOAD_DIR = previousUploadDir;
+			}
+			await rm(uploadDir, { recursive: true, force: true });
+		}
+	});
+
+	it('bulk-rejects expenses and resets payment status', async () => {
+		const fixture = await createWorkspaceFixture();
+		const memberContext = await createMemberContext(fixture, 'member');
+		const e1 = await createExpense(memberContext, {
+			description: 'To reject',
+			amount: '30,00',
+			expenseDate: '2026-06-10',
+			categoryId: fixture.categoryId
+		});
+
+		const result = await bulkReviewExpenses(fixture.context, [e1.ids[0]], 'rejected');
+		expect(result.count).toBe(1);
+
+		const listed = await listExpenses(fixture.context, {});
+		const rejected = listed.items.find((e) => e.id === e1.ids[0]);
+		expect(rejected?.reviewStatus).toBe('rejected');
+		expect(rejected?.paymentStatus).toBe('unpaid');
+
+		// Member role cannot bulk review
+		await expect(
+			bulkReviewExpenses(memberContext, [e1.ids[0]], 'approved')
+		).rejects.toMatchObject({ status: 403 });
+
+		// Empty ids list is rejected
+		await expect(
+			bulkReviewExpenses(fixture.context, [], 'approved')
+		).rejects.toMatchObject({ status: 400 });
+	});
+
 	it('rejects unsafe attachment inputs before writing files', async () => {
 		const fixture = await createWorkspaceFixture();
+		const uploadDirs: string[] = [];
+		afterEach(async () => {
+			for (const d of uploadDirs) await rm(d, { recursive: true, force: true });
+		});
 		const previousUploadDir = process.env.UPLOAD_DIR;
 		const uploadDir = await mkdtemp(path.join(tmpdir(), 'expense-attachments-'));
 		uploadDirs.push(uploadDir);
