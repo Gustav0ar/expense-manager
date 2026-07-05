@@ -772,7 +772,8 @@ describe('server service integration', () => {
 		const fixture = await createWorkspaceFixture();
 		const memberContext = await createMemberContext(fixture, 'member');
 
-		const created = await createExpense(fixture.context, {
+		// Create as a member so the expense starts in 'pending' review state
+		const created = await createExpense(memberContext, {
 			categoryId: fixture.categoryId,
 			description: 'Despesa para transições',
 			amount: '50,00',
@@ -780,12 +781,12 @@ describe('server service integration', () => {
 		});
 		const id = created.id;
 
-		// Cannot pay/reconcile before approval
+		// Cannot pay/reconcile before approval (WHERE reviewStatus='approved' fails)
 		await expect(
 			updateExpensePaymentStatus(fixture.context, id, { paymentStatus: 'paid' })
 		).rejects.toMatchObject({ status: 404 });
 
-		// Cannot reject a reconciled expense without reconcile rights
+		// Cannot reject a reconciled expense without reconcile rights (member role)
 		await reviewExpense(fixture.context, id, { reviewStatus: 'approved' });
 		await updateExpensePaymentStatus(fixture.context, id, {
 			paymentStatus: 'reconciled',
@@ -800,16 +801,16 @@ describe('server service integration', () => {
 			updateExpensePaymentStatus(fixture.context, id, { paymentStatus: 'paid' })
 		).rejects.toMatchObject({ status: 400 });
 
-		// Can mark unpaid (reset from reconciled back to unpaid is allowed for reconcilers)
+		// Can reset to unpaid (reconcilers may undo reconciliation)
 		await updateExpensePaymentStatus(fixture.context, id, { paymentStatus: 'unpaid' });
 
-		// Re-approve and re-pay; then reconcile without paidAt: original date must be preserved
+		// Re-approve and mark paid with a specific date; then reconcile without supplying
+		// paidAt — the service should preserve the original payment date.
 		await reviewExpense(fixture.context, id, { reviewStatus: 'approved' });
 		await updateExpensePaymentStatus(fixture.context, id, {
 			paymentStatus: 'paid',
 			paidAt: '2026-06-12'
 		});
-		// Reconcile without providing paidAt — should preserve the paid-date
 		await updateExpensePaymentStatus(fixture.context, id, { paymentStatus: 'reconciled' });
 		const [row] = await db
 			.select({ paidAt: expense.paidAt, paymentStatus: expense.paymentStatus })
@@ -817,7 +818,7 @@ describe('server service integration', () => {
 			.where(eq(expense.id, id));
 		expect(row).toEqual({ paidAt: '2026-06-12', paymentStatus: 'reconciled' });
 
-		// Owner (with reconcile rights) can reject a reconciled expense, wiping payment data
+		// Owner (with reconcile rights) can reject a reconciled expense; payment fields are cleared
 		await reviewExpense(fixture.context, id, { reviewStatus: 'rejected', reason: 'Erro' });
 		const [afterReject] = await db
 			.select({
