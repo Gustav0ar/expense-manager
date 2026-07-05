@@ -951,7 +951,7 @@ test('covers workspace settings, theme, invitations and workspace switching', as
 	await inviteForm.getByLabel('Papel').selectOption('viewer');
 	await inviteForm.getByRole('button', { name: 'Convidar' }).click();
 	await expect(page.getByText('Convite criado:')).toBeVisible();
-	await expect(page.getByRole('cell', { name: 'viewer' })).toBeVisible();
+	await expect(page.getByRole('cell', { name: 'Visualizador' })).toBeVisible();
 
 	await page.goto('/invite/token-invalido');
 	await expect(page.getByText('Convite inválido ou expirado.')).toBeVisible();

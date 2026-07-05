@@ -124,7 +124,7 @@ async function inviteUser(page: Page, email: string, role: 'admin' | 'member' | 
 
 	const row = await invitationRow(page, email);
 	await expect(row.locator('td').nth(1)).toHaveText(role);
-	await expect(row.locator('td').nth(2)).toHaveText('pending');
+	await expect(row.locator('td').nth(2)).toHaveText('Pendente');
 	return inviteUrl!;
 }
 
@@ -213,7 +213,7 @@ test('covers invitations, every assignable role, acceptance, role changes and re
 		await expect(page.getByRole('heading', { name: 'Convites' })).toBeVisible();
 
 		const ownerRow = await memberRow(page, ownerEmail);
-		await expect(ownerRow.locator('td').nth(2)).toHaveText('owner');
+		await expect(ownerRow.locator('td').nth(2)).toHaveText('Owner');
 		await expect(ownerRow.locator('select[name="role"]')).toHaveCount(0);
 		await expect(ownerRow.getByRole('button', { name: 'Remover' })).toHaveCount(0);
 
@@ -223,7 +223,7 @@ test('covers invitations, every assignable role, acceptance, role changes and re
 		expect(new URL(renewedInviteUrl).pathname).not.toBe(new URL(initialInviteUrl).pathname);
 		await expect(invitationRows(page, roleCycleEmail)).toHaveCount(1);
 		await expect((await invitationRow(page, roleCycleEmail)).locator('td').nth(1)).toHaveText(
-			'member'
+			'Membro'
 		);
 
 		const roleCycleSession = await acceptInvite(browser, renewedInviteUrl, {
@@ -233,7 +233,7 @@ test('covers invitations, every assignable role, acceptance, role changes and re
 		sessions.push(roleCycleSession);
 		await page.goto('/app/settings/users');
 		await expect((await invitationRow(page, roleCycleEmail)).locator('td').nth(2)).toHaveText(
-			'accepted'
+			'Aceito'
 		);
 		await expect(
 			(await memberRow(page, roleCycleEmail)).locator('select[name="role"]')
