@@ -28,10 +28,10 @@ function setSecurityHeaders(response: Response) {
 
 	if (!dev) {
 		response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-		response.headers.set(
-			'Content-Security-Policy',
-			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
-		);
+		// Content-Security-Policy is set by SvelteKit (csp: { mode: 'nonce' } in
+		// vite.config.ts). It auto-injects a per-request nonce into every inline
+		// hydration script and into the CSP header, so script-src 'self' no longer
+		// blocks them. We must not override that header here.
 	}
 }
 

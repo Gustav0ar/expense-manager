@@ -18,6 +18,23 @@ export default defineConfig({
 					...config,
 					include: [...config.include, '../drizzle.config.ts']
 				})
+			},
+			// Let SvelteKit auto-nonce its inline hydration scripts so the strict
+			// script-src CSP policy doesn't block them in production.
+			csp: {
+				mode: 'nonce',
+				directives: {
+					'default-src': ['self'],
+					// SvelteKit adds the nonce automatically when mode is 'nonce'.
+					'script-src': ['self'],
+					'style-src': ['self', 'unsafe-inline'],
+					'img-src': ['self', 'data:'],
+					'font-src': ['self'],
+					'connect-src': ['self'],
+					'frame-ancestors': ['none'],
+					'base-uri': ['self'],
+					'form-action': ['self']
+				}
 			}
 		})
 	],
