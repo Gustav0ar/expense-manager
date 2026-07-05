@@ -83,15 +83,15 @@
 
 	<div class="content-grid two">
 		<section class="panel">
-			<div class="panel-heading">
+			<div class="panel-heading panel-heading-wrap">
 				<h3>{t('Budget by category')}</h3>
 				<div class="inline-actions">
 					<Target size={19} />
 					<form method="post" action="?/sendBudgetAlerts">
 						<input type="hidden" name="periodMonth" value={data.periodMonth} />
-						<button class="button secondary" type="submit">
+						<button class="button secondary" type="submit" title={t('Send budget alert email')}>
 							<Bell size={16} />
-							<span>{t('Send budget alert email')}</span>
+							<span>{t('Enable alerts')}</span>
 						</button>
 					</form>
 				</div>
