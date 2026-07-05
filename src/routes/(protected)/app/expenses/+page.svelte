@@ -20,6 +20,7 @@
 		XCircle
 	} from '@lucide/svelte';
 	import type { Attachment } from 'svelte/attachments';
+	import { SvelteSet } from 'svelte/reactivity';
 	import type { ActionData, PageData } from './$types';
 
 	type SupportCatalogKind = 'paymentMethod' | 'vendor' | 'costCenter';
@@ -82,17 +83,15 @@
 		vendor: 1,
 		costCenter: 1
 	});
-	let selectedIds = $state(new Set<number>());
+	let selectedIds = new SvelteSet<number>();
 
 	function toggleSelect(id: number) {
-		const next = new Set(selectedIds);
-		if (next.has(id)) next.delete(id);
-		else next.add(id);
-		selectedIds = next;
+		if (selectedIds.has(id)) selectedIds.delete(id);
+		else selectedIds.add(id);
 	}
 
 	function clearSelection() {
-		selectedIds = new Set();
+		selectedIds.clear();
 	}
 	let activeCatalogMeta = $derived(
 		supportCatalogTabs.find((tab) => tab.kind === supportCatalogTab) ?? supportCatalogTabs[0]

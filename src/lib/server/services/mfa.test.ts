@@ -54,7 +54,7 @@ const dbMock = vi.hoisted(() => {
 
 	const deleteChain = () => ({
 		where: () => ({
-			catch: (_fn: (e: unknown) => unknown) => Promise.resolve()
+			catch: () => Promise.resolve()
 		})
 	});
 
@@ -122,9 +122,7 @@ describe('MFA verifyMfaChallenge — TOTP replay prevention', () => {
 	const userId = 'user-totp-replay';
 	const sessionId = 'session-1';
 	const now = Date.now();
-	// Pin to a known counter step so the code is stable for the whole test.
 	const stepSeconds = 30;
-	const counter = Math.floor(now / 1000 / stepSeconds);
 	const code = generateTotpCode(secret, now, stepSeconds);
 
 	beforeEach(() => {
