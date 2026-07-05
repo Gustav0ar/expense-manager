@@ -382,7 +382,11 @@
 				>
 					<option value="">{t('Select')}</option>
 					{#each data.categories as category (category.id)}
-						<option value={category.id} selected={category.id.toString() === (form?.values?.categoryId ?? '')}>{category.icon ?? '💼'} {category.name}</option>
+						<option
+							value={category.id}
+							selected={category.id.toString() === (form?.values?.categoryId ?? '')}
+							>{category.icon ?? '💼'} {category.name}</option
+						>
 					{/each}
 				</select>
 				{#if form?.fieldErrors?.categoryId}
@@ -395,7 +399,11 @@
 				<select name="paymentMethodId">
 					<option value="">{t('Select')}</option>
 					{#each data.catalogs.paymentMethods as paymentMethod (paymentMethod.id)}
-						<option value={paymentMethod.id} selected={paymentMethod.id.toString() === (form?.values?.paymentMethodId ?? '')}>{paymentMethod.name}</option>
+						<option
+							value={paymentMethod.id}
+							selected={paymentMethod.id.toString() === (form?.values?.paymentMethodId ?? '')}
+							>{paymentMethod.name}</option
+						>
 					{/each}
 				</select>
 			</label>
@@ -431,7 +439,13 @@
 
 			<label class="expense-field">
 				<span>{t('Installments')}</span>
-				<input name="installments" type="number" min="1" max="120" value={form?.values?.installments ?? '1'} />
+				<input
+					name="installments"
+					type="number"
+					min="1"
+					max="120"
+					value={form?.values?.installments ?? '1'}
+				/>
 			</label>
 
 			<label class="expense-field notes-field">
@@ -763,7 +777,10 @@
 				{#each data.expenses.items as expense (expense.id)}
 					<article class="expense-table-item">
 						{#if data.permissions.canReview && expense.reviewStatus === 'pending'}
-							<label class="expense-select-label" aria-label={t('Select {description}', { description: expense.description })}>
+							<label
+								class="expense-select-label"
+								aria-label={t('Select {description}', { description: expense.description })}
+							>
 								<input
 									type="checkbox"
 									class="expense-select-checkbox"

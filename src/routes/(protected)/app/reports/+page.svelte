@@ -21,7 +21,9 @@
 			data.filters.groupBy === 'year'
 	);
 	const analytics = $derived(data.analytics);
-	const reportPeriod = $derived(isPeriod ? (data.filters.groupBy as 'week' | 'month' | 'year') : undefined);
+	const reportPeriod = $derived(
+		isPeriod ? (data.filters.groupBy as 'week' | 'month' | 'year') : undefined
+	);
 	const exportUrl = $derived(createExportUrl(data.filters));
 
 	function createExportUrl(filters: PageData['filters']) {
@@ -112,9 +114,7 @@
 					<option value="payment" selected={data.filters.groupBy === 'payment'}
 						>{t('Payment')}</option
 					>
-					<option value="vendor" selected={data.filters.groupBy === 'vendor'}
-						>{t('Vendor')}</option
-					>
+					<option value="vendor" selected={data.filters.groupBy === 'vendor'}>{t('Vendor')}</option>
 					<option value="costCenter" selected={data.filters.groupBy === 'costCenter'}
 						>{t('Cost center')}</option
 					>

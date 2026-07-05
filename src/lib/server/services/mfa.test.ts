@@ -141,17 +141,20 @@ describe('MFA verifyMfaChallenge — TOTP replay prevention', () => {
 		// first call succeeds (counter was null/smaller), second call fails
 		// (counter is now equal, so `lastUsedTotpCounter < counter` is false).
 		let updateCallCount = 0;
-		vi.spyOn(dbMock, 'update').mockImplementation(() => ({
-			set: () => ({
-				where: () => ({
-					returning: async () => {
-						updateCallCount += 1;
-						// First claim succeeds; subsequent claims for the same counter fail.
-						return updateCallCount === 1 ? [{ userId }] : [];
-					}
-				})
-			})
-		}) as ReturnType<typeof dbMock.update>);
+		vi.spyOn(dbMock, 'update').mockImplementation(
+			() =>
+				({
+					set: () => ({
+						where: () => ({
+							returning: async () => {
+								updateCallCount += 1;
+								// First claim succeeds; subsequent claims for the same counter fail.
+								return updateCallCount === 1 ? [{ userId }] : [];
+							}
+						})
+					})
+				}) as ReturnType<typeof dbMock.update>
+		);
 
 		// markMfaSessionVerified calls db.insert — stub it out.
 		(dbMock as unknown as Record<string, unknown>).insert = () => ({
@@ -200,9 +203,12 @@ describe('MFA verifyMfaChallenge — recovery-code single-use', () => {
 		// TOTP check will fail (wrong code format triggers early return), so the
 		// recovery-code branch runs. Mock db.update to return [] (counter claim
 		// irrelevant here — TOTP won't match a recovery code string).
-		vi.spyOn(dbMock, 'update').mockImplementation(() => ({
-			set: () => ({ where: () => ({ returning: async () => [] }) })
-		}) as ReturnType<typeof dbMock.update>);
+		vi.spyOn(dbMock, 'update').mockImplementation(
+			() =>
+				({
+					set: () => ({ where: () => ({ returning: async () => [] }) })
+				}) as ReturnType<typeof dbMock.update>
+		);
 
 		// db.execute drives the recovery-code removal. First call: hash is present →
 		// remove it and return a row. Second call: hash is gone → return [].

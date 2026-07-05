@@ -162,8 +162,8 @@
 										<button
 											type="button"
 											class="text-button danger"
-											onclick={() => openRemoveDialog(member.id, member.name)}
-										>{t('Remove')}</button>
+											onclick={() => openRemoveDialog(member.id, member.name)}>{t('Remove')}</button
+										>
 									{/if}
 								</td>
 							</tr>
@@ -220,7 +220,9 @@
 				</div>
 
 				<p class="dialog-muted">
-					{t('Remove {name} from the workspace? They will lose access immediately.', { name: pendingRemove.name })}
+					{t('Remove {name} from the workspace? They will lose access immediately.', {
+						name: pendingRemove.name
+					})}
 				</p>
 
 				<form method="post" action="?/remove" class="dialog-actions">

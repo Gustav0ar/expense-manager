@@ -33,8 +33,13 @@
 	const chartItems = $derived.by(() => {
 		if (visibleItems.length <= MAX_SLICES) return visibleItems;
 		const top = visibleItems.slice(0, MAX_SLICES - 1);
-		const othersTotal = visibleItems.slice(MAX_SLICES - 1).reduce((sum, item) => sum + item.totalCents, 0);
-		return [...top, { label: othersLabel, totalCents: othersTotal, color: '#94a3b8', isOthers: true as const }];
+		const othersTotal = visibleItems
+			.slice(MAX_SLICES - 1)
+			.reduce((sum, item) => sum + item.totalCents, 0);
+		return [
+			...top,
+			{ label: othersLabel, totalCents: othersTotal, color: '#94a3b8', isOthers: true as const }
+		];
 	});
 	const fallbackColors = ['#0f766e', '#2563eb', '#f97316', '#7c3aed', '#dc2626', '#0891b2'];
 	const segments = $derived.by(() => {

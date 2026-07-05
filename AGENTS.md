@@ -22,16 +22,16 @@ docker-compose --file .devcontainer/compose.yml exec app sh -c "cd /workspaces/e
 
 ### Common commands (all run inside the container)
 
-| Task | Command |
-|---|---|
-| Install deps | `CI=true pnpm install --frozen-lockfile` |
-| Run migrations | `pnpm db:migrate` |
-| Dev server (port 5173) | `pnpm dev` |
-| Build | `pnpm build` |
-| Unit tests | `pnpm test:unit` |
-| E2E tests | `pnpm exec playwright test src/routes/<file>.e2e.ts --timeout=60000` |
-| All E2E | `pnpm test:e2e` |
-| Type check | `pnpm check` |
+| Task                   | Command                                                              |
+| ---------------------- | -------------------------------------------------------------------- |
+| Install deps           | `CI=true pnpm install --frozen-lockfile`                             |
+| Run migrations         | `pnpm db:migrate`                                                    |
+| Dev server (port 5173) | `pnpm dev`                                                           |
+| Build                  | `pnpm build`                                                         |
+| Unit tests             | `pnpm test:unit`                                                     |
+| E2E tests              | `pnpm exec playwright test src/routes/<file>.e2e.ts --timeout=60000` |
+| All E2E                | `pnpm test:e2e`                                                      |
+| Type check             | `pnpm check`                                                         |
 
 ### Working with worktrees
 
@@ -47,6 +47,7 @@ The worktree shares the same postgres service as the main workspace. Each worktr
 ### Environment variables
 
 The container injects all required env vars via `.devcontainer/compose.yml`. Notable values:
+
 - `DATABASE_URL`: `postgres://expense_manager:expense_manager@postgres:5432/expense_manager`
 - `ORIGIN`: `http://localhost:5173`
 - `BETTER_AUTH_SECRET`: `development-secret-development-secret-32`
@@ -65,8 +66,6 @@ The `postCreateCommand` in `devcontainer.json` runs `pnpm install`, `playwright 
 ### When a test fails after UI changes
 
 E2E helpers that scrape page text may need updating when the UI changes. The invite URL helpers in `users.e2e.ts`, `settings.e2e.ts`, and `reports.e2e.ts` extract the URL from `.invite-url-row .invite-url-code` — not the old `.notice.success` text. The remove-member flow in `users.e2e.ts` now requires a dialog confirmation (click "Remover" on the row, then click "Remover" in the dialog).
-
-
 
 - Write default product UI text, documentation, server messages and tests in English.
 - When a user-facing string needs pt-BR support, add the English source string to the UI/server code and add the pt-BR translation in `src/lib/i18n/messages.ts`.

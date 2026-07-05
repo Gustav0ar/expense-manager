@@ -74,7 +74,14 @@ export type ExpenseFilters = {
 	limit?: number;
 };
 
-export type GroupedReportGroupBy = 'category' | 'week' | 'month' | 'year' | 'payment' | 'vendor' | 'costCenter';
+export type GroupedReportGroupBy =
+	| 'category'
+	| 'week'
+	| 'month'
+	| 'year'
+	| 'payment'
+	| 'vendor'
+	| 'costCenter';
 export type ReportGroupBy = GroupedReportGroupBy | 'expense';
 
 export type AnalyticalExpenseReportFilters = Omit<ExpenseFilters, 'cursor' | 'limit'> & {
@@ -778,7 +785,10 @@ export async function getDashboard(context: WorkspaceContext, from?: string, to?
 
 export async function getReport(
 	context: WorkspaceContext,
-	input: GroupedReportFilters & { groupBy: GroupedReportGroupBy; dateField?: 'expenseDate' | 'competencyMonth' }
+	input: GroupedReportFilters & {
+		groupBy: GroupedReportGroupBy;
+		dateField?: 'expenseDate' | 'competencyMonth';
+	}
 ) {
 	if (input.groupBy === 'category') {
 		return getTotalsByCategory(context.workspaceId, input);
@@ -796,7 +806,13 @@ export async function getReport(
 		return getTotalsByCostCenter(context.workspaceId, input);
 	}
 
-	return getTotalsByPeriod(context.workspaceId, input, input.groupBy, context.weekStartsOn, input.dateField);
+	return getTotalsByPeriod(
+		context.workspaceId,
+		input,
+		input.groupBy,
+		context.weekStartsOn,
+		input.dateField
+	);
 }
 
 export async function getAnalyticalExpenseReport(
@@ -973,7 +989,8 @@ async function getTotalsByPeriod(
 		groupBy === 'week'
 			? sql`(${dateCol} - (((extract(dow from ${dateCol})::int - ${weekStartsOn} + 7) % 7) * interval '1 day'))::date`
 			: sql`date_trunc(${groupBy === 'month' ? 'month' : 'year'}, ${dateCol}::timestamp)::date`;
-	const nullGuard = dateField === 'competencyMonth' ? sql`and e.competency_month is not null` : sql``;
+	const nullGuard =
+		dateField === 'competencyMonth' ? sql`and e.competency_month is not null` : sql``;
 	const result = await db.execute<{ bucket: string; total_cents: string | number }>(sql`
 		select ${bucket} as bucket,
 			coalesce(sum(e.amount_cents), 0)::bigint as total_cents

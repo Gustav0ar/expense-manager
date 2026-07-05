@@ -63,10 +63,19 @@
 
 	{#if form?.message}
 		<p
-			class:success={form.tone === 'success' || (form.importResult?.importedCount ?? 0) > 0 || (form.importResult?.duplicateCount ?? 0) > 0}
-			class:danger={form.tone === 'danger' || (form.tone !== 'success' && !form.importResult?.importedCount && !form.importResult?.duplicateCount)}
+			class:success={form.tone === 'success' ||
+				(form.importResult?.importedCount ?? 0) > 0 ||
+				(form.importResult?.duplicateCount ?? 0) > 0}
+			class:danger={form.tone === 'danger' ||
+				(form.tone !== 'success' &&
+					!form.importResult?.importedCount &&
+					!form.importResult?.duplicateCount)}
 			class="notice"
-			role={form.tone === 'success' || (form.importResult?.importedCount ?? 0) > 0 || (form.importResult?.duplicateCount ?? 0) > 0 ? 'status' : 'alert'}
+			role={form.tone === 'success' ||
+			(form.importResult?.importedCount ?? 0) > 0 ||
+			(form.importResult?.duplicateCount ?? 0) > 0
+				? 'status'
+				: 'alert'}
 		>
 			{form.message}
 		</p>
