@@ -208,6 +208,8 @@ write_compose_secret_file() {
 
 	mkdir -p secrets
 	chmod 700 secrets
+	# Make file writable before overwriting in case a previous deploy set it to 444.
+	chmod 644 "secrets/${secret_name}" 2>/dev/null || true
 	printf '%s' "${value}" > "secrets/${secret_name}"
 	# Docker Compose file secrets are bind mounts in standalone mode. Keep the
 	# directory private on the host, but make mounted files readable to
