@@ -97,9 +97,15 @@
 										<form method="post" action="?/changeRole" class="inline-form">
 											<input type="hidden" name="id" value={member.id} />
 											<select name="role">
-												<option value="admin" selected={member.role === 'admin'}>{t('Admin')}</option>
-												<option value="member" selected={member.role === 'member'}>{t('Member')}</option>
-												<option value="viewer" selected={member.role === 'viewer'}>{t('Viewer')}</option>
+												<option value="admin" selected={member.role === 'admin'}
+													>{t('Admin')}</option
+												>
+												<option value="member" selected={member.role === 'member'}
+													>{t('Member')}</option
+												>
+												<option value="viewer" selected={member.role === 'viewer'}
+													>{t('Viewer')}</option
+												>
 											</select>
 											<button class="button secondary" type="submit">{t('Save')}</button>
 										</form>
