@@ -36,7 +36,7 @@
 	const height = 220;
 	const padding = { top: 18, right: 28, bottom: 34, left: 28 };
 	const max = $derived(Math.max(...items.map((item) => item.totalCents), 0));
-	const chartItems = $derived(items.filter((item) => item.totalCents > 0));
+	const chartItems = $derived(items);
 	const points = $derived.by(() =>
 		chartItems.map((item, index) => {
 			const x =
@@ -79,7 +79,7 @@
 
 <svelte:window onlanguagechange={updateLocales} />
 
-{#if points.length === 0}
+{#if items.length === 0 || total === 0}
 	<p class="empty">{empty}</p>
 {:else}
 	<div class="trend-chart">

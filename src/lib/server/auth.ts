@@ -44,6 +44,12 @@ export const auth = betterAuth({
 			await sendVerificationEmail(user.email, url, getCurrentLocale());
 		}
 	},
+	session: {
+		cookieCache: {
+			enabled: true,
+			maxAge: 60 * 5 // 5 minutes — validates session from signed cookie without a DB round-trip
+		}
+	},
 	rateLimit: {
 		enabled: true,
 		window: 60,

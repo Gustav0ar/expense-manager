@@ -19,6 +19,7 @@ export const GET: RequestHandler = async (event) => {
 		from: event.url.searchParams.get('from') || firstDayOfMonth(today),
 		to: event.url.searchParams.get('to') || lastDayOfMonth(today),
 		groupBy: event.url.searchParams.get('groupBy') || 'category',
+		dateField: event.url.searchParams.get('dateField') || 'expenseDate',
 		categoryId: event.url.searchParams.get('categoryId') || undefined,
 		vendorId: event.url.searchParams.get('vendorId') || undefined,
 		costCenterId: event.url.searchParams.get('costCenterId') || undefined,
@@ -34,50 +35,60 @@ export const GET: RequestHandler = async (event) => {
 		const report = await getAnalyticalExpenseReport(context, filters.data, {
 			limit: analyticalReportExportLimit
 		});
-		const lines = [
-			[
-				'id',
-				'date',
-				'competency',
-				'description',
-				'category',
-				'vendor',
-				'cost_center',
-				'payment',
-				'amount_cents',
-				'currency',
-				'review',
-				'payment_status',
-				'payment_date',
-				'installment',
-				'attachments',
-				'created_at',
-				'notes'
-			].join(','),
-			...report.items.map((row) =>
-				[
-					row.id,
-					csvCell(row.expenseDate),
-					csvCell(row.competencyMonth ?? ''),
-					csvCell(row.description),
-					csvCell(categoryLabel(row)),
-					csvCell(row.vendor ?? ''),
-					csvCell(row.costCenter ?? ''),
-					csvCell(row.paymentMethod ?? ''),
-					row.amountCents,
-					csvCell(row.currency),
-					csvCell(reviewLabel(row.reviewStatus, context.locale)),
-					csvCell(paymentLabel(row.paymentStatus, context.locale)),
-					csvCell(row.paidAt ?? ''),
-					csvCell(installmentLabel(row)),
-					row.attachmentCount,
-					csvCell(row.createdAt.toISOString()),
-					csvCell(row.notes ?? '')
-				].join(',')
-			)
-		];
+		const header = [
+			'id',
+			'date',
+			'competency',
+			'description',
+			'category',
+			'vendor',
+			'cost_center',
+			'payment',
+			'amount_cents',
+			'currency',
+			'review',
+			'payment_status',
+			'payment_date',
+			'installment',
+			'attachments',
+			'created_at',
+			'notes'
+		].join(',');
 
-		return new Response(lines.join('\n'), {
+		const encoder = new TextEncoder();
+		const stream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(encoder.encode(header + '\n'));
+				for (const row of report.items) {
+					controller.enqueue(
+						encoder.encode(
+							[
+								row.id,
+								csvCell(row.expenseDate),
+								csvCell(row.competencyMonth ?? ''),
+								csvCell(row.description),
+								csvCell(categoryLabel(row)),
+								csvCell(row.vendor ?? ''),
+								csvCell(row.costCenter ?? ''),
+								csvCell(row.paymentMethod ?? ''),
+								row.amountCents,
+								csvCell(row.currency),
+								csvCell(reviewLabel(row.reviewStatus, context.locale)),
+								csvCell(paymentLabel(row.paymentStatus, context.locale)),
+								csvCell(row.paidAt ?? ''),
+								csvCell(installmentLabel(row)),
+								row.attachmentCount,
+								csvCell(row.createdAt.toISOString()),
+								csvCell(row.notes ?? '')
+							].join(',') + '\n'
+						)
+					);
+				}
+				controller.close();
+			}
+		});
+
+		return new Response(stream, {
 			headers: {
 				'content-type': 'text/csv; charset=utf-8',
 				'content-disposition': 'attachment; filename="expense-analytical-report.csv"'
@@ -89,6 +100,7 @@ export const GET: RequestHandler = async (event) => {
 		from: filters.data.from,
 		to: filters.data.to,
 		groupBy,
+		dateField: filters.data.dateField,
 		categoryId: filters.data.categoryId,
 		vendorId: filters.data.vendorId,
 		costCenterId: filters.data.costCenterId,
@@ -96,12 +108,19 @@ export const GET: RequestHandler = async (event) => {
 		reviewStatus: filters.data.reviewStatus,
 		paymentStatus: filters.data.paymentStatus
 	});
-	const lines = [
-		['group', 'amount_cents'].join(','),
-		...report.map((row) => [csvCell(row.label), row.totalCents].join(','))
-	];
 
-	return new Response(lines.join('\n'), {
+	const encoder = new TextEncoder();
+	const stream = new ReadableStream({
+		start(controller) {
+			controller.enqueue(encoder.encode(['group', 'amount_cents'].join(',') + '\n'));
+			for (const row of report) {
+				controller.enqueue(encoder.encode([csvCell(row.label), row.totalCents].join(',') + '\n'));
+			}
+			controller.close();
+		}
+	});
+
+	return new Response(stream, {
 		headers: {
 			'content-type': 'text/csv; charset=utf-8',
 			'content-disposition': 'attachment; filename="expense-report.csv"'

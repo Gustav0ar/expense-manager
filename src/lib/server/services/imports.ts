@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import {
 	auditEvent,
@@ -156,8 +156,11 @@ export async function importExpenses(context: WorkspaceContext, input: ImportExp
 	const reviewStatus = canReviewExpenses(context.role) ? 'approved' : 'pending';
 	const reviewedByUserId = reviewStatus === 'approved' ? context.userId : null;
 	const reviewedAt = reviewStatus === 'approved' ? new Date() : null;
+	let duplicateCount = 0;
+	let insertedCount = 0;
 
 	const result = await db.transaction(async (tx) => {
+		// Create the import batch record first so we can reference its id on each expense row.
 		const [batch] = await tx
 			.insert(importBatch)
 			.values({
@@ -166,7 +169,8 @@ export async function importExpenses(context: WorkspaceContext, input: ImportExp
 				sourceType: input.sourceType,
 				fileName: input.file.name.slice(0, 180) || `import.${input.sourceType}`,
 				rowCount: parsed.rows.length + parsed.errors.length,
-				importedCount: validRows.length,
+				// importedCount will be updated after the dedup loop; use 0 for now
+				importedCount: 0,
 				failedCount: failedRows.length,
 				failedRows
 			})
@@ -197,45 +201,88 @@ export async function importExpenses(context: WorkspaceContext, input: ImportExp
 				)
 			]);
 
-			await tx.insert(expense).values(
-				validRows.map((row) => {
-					const importedPaymentMethod = lookupCatalogItem(paymentMethods, row.paymentMethod);
-					const importedVendor = lookupCatalogItem(vendors, row.vendor);
-					const importedCostCenter = lookupCatalogItem(costCenters, row.costCenter);
+			const seenInBatch = new Set<string>();
 
-					return {
-						workspaceId: context.workspaceId,
-						categoryId: row.categoryId,
-						createdByUserId: context.userId,
-						description: row.description,
-						amountCents: parseCurrencyToCents(row.amount),
-						currency: context.currency,
-						expenseDate: row.expenseDate,
-						paymentMethodId: importedPaymentMethod?.id ?? null,
-						paymentMethod: importedPaymentMethod?.name ?? null,
-						vendorId: importedVendor?.id ?? null,
-						vendor: importedVendor?.name ?? null,
-						costCenterId: importedCostCenter?.id ?? null,
-						costCenter: importedCostCenter?.name ?? null,
-						notes: row.notes || null,
-						importBatchId: batch.id,
-						reviewStatus,
-						reviewedByUserId,
-						reviewedAt
-					};
-				})
-			);
+			for (const row of validRows) {
+				const amountCents = parseCurrencyToCents(row.amount);
+				const fp = `${amountCents}|${row.expenseDate}|${row.description}`;
+
+				// Only check the DB for the first occurrence of a fingerprint in this batch.
+				// Rows with the same fingerprint already inserted in this batch bypass the DB
+				// check so that legitimately identical transactions within one import are all
+				// kept (the DB SELECT runs inside the transaction and would otherwise see rows
+				// we just inserted, silently dropping genuine duplicates).
+				if (!seenInBatch.has(fp)) {
+					// NOTE: This SELECT-then-INSERT dedup has a TOCTOU window under concurrent
+					// imports from the same workspace. A unique partial index on
+					// (workspace_id, amount_cents, expense_date, description) WHERE deleted_at IS NULL
+					// would make this race-safe. Without it, concurrent imports of the same file
+					// can produce duplicates.
+					const [duplicate] = await tx
+						.select({ id: expense.id })
+						.from(expense)
+						.where(
+							and(
+								eq(expense.workspaceId, context.workspaceId),
+								eq(expense.amountCents, amountCents),
+								eq(expense.expenseDate, row.expenseDate),
+								eq(expense.description, row.description),
+								isNull(expense.deletedAt)
+							)
+						)
+						.limit(1);
+
+					if (duplicate) {
+						duplicateCount++;
+						continue;
+					}
+				}
+
+				const importedPaymentMethod = lookupCatalogItem(paymentMethods, row.paymentMethod);
+				const importedVendor = lookupCatalogItem(vendors, row.vendor);
+				const importedCostCenter = lookupCatalogItem(costCenters, row.costCenter);
+
+				await tx.insert(expense).values({
+					workspaceId: context.workspaceId,
+					categoryId: row.categoryId,
+					createdByUserId: context.userId,
+					description: row.description,
+					amountCents,
+					currency: context.currency,
+					expenseDate: row.expenseDate,
+					paymentMethodId: importedPaymentMethod?.id ?? null,
+					paymentMethod: importedPaymentMethod?.name ?? null,
+					vendorId: importedVendor?.id ?? null,
+					vendor: importedVendor?.name ?? null,
+					costCenterId: importedCostCenter?.id ?? null,
+					costCenter: importedCostCenter?.name ?? null,
+					notes: row.notes || null,
+					importBatchId: batch.id,
+					reviewStatus,
+					reviewedByUserId,
+					reviewedAt
+				});
+				seenInBatch.add(fp);
+				insertedCount++;
+			}
+
+			// Update the batch with the real imported count now that we know it.
+			await tx
+				.update(importBatch)
+				.set({ importedCount: insertedCount })
+				.where(eq(importBatch.id, batch.id));
 		}
 
 		await tx.insert(auditEvent).values({
 			workspaceId: context.workspaceId,
 			actorUserId: context.userId,
-			action: validRows.length > 0 ? 'expense_import.completed' : 'expense_import.failed',
+			action: insertedCount > 0 ? 'expense_import.completed' : 'expense_import.failed',
 			entityType: 'import_batch',
 			entityId: String(batch.id),
 			metadata: {
 				sourceType: input.sourceType,
-				importedCount: validRows.length,
+				importedCount: insertedCount,
+				duplicateCount,
 				failedCount: failedRows.length,
 				rowCount: parsed.rows.length + parsed.errors.length,
 				reviewStatus
@@ -247,7 +294,8 @@ export async function importExpenses(context: WorkspaceContext, input: ImportExp
 
 	return {
 		importBatchId: result.id,
-		importedCount: validRows.length,
+		importedCount: insertedCount,
+		duplicateCount,
 		failedCount: failedRows.length,
 		failedRows
 	};

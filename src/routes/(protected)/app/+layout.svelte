@@ -57,11 +57,16 @@
 
 	function isActive(href: string) {
 		const pathname = page.url.pathname;
+		if (href === '/app/settings/workspace' &&
+			(pathname.startsWith('/app/settings/security') || pathname.startsWith('/app/settings/audit'))) {
+			return true;
+		}
 		return pathname === href || pathname.startsWith(`${href}/`);
 	}
 </script>
 
 {#if data.currentWorkspace}
+	<a href="#main-content" class="skip-link">{t('Skip to main content')}</a>
 	<div class="app-shell">
 		<aside class="sidebar">
 			<a class="brand compact" href={resolve('/app/dashboard')}>Expense Manager</a>
@@ -95,7 +100,7 @@
 			</form>
 		</aside>
 
-		<main class="main-panel">
+		<main class="main-panel" id="main-content">
 			{@render children()}
 		</main>
 	</div>

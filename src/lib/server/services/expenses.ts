@@ -1,4 +1,5 @@
 import { error } from '@sveltejs/kit';
+import { unlink } from 'node:fs/promises';
 import {
 	and,
 	desc,
@@ -44,6 +45,7 @@ import { getBudgetSummary } from './budgets';
 import { randomToken } from '$lib/server/utils/crypto';
 import { resolveExpenseCatalogSelection } from './expense-catalogs';
 import { translate } from '$lib/i18n';
+import { getUploadDir, safeStoragePath } from './attachments';
 
 export type ExpenseInput = {
 	categoryId: number;
@@ -72,7 +74,7 @@ export type ExpenseFilters = {
 	limit?: number;
 };
 
-export type GroupedReportGroupBy = 'category' | 'week' | 'month' | 'year' | 'payment';
+export type GroupedReportGroupBy = 'category' | 'week' | 'month' | 'year' | 'payment' | 'vendor' | 'costCenter';
 export type ReportGroupBy = GroupedReportGroupBy | 'expense';
 
 export type AnalyticalExpenseReportFilters = Omit<ExpenseFilters, 'cursor' | 'limit'> & {
@@ -635,6 +637,43 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 	if (!deleted)
 		throw error(409, translate(context.locale, 'Expense was modified. Reload and try again.'));
 
+	// Fetch and clean up all attachments for the soft-deleted expense.
+	// The expense_attachment FK has onDelete:'cascade' but that only fires on a
+	// hard DELETE; soft-deletes (setting deletedAt) leave attachment rows behind.
+	const attachments = await db
+		.select({ id: expenseAttachment.id, storageKey: expenseAttachment.storageKey })
+		.from(expenseAttachment)
+		.where(eq(expenseAttachment.expenseId, id));
+
+	if (attachments.length > 0) {
+		const uploadDir = getUploadDir();
+		await db.transaction(async (tx) => {
+			await tx.delete(expenseAttachment).where(eq(expenseAttachment.expenseId, id));
+
+			await tx.insert(auditEvent).values(
+				attachments.map((att) => ({
+					workspaceId: context.workspaceId,
+					actorUserId: context.userId,
+					action: 'expense_attachment.deleted' as const,
+					entityType: 'expense_attachment',
+					entityId: String(att.id),
+					metadata: { expenseId: id, reason: 'expense_deleted' }
+				}))
+			);
+		});
+
+		// Remove files from disk after the DB transaction succeeds.
+		// Failures here leave orphaned files but won't corrupt DB state.
+		for (const att of attachments) {
+			try {
+				const filePath = safeStoragePath(uploadDir, att.storageKey);
+				await unlink(filePath);
+			} catch {
+				// File may not exist on disk; safe to ignore.
+			}
+		}
+	}
+
 	await writeAuditEvent({
 		workspaceId: context.workspaceId,
 		actorUserId: context.userId,
@@ -642,6 +681,57 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 		entityType: 'expense',
 		entityId: id
 	});
+}
+
+export async function bulkReviewExpenses(
+	context: WorkspaceContext,
+	ids: number[],
+	decision: 'approved' | 'rejected'
+) {
+	if (!canReviewExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
+	if (ids.length === 0) throw error(400, translate(context.locale, 'No expenses selected.'));
+
+	const reviewedAt = new Date();
+	const updated = await db
+		.update(expense)
+		.set({
+			reviewStatus: decision,
+			reviewedByUserId: context.userId,
+			reviewedAt,
+			reviewRejectionReason: null,
+			...(decision === 'rejected'
+				? {
+						paymentStatus: 'unpaid' as const,
+						paidAt: null,
+						reconciledAt: null,
+						reconciledByUserId: null
+					}
+				: {})
+		})
+		.where(
+			and(
+				inArray(expense.id, ids),
+				eq(expense.workspaceId, context.workspaceId),
+				eq(expense.status, 'posted'),
+				eq(expense.reviewStatus, 'pending'),
+				isNull(expense.deletedAt)
+			)
+		)
+		.returning({ id: expense.id });
+
+	if (updated.length > 0) {
+		await writeAuditEvent({
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: `expense.bulk_${decision}`,
+			entityType: 'expense',
+			entityId: updated[0].id,
+			metadata: { ids: updated.map((r) => r.id), count: updated.length, decision }
+		});
+	}
+
+	return { count: updated.length };
 }
 
 export async function getDashboard(context: WorkspaceContext, from?: string, to?: string) {
@@ -688,7 +778,7 @@ export async function getDashboard(context: WorkspaceContext, from?: string, to?
 
 export async function getReport(
 	context: WorkspaceContext,
-	input: GroupedReportFilters & { groupBy: GroupedReportGroupBy }
+	input: GroupedReportFilters & { groupBy: GroupedReportGroupBy; dateField?: 'expenseDate' | 'competencyMonth' }
 ) {
 	if (input.groupBy === 'category') {
 		return getTotalsByCategory(context.workspaceId, input);
@@ -698,7 +788,15 @@ export async function getReport(
 		return getTotalsByPaymentMethod(context.workspaceId, input);
 	}
 
-	return getTotalsByPeriod(context.workspaceId, input, input.groupBy, context.weekStartsOn);
+	if (input.groupBy === 'vendor') {
+		return getTotalsByVendor(context.workspaceId, input);
+	}
+
+	if (input.groupBy === 'costCenter') {
+		return getTotalsByCostCenter(context.workspaceId, input);
+	}
+
+	return getTotalsByPeriod(context.workspaceId, input, input.groupBy, context.weekStartsOn, input.dateField);
 }
 
 export async function getAnalyticalExpenseReport(
@@ -867,18 +965,22 @@ async function getTotalsByPeriod(
 	workspaceId: number,
 	filters: GroupedReportFilters,
 	groupBy: 'week' | 'month' | 'year',
-	weekStartsOn = 1
+	weekStartsOn = 1,
+	dateField: 'expenseDate' | 'competencyMonth' = 'expenseDate'
 ) {
+	const dateCol = dateField === 'competencyMonth' ? sql`e.competency_month` : sql`e.expense_date`;
 	const bucket =
 		groupBy === 'week'
-			? sql`(e.expense_date - (((extract(dow from e.expense_date)::int - ${weekStartsOn} + 7) % 7) * interval '1 day'))::date`
-			: sql`date_trunc(${groupBy === 'month' ? 'month' : 'year'}, e.expense_date::timestamp)::date`;
+			? sql`(${dateCol} - (((extract(dow from ${dateCol})::int - ${weekStartsOn} + 7) % 7) * interval '1 day'))::date`
+			: sql`date_trunc(${groupBy === 'month' ? 'month' : 'year'}, ${dateCol}::timestamp)::date`;
+	const nullGuard = dateField === 'competencyMonth' ? sql`and e.competency_month is not null` : sql``;
 	const result = await db.execute<{ bucket: string; total_cents: string | number }>(sql`
 		select ${bucket} as bucket,
 			coalesce(sum(e.amount_cents), 0)::bigint as total_cents
 		from expense e
 		where ${baseReportConditionsSql(workspaceId, filters)}
 			${groupedReportFilterSql(filters)}
+			${nullGuard}
 		group by bucket
 		order by bucket asc
 	`);
@@ -886,6 +988,52 @@ async function getTotalsByPeriod(
 	return result.map((row) => ({
 		key: String(row.bucket),
 		label: String(row.bucket),
+		totalCents: Number(row.total_cents)
+	}));
+}
+
+async function getTotalsByVendor(workspaceId: number, filters: GroupedReportFilters) {
+	const result = await db.execute<{
+		label: string;
+		total_cents: string | number;
+	}>(sql`
+		select coalesce(nullif(trim(v.name), ''), nullif(trim(e.vendor), ''), 'Unspecified') as label,
+			coalesce(sum(e.amount_cents), 0)::bigint as total_cents
+		from expense e
+		left join vendor v on v.id = e.vendor_id and v.workspace_id = e.workspace_id
+		where ${baseReportConditionsSql(workspaceId, filters)}
+			${groupedReportFilterSql(filters)}
+		group by label
+		order by total_cents desc, label asc
+	`);
+
+	return result.map((row) => ({
+		key: row.label,
+		label: row.label,
+		color: '#7c3aed',
+		totalCents: Number(row.total_cents)
+	}));
+}
+
+async function getTotalsByCostCenter(workspaceId: number, filters: GroupedReportFilters) {
+	const result = await db.execute<{
+		label: string;
+		total_cents: string | number;
+	}>(sql`
+		select coalesce(nullif(trim(cc.name), ''), nullif(trim(e.cost_center), ''), 'Unspecified') as label,
+			coalesce(sum(e.amount_cents), 0)::bigint as total_cents
+		from expense e
+		left join cost_center cc on cc.id = e.cost_center_id and cc.workspace_id = e.workspace_id
+		where ${baseReportConditionsSql(workspaceId, filters)}
+			${groupedReportFilterSql(filters)}
+		group by label
+		order by total_cents desc, label asc
+	`);
+
+	return result.map((row) => ({
+		key: row.label,
+		label: row.label,
+		color: '#0891b2',
 		totalCents: Number(row.total_cents)
 	}));
 }
