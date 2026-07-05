@@ -175,9 +175,7 @@ export async function deleteExpenseAttachment(context: WorkspaceContext, attachm
 	const filePath = safeStoragePath(getUploadDir(), attachment.storageKey);
 
 	await db.transaction(async (tx) => {
-		await tx
-			.delete(expenseAttachment)
-			.where(eq(expenseAttachment.id, attachment.id));
+		await tx.delete(expenseAttachment).where(eq(expenseAttachment.id, attachment.id));
 
 		await tx.insert(auditEvent).values({
 			workspaceId: context.workspaceId,

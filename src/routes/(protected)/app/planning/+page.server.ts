@@ -191,7 +191,10 @@ export const actions: Actions = {
 		}
 		const isSuccess = result.importedCount > 0 || result.duplicateCount > 0;
 		return {
-			message: parts.length > 0 ? parts.join(' ') : translate(event.locals.locale, 'No expenses imported.'),
+			message:
+				parts.length > 0
+					? parts.join(' ')
+					: translate(event.locals.locale, 'No expenses imported.'),
 			importResult: result,
 			tone: isSuccess ? 'success' : 'danger'
 		};

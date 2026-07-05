@@ -1,6 +1,6 @@
 FROM node:24-alpine AS deps
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
+RUN npm install -g corepack && corepack enable && corepack prepare pnpm@11.9.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 RUN pnpm install --frozen-lockfile
 

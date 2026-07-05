@@ -76,16 +76,16 @@ export const actions: Actions = {
 				message: translate(event.locals.locale, 'Check expense data.'),
 				fieldErrors,
 				values: {
-					description: formData.get('description') as string ?? '',
-					amount: formData.get('amount') as string ?? '',
-					expenseDate: formData.get('expenseDate') as string ?? '',
-					categoryId: formData.get('categoryId') as string ?? '',
-					paymentMethodId: formData.get('paymentMethodId') as string ?? '',
+					description: (formData.get('description') as string) ?? '',
+					amount: (formData.get('amount') as string) ?? '',
+					expenseDate: (formData.get('expenseDate') as string) ?? '',
+					categoryId: (formData.get('categoryId') as string) ?? '',
+					paymentMethodId: (formData.get('paymentMethodId') as string) ?? '',
 					vendorId: formData.get('vendorId') ? Number(formData.get('vendorId')) : null,
 					costCenterId: formData.get('costCenterId') ? Number(formData.get('costCenterId')) : null,
-					competencyMonth: formData.get('competencyMonth') as string ?? '',
-					installments: formData.get('installments') as string ?? '1',
-					notes: formData.get('notes') as string ?? '',
+					competencyMonth: (formData.get('competencyMonth') as string) ?? '',
+					installments: (formData.get('installments') as string) ?? '1',
+					notes: (formData.get('notes') as string) ?? ''
 				}
 			});
 		}
@@ -268,7 +268,9 @@ export const actions: Actions = {
 			await bulkReviewExpenses(context, ids, decision);
 		} catch (err) {
 			if (isHttpError(err) && err.status < 500) {
-				return fail((err as { status: number }).status, { message: (err as { body: { message: string } }).body.message });
+				return fail((err as { status: number }).status, {
+					message: (err as { body: { message: string } }).body.message
+				});
 			}
 			throw err;
 		}

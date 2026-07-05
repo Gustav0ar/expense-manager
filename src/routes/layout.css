@@ -83,7 +83,6 @@
 		--color-role-surface: #172554;
 		--shadow-panel: 0 20px 50px rgb(0 0 0 / 0.28);
 	}
-
 }
 
 :root[data-theme='dark'] {

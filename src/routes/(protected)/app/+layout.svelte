@@ -57,8 +57,10 @@
 
 	function isActive(href: string) {
 		const pathname = page.url.pathname;
-		if (href === '/app/settings/workspace' &&
-			(pathname.startsWith('/app/settings/security') || pathname.startsWith('/app/settings/audit'))) {
+		if (
+			href === '/app/settings/workspace' &&
+			(pathname.startsWith('/app/settings/security') || pathname.startsWith('/app/settings/audit'))
+		) {
 			return true;
 		}
 		return pathname === href || pathname.startsWith(`${href}/`);

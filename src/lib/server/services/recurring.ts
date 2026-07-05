@@ -282,12 +282,7 @@ export async function runRecurringExpenseScheduler(): Promise<{
 	const dueRows = await db
 		.selectDistinct({ workspaceId: recurringExpense.workspaceId })
 		.from(recurringExpense)
-		.where(
-			and(
-				eq(recurringExpense.status, 'active'),
-				lte(recurringExpense.nextRunDate, asOf)
-			)
-		);
+		.where(and(eq(recurringExpense.status, 'active'), lte(recurringExpense.nextRunDate, asOf)));
 
 	if (dueRows.length === 0) {
 		return { processed: 0, created: 0, errors: 0 };

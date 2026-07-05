@@ -462,9 +462,11 @@ export const ptBrMessages = {
 	'Copy all': 'Copiar tudo',
 	'Copied!': 'Copiado!',
 	'Scan this QR code with your authenticator app': 'Escaneie este QR code com seu app autenticador',
-	'Disabling MFA will reduce your account security.': 'Desativar o MFA reduzirá a segurança da sua conta.',
+	'Disabling MFA will reduce your account security.':
+		'Desativar o MFA reduzirá a segurança da sua conta.',
 	'Remove member?': 'Remover membro?',
-	'Remove {name} from the workspace? They will lose access immediately.': 'Remover {name} do workspace? Eles perderão o acesso imediatamente.',
+	'Remove {name} from the workspace? They will lose access immediately.':
+		'Remover {name} do workspace? Eles perderão o acesso imediatamente.',
 	'Skip to main content': 'Pular para o conteúdo principal',
 	'You received an invite to access {workspace}. Open: {url}':
 		'Você recebeu um convite para acessar {workspace}. Acesse: {url}',
@@ -510,7 +512,8 @@ export const ptBrMessages = {
 	'Recurring expense not found.': 'Recorrência não encontrada.',
 	'{count} duplicates skipped.': '{count} duplicatas ignoradas.',
 	'Send budget alert email': 'Enviar alertas de orçamento por email',
-	'Budget alert email already sent for this month.': 'Alertas de orçamento já enviados para este mês.',
+	'Budget alert email already sent for this month.':
+		'Alertas de orçamento já enviados para este mês.',
 	'Delete attachment?': 'Excluir comprovante?',
 	'Bulk actions': 'Ações em lote',
 	'{count} selected': '{count} selecionado(s)',

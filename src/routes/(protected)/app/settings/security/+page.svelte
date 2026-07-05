@@ -56,7 +56,12 @@
 	</div>
 
 	{#if form?.message}
-		<p class:success={form.recoveryCodes} class:danger={!form.recoveryCodes} class="notice" role={form.recoveryCodes ? 'status' : 'alert'}>
+		<p
+			class:success={form.recoveryCodes}
+			class:danger={!form.recoveryCodes}
+			class="notice"
+			role={form.recoveryCodes ? 'status' : 'alert'}
+		>
 			{form.message}
 		</p>
 	{/if}
