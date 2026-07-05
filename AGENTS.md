@@ -1,5 +1,73 @@
 # Agent Guidelines
 
+## Development environment
+
+The project uses a **dev container** (`.devcontainer/`) backed by podman. All build, test, and runtime commands must run inside the container, not on the host — the host lacks the right Node version, pnpm, and the Playwright browser deps.
+
+### Start the container
+
+```bash
+export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
+docker-compose --file .devcontainer/compose.yml up -d
+```
+
+The `postgres` service starts automatically. The `app` service mounts the repo at `/workspaces/expense-manager`.
+
+### Run commands inside the container
+
+```bash
+export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
+docker-compose --file .devcontainer/compose.yml exec app sh -c "cd /workspaces/expense-manager && <command>"
+```
+
+### Common commands (all run inside the container)
+
+| Task | Command |
+|---|---|
+| Install deps | `CI=true pnpm install --frozen-lockfile` |
+| Run migrations | `pnpm db:migrate` |
+| Dev server (port 5173) | `pnpm dev` |
+| Build | `pnpm build` |
+| Unit tests | `pnpm test:unit` |
+| E2E tests | `pnpm exec playwright test src/routes/<file>.e2e.ts --timeout=60000` |
+| All E2E | `pnpm test:e2e` |
+| Type check | `pnpm check` |
+
+### Working with worktrees
+
+Worktrees live inside the repo (`.claude/worktrees/<name>/`) and are mounted into the container at the same path under `/workspaces/expense-manager/.claude/worktrees/<name>/`. To run commands in a worktree:
+
+```bash
+docker-compose --file .devcontainer/compose.yml exec app sh -c \
+  "cd /workspaces/expense-manager/.claude/worktrees/<name> && CI=true pnpm install --frozen-lockfile && pnpm build"
+```
+
+The worktree shares the same postgres service as the main workspace. Each worktree needs its own migration run (`pnpm db:migrate`) if the schema has changed relative to HEAD.
+
+### Environment variables
+
+The container injects all required env vars via `.devcontainer/compose.yml`. Notable values:
+- `DATABASE_URL`: `postgres://expense_manager:expense_manager@postgres:5432/expense_manager`
+- `ORIGIN`: `http://localhost:5173`
+- `BETTER_AUTH_SECRET`: `development-secret-development-secret-32`
+- `REQUIRE_EMAIL_VERIFICATION`: `false`
+
+Do **not** set these manually when running inside the container — they are already present.
+
+### Playwright / E2E
+
+Playwright chromium is pre-installed in the container at `/home/node/.cache/ms-playwright/`. The `playwright.config.ts` builds the app and starts `pnpm preview` on port 4173 automatically before running tests — no manual server start needed.
+
+The `postCreateCommand` in `devcontainer.json` runs `pnpm install`, `playwright install chromium`, and `pnpm db:migrate` automatically on container creation.
+
+**Known pre-existing E2E failure:** `settings.e2e.ts` › `covers security MFA setup…` fails on HEAD due to a timing issue with `'MFA ativado.'` text — not caused by our changes.
+
+### When a test fails after UI changes
+
+E2E helpers that scrape page text may need updating when the UI changes. The invite URL helpers in `users.e2e.ts`, `settings.e2e.ts`, and `reports.e2e.ts` extract the URL from `.invite-url-row .invite-url-code` — not the old `.notice.success` text. The remove-member flow in `users.e2e.ts` now requires a dialog confirmation (click "Remover" on the row, then click "Remover" in the dialog).
+
+
+
 - Write default product UI text, documentation, server messages and tests in English.
 - When a user-facing string needs pt-BR support, add the English source string to the UI/server code and add the pt-BR translation in `src/lib/i18n/messages.ts`.
 - Do not hardcode pt-BR text outside i18n dictionaries, except for compatibility aliases that intentionally accept external input such as CSV headers.
