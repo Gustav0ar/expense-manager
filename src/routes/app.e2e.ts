@@ -302,6 +302,11 @@ async function createCatalogItem(
 	const form = dialog.locator('form.support-catalog-create-form').first();
 	await form.getByLabel(fieldLabel).fill(name);
 	await form.getByRole('button', { name: 'Criar' }).click();
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('status')).toHaveText('Item adicionado ao cadastro com sucesso.');
+	await expect(dialog.getByLabel(`Editar ${catalogKindName(kind)} ${name}`)).toBeVisible();
+	await dialog.getByRole('button', { name: 'Fechar' }).click();
+	await expect(dialog).toBeHidden();
 	if (kind === 'paymentMethod') {
 		await expect(page.locator(`select[name="${catalogSelectName(kind)}"]`).first()).toContainText(
 			name

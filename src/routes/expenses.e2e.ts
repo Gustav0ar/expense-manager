@@ -48,7 +48,12 @@ async function createCatalogFromDialog(
 		.locator('form.support-catalog-create-form');
 	await form.getByLabel(createCatalogLabel(kind)).fill(name);
 	await form.getByRole('button', { name: 'Criar' }).click();
-	await expect(page.getByRole('dialog', { name: 'Cadastros de apoio' })).toBeHidden();
+	const dialog = page.getByRole('dialog', { name: 'Cadastros de apoio' });
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('status')).toHaveText('Item adicionado ao cadastro com sucesso.');
+	await expect(dialog.getByLabel(`Editar ${catalogKindName(kind)} ${name}`)).toBeVisible();
+	await dialog.getByRole('button', { name: 'Fechar' }).click();
+	await expect(dialog).toBeHidden();
 }
 
 async function createCatalogByRequest(
@@ -148,6 +153,12 @@ function createCatalogLabel(kind: 'paymentMethod' | 'vendor' | 'costCenter') {
 	if (kind === 'paymentMethod') return 'Novo pagamento';
 	if (kind === 'vendor') return 'Novo fornecedor';
 	return 'Novo centro de custo';
+}
+
+function catalogKindName(kind: 'paymentMethod' | 'vendor' | 'costCenter') {
+	if (kind === 'paymentMethod') return 'pagamento';
+	if (kind === 'vendor') return 'fornecedor';
+	return 'centro de custo';
 }
 
 function tabLabel(kind: 'paymentMethod' | 'vendor' | 'costCenter') {
@@ -285,7 +296,8 @@ test('validates support catalog errors, search and pagination', async ({ page })
 	await createForm.evaluate((form) => form.setAttribute('novalidate', ''));
 	await createForm.getByLabel('Novo fornecedor').fill('A');
 	await createForm.getByRole('button', { name: 'Criar' }).click();
-	await expect(page.getByText('Confira o cadastro auxiliar.')).toBeVisible();
+	await expect(page.getByRole('dialog', { name: 'Cadastros de apoio' })).toBeVisible();
+	await expect(page.getByRole('alert')).toHaveText('Confira o cadastro auxiliar.');
 
 	await openCatalogDialog(page, 'vendor');
 	const originalVendorEdit = page.getByLabel('Editar fornecedor Fornecedor Original');

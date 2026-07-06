@@ -104,11 +104,38 @@ export const actions: Actions = {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, expenseCatalogSchema);
-		if (!parsed.success)
-			return fail(400, { message: translate(event.locals.locale, 'Check auxiliary catalog.') });
+		if (!parsed.success) {
+			const message = translate(event.locals.locale, 'Check auxiliary catalog.');
+			return fail(400, {
+				message,
+				catalogAction: 'createCatalog',
+				catalogMessage: message
+			});
+		}
 
-		await createExpenseCatalogItem(context, parsed.data);
-		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
+		try {
+			const item = await createExpenseCatalogItem(context, parsed.data);
+			if (!isEnhancedAction(event)) {
+				throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
+			}
+
+			return {
+				catalogAction: 'createCatalog',
+				catalogKind: parsed.data.kind,
+				catalogName: item.name,
+				catalogMessage: translate(event.locals.locale, 'Catalog item added successfully.')
+			};
+		} catch (catalogError) {
+			if (isHttpError(catalogError) && catalogError.status < 500) {
+				return fail(catalogError.status, {
+					message: catalogError.body.message,
+					catalogAction: 'createCatalog',
+					catalogKind: parsed.data.kind,
+					catalogMessage: catalogError.body.message
+				});
+			}
+			throw catalogError;
+		}
 	},
 	updateCatalog: async (event) => {
 		const context = await requireWorkspaceContext(event);
@@ -281,4 +308,8 @@ export const actions: Actions = {
 function safeExpensesReturnTo(value: FormDataEntryValue | null) {
 	const path = value?.toString() || '/app/expenses';
 	return path.startsWith('/app/expenses') && !path.startsWith('//') ? path : '/app/expenses';
+}
+
+function isEnhancedAction(event: { request: Request }) {
+	return event.request.headers.get('x-sveltekit-action') === 'true';
 }

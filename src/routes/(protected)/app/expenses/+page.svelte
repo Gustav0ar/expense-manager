@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import LocalizedDate from '$lib/components/LocalizedDate.svelte';
 	import SearchableSelect from '$lib/components/SearchableSelect.svelte';
@@ -21,10 +22,19 @@
 	} from '@lucide/svelte';
 	import type { Attachment } from 'svelte/attachments';
 	import { SvelteSet } from 'svelte/reactivity';
+	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { ActionData, PageData } from './$types';
 
 	type SupportCatalogKind = 'paymentMethod' | 'vendor' | 'costCenter';
 	type SupportCatalogItem = PageData['catalogs']['paymentMethods'][number];
+	type SupportCatalogNotice = { tone: 'success' | 'danger'; message: string };
+	type SupportCatalogActionData = {
+		message?: string;
+		catalogAction?: 'createCatalog';
+		catalogKind?: SupportCatalogKind;
+		catalogName?: string;
+		catalogMessage?: string;
+	};
 
 	let { data, form } = $props<{ data: PageData; form: ActionData }>();
 	const expensesPath = resolve('/app/expenses');
@@ -78,6 +88,8 @@
 		vendor: '',
 		costCenter: ''
 	});
+	let supportCatalogNotice = $state<SupportCatalogNotice | null>(null);
+	let supportCatalogCreating = $state(false);
 	let supportCatalogPage = $state<Record<SupportCatalogKind, number>>({
 		paymentMethod: 1,
 		vendor: 1,
@@ -200,6 +212,7 @@
 	}
 
 	function closeSupportCatalogDialog() {
+		supportCatalogNotice = null;
 		supportCatalogDialog?.close();
 	}
 
@@ -282,6 +295,7 @@
 
 	function setSupportCatalogTab(kind: SupportCatalogKind) {
 		supportCatalogTab = kind;
+		supportCatalogNotice = null;
 	}
 
 	function updateSupportCatalogSearch(kind: SupportCatalogKind, value: string) {
@@ -292,6 +306,56 @@
 	function goToSupportCatalogPage(page: number) {
 		supportCatalogPage[supportCatalogTab] = Math.min(Math.max(page, 1), supportCatalogPageCount);
 	}
+
+	function supportCatalogActionData(value: unknown): SupportCatalogActionData | null {
+		if (typeof value !== 'object' || value == null) return null;
+		const data = value as SupportCatalogActionData;
+		return data.catalogAction === 'createCatalog' ? data : null;
+	}
+
+	const enhanceSupportCatalogCreate: SubmitFunction = () => {
+		supportCatalogCreating = true;
+		supportCatalogNotice = null;
+
+		return async ({ result, update }) => {
+			supportCatalogCreating = false;
+
+			if (result.type === 'success') {
+				const catalogData = supportCatalogActionData(result.data);
+				await update({ reset: true, invalidateAll: true });
+
+				if (catalogData?.catalogKind) {
+					supportCatalogTab = catalogData.catalogKind;
+					supportCatalogSearch[catalogData.catalogKind] = '';
+					supportCatalogPage[catalogData.catalogKind] = 1;
+				}
+
+				supportCatalogNotice = {
+					tone: 'success',
+					message: catalogData?.catalogMessage ?? t('Catalog item added successfully.')
+				};
+				return;
+			}
+
+			if (result.type === 'failure') {
+				const catalogData = supportCatalogActionData(result.data);
+				await update({ reset: false, invalidateAll: false });
+				supportCatalogNotice = {
+					tone: 'danger',
+					message:
+						catalogData?.catalogMessage ?? catalogData?.message ?? t('Check auxiliary catalog.')
+				};
+				return;
+			}
+
+			if (result.type === 'error') {
+				supportCatalogNotice = { tone: 'danger', message: t('Could not save the catalog.') };
+				return;
+			}
+
+			await update({ reset: false, invalidateAll: false });
+		};
+	};
 </script>
 
 <svelte:head>
@@ -306,7 +370,7 @@
 		</div>
 	</div>
 
-	{#if form?.message}
+	{#if form?.message && form.catalogAction !== 'createCatalog'}
 		<p class="notice danger" role="alert">{form.message}</p>
 	{/if}
 
@@ -509,6 +573,7 @@
 					method="post"
 					action="?/createCatalog"
 					class="support-catalog-form support-catalog-create-form"
+					use:enhance={enhanceSupportCatalogCreate}
 				>
 					<input type="hidden" name="returnTo" value={data.returnTo} />
 					<input type="hidden" name="kind" value={supportCatalogTab} />
@@ -522,11 +587,20 @@
 							placeholder={activeCatalogMeta.placeholder}
 						/>
 					</label>
-					<button class="button secondary" type="submit">
+					<button class="button secondary" type="submit" disabled={supportCatalogCreating}>
 						<Plus size={16} />
 						<span>{t('Create')}</span>
 					</button>
 				</form>
+
+				{#if supportCatalogNotice}
+					<p
+						class={`notice ${supportCatalogNotice.tone}`}
+						role={supportCatalogNotice.tone === 'danger' ? 'alert' : 'status'}
+					>
+						{supportCatalogNotice.message}
+					</p>
+				{/if}
 
 				<div class="support-catalog-toolbar">
 					<label class="support-catalog-search">

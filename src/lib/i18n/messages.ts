@@ -29,6 +29,7 @@ export const ptBrMessages = {
 	'Budget by category': 'Orçamento por categoria',
 	'Budget month': 'Mês do orçamento',
 	Cancel: 'Cancelar',
+	'Catalog item added successfully.': 'Item adicionado ao cadastro com sucesso.',
 	'Catalog type': 'Tipo de cadastro',
 	Category: 'Categoria',
 	'Category name': 'Nome da categoria',
