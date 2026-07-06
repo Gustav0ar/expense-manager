@@ -4,6 +4,12 @@ import { describe, expect, it } from 'vitest';
  * Mirrors the shouldEnforceMfa logic from hooks.server.ts.
  * Tests here serve as the authoritative specification of which routes bypass MFA
  * enforcement. If this test breaks after a hooks.server.ts change, update BOTH.
+ *
+ * Exempted paths: pre-auth flows (sign-in, sign-up, OAuth), read-only session
+ * operations (get-session, list-sessions, update-session), email flows
+ * (verify-email, send-verification-email), password-reset, health check, and
+ * sign-out. Sensitive write operations (change-password, change-email,
+ * delete-user, revoke-sessions) are intentionally enforced.
  */
 function shouldEnforceMfa(pathname: string): boolean {
 	if (pathname === '/mfa' || pathname.startsWith('/mfa/')) return false;
