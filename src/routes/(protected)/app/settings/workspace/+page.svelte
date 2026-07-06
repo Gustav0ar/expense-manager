@@ -2,7 +2,15 @@
 	import { resolve } from '$app/paths';
 	import type { ActionData } from './$types';
 	import type { LayoutData } from '../../$types';
-	import { ClipboardList, Monitor, Moon, ShieldCheck, Sun } from '@lucide/svelte';
+	import {
+		ClipboardList,
+		LogOut,
+		Monitor,
+		Moon,
+		ShieldCheck,
+		Sun,
+		UsersRound
+	} from '@lucide/svelte';
 	import { commonCurrencyCodes, defaultCurrencyForLocale, translate } from '$lib/i18n';
 
 	let { data, form } = $props<{ data: LayoutData; form: ActionData }>();
@@ -171,6 +179,10 @@
 			<div class="panel-heading">
 				<h3>{t('Account and audit')}</h3>
 			</div>
+			<a class="shortcut-link" href={resolve('/app/settings/users')}>
+				<UsersRound size={18} />
+				<span>{t('Users')}</span>
+			</a>
 			<a class="shortcut-link" href={resolve('/app/settings/security')}>
 				<ShieldCheck size={18} />
 				<span>{t('Security')}</span>
@@ -210,6 +222,19 @@
 				/>
 			</label>
 			<button class="button primary align-end" type="submit">{t('Create')}</button>
+		</form>
+	</section>
+
+	<section class="panel logout-panel">
+		<div class="logout-identity">
+			<strong>{data.user.name}</strong>
+			<span>{data.user.email}</span>
+		</div>
+		<form method="post" action="/logout">
+			<button class="button secondary danger" type="submit">
+				<LogOut size={16} />
+				{t('Logout')}
+			</button>
 		</form>
 	</section>
 </section>

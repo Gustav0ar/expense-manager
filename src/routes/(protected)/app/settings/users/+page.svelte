@@ -1,6 +1,7 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { translate } from '$lib/i18n';
-	import { UserMinus } from '@lucide/svelte';
+	import { ArrowLeft, UserMinus } from '@lucide/svelte';
 	import type { Attachment } from 'svelte/attachments';
 	import type { ActionData, PageData } from './$types';
 
@@ -76,6 +77,10 @@
 <section class="page-section">
 	<div class="section-heading">
 		<div>
+			<a class="breadcrumb" href={resolve('/app/settings/workspace')}>
+				<ArrowLeft size={13} />
+				{t('Settings')}
+			</a>
 			<span class="eyebrow">{t('Access')}</span>
 			<h2>{t('Users')}</h2>
 		</div>

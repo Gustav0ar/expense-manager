@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { translate } from '$lib/i18n';
-	import { Copy, Download, KeyRound, ShieldCheck, ShieldOff } from '@lucide/svelte';
+	import { ArrowLeft, Copy, Download, KeyRound, ShieldCheck, ShieldOff } from '@lucide/svelte';
+	import { resolve } from '$app/paths';
 	import type { ActionData, PageData } from './$types';
 	import QRCode from 'qrcode';
 	import { onMount } from 'svelte';
@@ -50,6 +51,10 @@
 <section class="page-section">
 	<div class="section-heading">
 		<div>
+			<a class="breadcrumb" href={resolve('/app/settings/workspace')}>
+				<ArrowLeft size={13} />
+				{t('Settings')}
+			</a>
 			<span class="eyebrow">{t('Account')}</span>
 			<h2>{t('Security')}</h2>
 		</div>

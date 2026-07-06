@@ -707,6 +707,59 @@ test('covers dashboard, categories, expenses and reports happy path', async ({ p
 	expect(analyticalCsvText).toContain('12540');
 });
 
+test('nav has exactly 5 items, Settings tab is active for all settings sub-routes, back-links work', async ({
+	page
+}) => {
+	await registerAndCreateWorkspace(page);
+
+	// Nav has 5 items (down from 7)
+	await page.goto('/app/dashboard');
+	await expect(page.locator('.nav-item')).toHaveCount(5);
+
+	// Nav labels (pt-BR)
+	const labels = ['Dashboard', 'Despesas', 'Orçamento', 'Relatórios', 'Ajustes'];
+	for (const label of labels) {
+		await expect(page.locator('.nav-item').filter({ hasText: label }).first()).toBeVisible();
+	}
+
+	// Settings tab lights up for /users, /security, /audit
+	for (const subPath of ['/app/settings/users', '/app/settings/security', '/app/settings/audit']) {
+		await page.goto(subPath);
+		const settingsItem = page.locator('.nav-item[href="/app/settings/workspace"]');
+		await expect(settingsItem).toHaveClass(/active/);
+	}
+
+	// Budget tab lights up for /categories
+	await page.goto('/app/categories');
+	const budgetItem = page.locator('.nav-item[href="/app/planning"]');
+	await expect(budgetItem).toHaveClass(/active/);
+
+	// Back-link on Categories goes to /planning
+	await expect(
+		page.locator('#main-content').getByRole('link', { name: /Orçamento/i })
+	).toHaveAttribute('href', '/app/planning');
+
+	// Users page has back link to settings
+	await page.goto('/app/settings/users');
+	await expect(
+		page.locator('#main-content').getByRole('link', { name: /Ajustes/i })
+	).toHaveAttribute('href', '/app/settings/workspace');
+
+	// Settings page shows Users shortcut
+	await page.goto('/app/settings/workspace');
+	await expect(page.getByRole('link', { name: 'Usuários' })).toHaveAttribute(
+		'href',
+		'/app/settings/users'
+	);
+
+	// Budget page shows Categories shortcut that links to /categories
+	await page.goto('/app/planning?periodMonth=2026-07-01');
+	await expect(page.getByRole('heading', { name: 'Orçamento', exact: true })).toBeVisible();
+	await expect(
+		page.locator('#main-content').getByRole('link', { name: /Categorias/ })
+	).toHaveAttribute('href', '/app/categories');
+});
+
 test('keeps core app screens responsive without horizontal overflow', async ({ page }) => {
 	await page.setViewportSize({ width: 1280, height: 800 });
 	await registerAndCreateWorkspace(page);
@@ -728,7 +781,8 @@ test('keeps core app screens responsive without horizontal overflow', async ({ p
 		},
 		{
 			url: '/app/planning?periodMonth=2026-06-01',
-			assertReady: () => expect(page.getByRole('heading', { name: 'Planejamento' })).toBeVisible()
+			assertReady: () =>
+				expect(page.getByRole('heading', { name: 'Orçamento', exact: true })).toBeVisible()
 		},
 		{
 			url: '/app/reports?from=2026-06-01&to=2026-06-30&groupBy=expense',

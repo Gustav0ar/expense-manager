@@ -10,7 +10,14 @@ export type LocalePreference = (typeof localePreferences)[number];
 export type MessageKey = keyof typeof ptBrMessages | (string & {});
 
 const dictionaries: Record<SupportedLocale, Partial<Record<string, string>>> = {
-	en: {},
+	en: {
+		'Home short': 'Home',
+		'Expenses short': 'Exp.',
+		'Budget short': 'Budget',
+		'Reports short': 'Rep.',
+		'Settings short': 'Config',
+		Budget: 'Budget'
+	},
 	'pt-BR': ptBrMessages
 };
 

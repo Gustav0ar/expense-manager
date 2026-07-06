@@ -2,6 +2,7 @@
 	import { resolve } from '$app/paths';
 	import LocalizedDateTime from '$lib/components/LocalizedDateTime.svelte';
 	import { translate } from '$lib/i18n';
+	import { ArrowLeft } from '@lucide/svelte';
 	import type { PageData } from './$types';
 
 	let { data } = $props<{ data: PageData }>();
@@ -24,6 +25,10 @@
 <section class="page-section">
 	<div class="section-heading">
 		<div>
+			<a class="breadcrumb" href={resolve('/app/settings/workspace')}>
+				<ArrowLeft size={13} />
+				{t('Settings')}
+			</a>
 			<span class="eyebrow">{t('Security')}</span>
 			<h2>{t('Audit')}</h2>
 		</div>

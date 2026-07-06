@@ -419,7 +419,7 @@ test('allows every workspace role to read the shared application screens', async
 			{ path: '/app/dashboard', heading: 'Dashboard' },
 			{ path: '/app/expenses', heading: 'Expenses' },
 			{ path: '/app/categories', heading: 'Categories' },
-			{ path: '/app/planning', heading: 'Planning' },
+			{ path: '/app/planning', heading: 'Budget' },
 			{ path: '/app/reports', heading: 'Reports' },
 			{ path: '/app/settings/users', heading: 'Users' },
 			{ path: '/app/settings/workspace', heading: 'Workspace' },

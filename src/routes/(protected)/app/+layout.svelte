@@ -3,16 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { translate } from '$lib/i18n';
 	import type { LayoutData } from './$types';
-	import {
-		BarChart3,
-		CalendarClock,
-		FolderTree,
-		Home,
-		LogOut,
-		ReceiptText,
-		Settings,
-		UsersRound
-	} from '@lucide/svelte';
+	import { BarChart3, CalendarClock, Home, LogOut, ReceiptText, Settings } from '@lucide/svelte';
 
 	let { data, children } = $props<{ data: LayoutData; children: import('svelte').Snippet }>();
 
@@ -26,23 +17,11 @@
 		},
 		{
 			href: '/app/planning',
-			label: t('Planning'),
-			shortLabel: t('Planning short'),
+			label: t('Budget'),
+			shortLabel: t('Budget short'),
 			icon: CalendarClock
 		},
-		{
-			href: '/app/categories',
-			label: t('Categories'),
-			shortLabel: t('Categories short'),
-			icon: FolderTree
-		},
 		{ href: '/app/reports', label: t('Reports'), shortLabel: t('Reports short'), icon: BarChart3 },
-		{
-			href: '/app/settings/users',
-			label: t('Users'),
-			shortLabel: t('Team short'),
-			icon: UsersRound
-		},
 		{
 			href: '/app/settings/workspace',
 			label: t('Settings'),
@@ -57,9 +36,14 @@
 
 	function isActive(href: string) {
 		const pathname = page.url.pathname;
+		if (href === '/app/planning' && pathname.startsWith('/app/categories')) {
+			return true;
+		}
 		if (
 			href === '/app/settings/workspace' &&
-			(pathname.startsWith('/app/settings/security') || pathname.startsWith('/app/settings/audit'))
+			(pathname.startsWith('/app/settings/security') ||
+				pathname.startsWith('/app/settings/audit') ||
+				pathname.startsWith('/app/settings/users'))
 		) {
 			return true;
 		}

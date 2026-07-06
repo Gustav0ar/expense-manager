@@ -139,6 +139,10 @@ test('covers workspace preferences, appearance, language, creation and switching
 	await expect(page.getByRole('heading', { name: 'Aparência' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Idioma' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Conta e auditoria' })).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Usuários' })).toHaveAttribute(
+		'href',
+		'/app/settings/users'
+	);
 	await expect(page.getByRole('link', { name: 'Segurança' })).toHaveAttribute(
 		'href',
 		'/app/settings/security'
@@ -425,4 +429,31 @@ test('covers audit filters, metadata, empty state, pagination and invalid filter
 	expect(
 		(await page.request.get(`/app/settings/audit?entityType=${'x'.repeat(81)}`)).status()
 	).toBe(400);
+});
+
+test('logout button is hidden on desktop sidebar and visible in settings on mobile', async ({
+	page
+}) => {
+	await registerAndCreateWorkspace(page, 'Ajustes Logout');
+
+	// Desktop (1280px): sidebar footer logout is visible, settings-page logout panel is hidden
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await page.goto('/app/settings/workspace');
+	await expect(page.locator('form.sidebar-footer button[aria-label]')).toBeVisible();
+	await expect(page.locator('.logout-panel')).toBeHidden();
+
+	// Mobile (390px): sidebar logout is gone, settings-page logout panel is visible
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto('/app/settings/workspace');
+	await expect(page.locator('.sidebar-footer')).toBeHidden();
+	await expect(page.locator('.logout-panel')).toBeVisible();
+	await expect(page.locator('.logout-panel form[action="/logout"] button')).toBeVisible();
+	// User name and email are shown for context
+	await expect(page.locator('.logout-identity strong')).toContainText('Settings Owner');
+
+	// Tablet (768px): same — settings logout visible, sidebar logout absent
+	await page.setViewportSize({ width: 768, height: 1024 });
+	await page.goto('/app/settings/workspace');
+	await expect(page.locator('.sidebar-footer')).toBeHidden();
+	await expect(page.locator('.logout-panel')).toBeVisible();
 });
