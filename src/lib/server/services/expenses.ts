@@ -75,7 +75,13 @@ export type ExpenseFilters = {
 };
 
 export type GroupedReportGroupBy =
-	'category' | 'week' | 'month' | 'year' | 'payment' | 'vendor' | 'costCenter';
+	| 'category'
+	| 'week'
+	| 'month'
+	| 'year'
+	| 'payment'
+	| 'vendor'
+	| 'costCenter';
 export type ReportGroupBy = GroupedReportGroupBy | 'expense';
 
 export type AnalyticalExpenseReportFilters = Omit<ExpenseFilters, 'cursor' | 'limit'> & {
