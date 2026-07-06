@@ -26,9 +26,9 @@ describe('rate limit client IP resolution', () => {
 
 		// The rightmost value is appended by the trusted proxy and cannot be
 		// forged by the client, unlike the leftmost value.
-		expect(getClientIp(requestWithHeaders({ 'x-forwarded-for': '203.0.113.10, 198.51.100.20' }))).toBe(
-			'198.51.100.20'
-		);
+		expect(
+			getClientIp(requestWithHeaders({ 'x-forwarded-for': '203.0.113.10, 198.51.100.20' }))
+		).toBe('198.51.100.20');
 	});
 
 	it('falls back to x-real-ip when there is no forwarded chain', () => {
@@ -53,9 +53,9 @@ describe('rate limit client IP resolution', () => {
 		it('trims whitespace from the extracted IP', () => {
 			process.env.TRUST_PROXY_HEADERS = 'true';
 
-			expect(getClientIp(requestWithHeaders({ 'x-forwarded-for': '192.0.2.30,  198.51.100.20  ' }))).toBe(
-				'198.51.100.20'
-			);
+			expect(
+				getClientIp(requestWithHeaders({ 'x-forwarded-for': '192.0.2.30,  198.51.100.20  ' }))
+			).toBe('198.51.100.20');
 		});
 
 		it('falls back to getClientAddress when forwarded header is empty', () => {

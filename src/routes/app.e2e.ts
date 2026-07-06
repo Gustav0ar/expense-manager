@@ -18,7 +18,9 @@ async function submitRegisterForm(page: Page, input: { email: string; name: stri
 	await form.locator('input[name="name"]').fill(input.name);
 	await form.locator('input[name="email"]').fill(input.email);
 	await form.locator('input[name="password"]').fill(['test', 'password', '123'].join('-'));
-	await form.locator('input[name="passwordConfirmation"]').fill(['test', 'password', '123'].join('-'));
+	await form
+		.locator('input[name="passwordConfirmation"]')
+		.fill(['test', 'password', '123'].join('-'));
 	await expect(form.locator('input[name="name"]')).toHaveValue(input.name);
 	await expect(form.locator('input[name="email"]')).toHaveValue(input.email);
 	await form.getByRole('button', { name: 'Criar conta' }).click();

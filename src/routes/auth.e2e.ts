@@ -237,7 +237,11 @@ test('covers login validation, invalid credentials, rate limiting, success and r
 	for (let attempt = 0; attempt < 5; attempt += 1) {
 		await expectActionMessage(
 			await page.request.post('/login', {
-				form: { email: limitedEmail, password: ['wrong', 'password', '123'].join('-'), next: '/app' }
+				form: {
+					email: limitedEmail,
+					password: ['wrong', 'password', '123'].join('-'),
+					next: '/app'
+				}
 			}),
 			'Credenciais inválidas.'
 		);

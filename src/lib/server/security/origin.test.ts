@@ -4,7 +4,9 @@ import { buildTrustedOrigins, isTrustedOrigin, parseTrustedOrigins } from './ori
 describe('origin security helpers', () => {
 	it('normalizes configured trusted origins', () => {
 		expect(
-			parseTrustedOrigins(' http://198.51.100.10:5173/app , https://financeiro.example.com ,invalid')
+			parseTrustedOrigins(
+				' http://198.51.100.10:5173/app , https://financeiro.example.com ,invalid'
+			)
 		).toEqual(['http://198.51.100.10:5173', 'https://financeiro.example.com']);
 	});
 
@@ -17,7 +19,7 @@ describe('origin security helpers', () => {
 		).toEqual(['http://localhost:5173', 'http://198.51.100.10:5173']);
 	});
 
-	it('allows same-origin development requests such as Tailscale URLs', () => {
+	it('allows same-origin development requests from alternate URLs', () => {
 		expect(
 			isTrustedOrigin({
 				origin: 'http://198.51.100.10:5173',
