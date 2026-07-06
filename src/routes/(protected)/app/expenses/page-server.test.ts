@@ -1,4 +1,4 @@
-import { error, isRedirect } from '@sveltejs/kit';
+import { error, isHttpError, isRedirect } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { actions } from './+page.server';
 
@@ -62,7 +62,7 @@ function createEvent(fields: Record<string, string>, locale = 'pt-BR', enhanced 
 	} as Parameters<NonNullable<typeof actions.createCatalog>>[0];
 }
 
-function createHttpError(status: 400, message: string) {
+function createHttpError(status: 400 | 403, message: string) {
 	try {
 		error(status, message);
 	} catch (httpError) {
@@ -140,6 +140,25 @@ describe('expenses page createCatalog action', () => {
 				catalogMessage: 'Fornecedor já existe.'
 			}
 		});
+	});
+
+	it('preserves permission errors as HTTP errors', async () => {
+		mocks.createExpenseCatalogItem.mockRejectedValue(createHttpError(403, 'Permissão negada.'));
+
+		try {
+			await createCatalog({
+				kind: 'vendor',
+				name: 'Viewer Vendor',
+				returnTo: '/app/expenses'
+			});
+			throw new Error('Expected createCatalog to throw');
+		} catch (catalogError) {
+			expect(isHttpError(catalogError, 403)).toBe(true);
+			expect(catalogError).toMatchObject({
+				status: 403,
+				body: { message: 'Permissão negada.' }
+			});
+		}
 	});
 
 	it('redirects after native form posts to preserve the non-enhanced fallback', async () => {

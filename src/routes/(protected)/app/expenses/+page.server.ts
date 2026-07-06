@@ -126,7 +126,7 @@ export const actions: Actions = {
 				catalogMessage: translate(event.locals.locale, 'Catalog item added successfully.')
 			};
 		} catch (catalogError) {
-			if (isHttpError(catalogError) && catalogError.status < 500) {
+			if (isHttpError(catalogError) && catalogError.status < 500 && catalogError.status !== 403) {
 				return fail(catalogError.status, {
 					message: catalogError.body.message,
 					catalogAction: 'createCatalog',
