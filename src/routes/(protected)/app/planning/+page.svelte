@@ -3,8 +3,7 @@
 	import LocalizedDateTime from '$lib/components/LocalizedDateTime.svelte';
 	import { translate } from '$lib/i18n';
 	import { formatCents } from '$lib/utils/format';
-	import { Bell, FileUp, FolderTree, Pause, Play, RefreshCw, Target, Trash2 } from '@lucide/svelte';
-	import { resolve } from '$app/paths';
+	import { Bell, FileUp, Pause, Play, RefreshCw, Target, Trash2 } from '@lucide/svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form } = $props<{ data: PageData; form: ActionData }>();
@@ -51,21 +50,15 @@
 			<h2>{t('Budget')}</h2>
 		</div>
 
-		<div class="inline-form">
-			<a class="button secondary" href={resolve('/app/categories')}>
-				<FolderTree size={16} />
-				<span class="hide-compact">{t('Categories')}</span>
-			</a>
-			<form method="get" class="inline-form">
-				<input
-					type="month"
-					name="periodMonth"
-					value={data.periodMonth.slice(0, 7)}
-					aria-label={t('Budget month')}
-				/>
-				<button class="button secondary" type="submit">{t('View month')}</button>
-			</form>
-		</div>
+		<form method="get" class="inline-form">
+			<input
+				type="month"
+				name="periodMonth"
+				value={data.periodMonth.slice(0, 7)}
+				aria-label={t('Budget month')}
+			/>
+			<button class="button secondary" type="submit">{t('View month')}</button>
+		</form>
 	</div>
 
 	{#if form?.message}

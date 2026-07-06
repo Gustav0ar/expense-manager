@@ -36,7 +36,7 @@
 
 	function isActive(href: string) {
 		const pathname = page.url.pathname;
-		if (href === '/app/planning' && pathname.startsWith('/app/categories')) {
+		if (href === '/app/expenses' && pathname.startsWith('/app/categories')) {
 			return true;
 		}
 		if (

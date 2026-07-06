@@ -544,6 +544,12 @@
 				<span>{t('{count} payments', { count: data.catalogs.paymentMethods.length })}</span>
 				<span>{t('{count} vendors', { count: data.catalogs.vendors.length })}</span>
 				<span>{t('{count} cost centers', { count: data.catalogs.costCenters.length })}</span>
+				<span
+					>{t('{count} categories', {
+						count: data.categories.filter((c: PageData['categories'][number]) => !c.isArchived)
+							.length
+					})}</span
+				>
 			</div>
 
 			<div class="support-catalog-tabs" role="tablist" aria-label={t('Catalog type')}>
@@ -561,6 +567,19 @@
 						<strong>{catalogItems(tab.kind).length}</strong>
 					</button>
 				{/each}
+				<a
+					class="support-catalog-tab"
+					role="tab"
+					aria-selected="false"
+					href={resolve('/app/categories')}
+					onclick={closeSupportCatalogDialog}
+				>
+					<span>{t('Categories')}</span>
+					<strong
+						>{data.categories.filter((c: PageData['categories'][number]) => !c.isArchived)
+							.length}</strong
+					>
+				</a>
 			</div>
 
 			<div

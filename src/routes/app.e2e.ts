@@ -729,15 +729,15 @@ test('nav has exactly 5 items, Settings tab is active for all settings sub-route
 		await expect(settingsItem).toHaveClass(/active/);
 	}
 
-	// Budget tab lights up for /categories
+	// Expenses tab lights up for /categories (Categories moved to Expenses dialog)
 	await page.goto('/app/categories');
-	const budgetItem = page.locator('.nav-item[href="/app/planning"]');
-	await expect(budgetItem).toHaveClass(/active/);
+	const expensesItem = page.locator('.nav-item[href="/app/expenses"]');
+	await expect(expensesItem).toHaveClass(/active/);
 
-	// Back-link on Categories goes to /planning
+	// Back-link on Categories goes to /expenses
 	await expect(
-		page.locator('#main-content').getByRole('link', { name: /Orçamento/i })
-	).toHaveAttribute('href', '/app/planning');
+		page.locator('#main-content').getByRole('link', { name: /Despesas/i })
+	).toHaveAttribute('href', '/app/expenses');
 
 	// Users page has back link to settings
 	await page.goto('/app/settings/users');
@@ -752,12 +752,12 @@ test('nav has exactly 5 items, Settings tab is active for all settings sub-route
 		'/app/settings/users'
 	);
 
-	// Budget page shows Categories shortcut that links to /categories
-	await page.goto('/app/planning?periodMonth=2026-07-01');
-	await expect(page.getByRole('heading', { name: 'Orçamento', exact: true })).toBeVisible();
-	await expect(
-		page.locator('#main-content').getByRole('link', { name: /Categorias/ })
-	).toHaveAttribute('href', '/app/categories');
+	// Support catalogs dialog shows Categories tab
+	await page.goto('/app/expenses');
+	await page.getByRole('button', { name: 'Cadastros' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Cadastros de apoio' });
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('tab', { name: /Categorias/ })).toBeVisible();
 });
 
 test('keeps core app screens responsive without horizontal overflow', async ({ page }) => {

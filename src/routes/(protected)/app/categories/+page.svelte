@@ -34,9 +34,9 @@
 <section class="page-section">
 	<div class="section-heading">
 		<div>
-			<a class="breadcrumb" href={resolve('/app/planning')}>
+			<a class="breadcrumb" href={resolve('/app/expenses')}>
 				<ArrowLeft size={13} />
-				{t('Budget')}
+				{t('Expenses')}
 			</a>
 			<span class="eyebrow">{t('Organization')}</span>
 			<h2>{t('Categories')}</h2>
