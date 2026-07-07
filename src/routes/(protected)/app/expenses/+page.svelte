@@ -8,6 +8,8 @@
 	import { formatCents } from '$lib/utils/format';
 	import { reviewLabel, reviewClass, paymentLabel, paymentClass } from '$lib/utils/status';
 	import {
+		Archive,
+		ArchiveRestore,
 		CheckCircle2,
 		ChevronLeft,
 		ChevronRight,
@@ -104,6 +106,7 @@
 	});
 	let categorySearch = $state('');
 	let categoryPage = $state(1);
+	let categoryView = $state<'active' | 'archived'>('active');
 	let categoryNotice = $state<SupportCatalogNotice | null>(null);
 	let categoryCreating = $state(false);
 	let selectedIds = new SvelteSet<number>();
@@ -152,11 +155,18 @@
 	let supportCatalogResultEnd = $derived(
 		Math.min(filteredSupportCatalogItems.length, activeSupportCatalogPage * supportCatalogPageSize)
 	);
-	let activeCategoryCount = $derived(data.categories.filter(isActiveCategory).length);
+	let activeCategories = $derived(data.categories.filter(isActiveCategory));
+	let activeCategoryCount = $derived(activeCategories.length);
+	let archivedCategoryCount = $derived(data.categories.length - activeCategoryCount);
+	let visibleCategories = $derived(
+		data.categories.filter((category: PageData['categories'][number]) =>
+			categoryView === 'archived' ? category.isArchived : !category.isArchived
+		)
+	);
 	let categoryQuery = $derived(categorySearch.trim().toLocaleLowerCase(data.locale));
 	let filteredCategories = $derived.by(() => {
-		if (!categoryQuery) return data.categories;
-		return data.categories.filter((category: PageData['categories'][number]) =>
+		if (!categoryQuery) return visibleCategories;
+		return visibleCategories.filter((category: PageData['categories'][number]) =>
 			category.name.toLocaleLowerCase(data.locale).includes(categoryQuery)
 		);
 	});
@@ -219,6 +229,18 @@
 
 	function isActiveCategory(category: PageData['categories'][number]) {
 		return !category.isArchived;
+	}
+
+	function categoryHasAssociations(category: PageData['categories'][number]) {
+		return category.associationCount > 0;
+	}
+
+	function categoryRemoveLabel(category: PageData['categories'][number]) {
+		return categoryHasAssociations(category) ? t('Archive') : t('Delete');
+	}
+
+	function categoryRemoveAriaLabel(category: PageData['categories'][number]) {
+		return `${categoryHasAssociations(category) ? t('Archive category') : t('Delete category')} ${category.name}`;
 	}
 
 	function isExpenseCatalogKind(kind: SupportCatalogKind): kind is ExpenseCatalogKind {
@@ -368,6 +390,11 @@
 
 	function updateCategorySearch(value: string) {
 		categorySearch = value;
+		categoryPage = 1;
+	}
+
+	function updateCategoryView(view: 'active' | 'archived') {
+		categoryView = view;
 		categoryPage = 1;
 	}
 
@@ -557,7 +584,7 @@
 					aria-describedby={form?.fieldErrors?.categoryId ? 'err-categoryId' : undefined}
 				>
 					<option value="">{t('Select')}</option>
-					{#each data.categories as category (category.id)}
+					{#each activeCategories as category (category.id)}
 						<option
 							value={category.id}
 							selected={category.id.toString() === (form?.values?.categoryId ?? '')}
@@ -747,6 +774,27 @@
 						</p>
 					{/if}
 
+					<div class="support-catalog-view-toggle" role="group" aria-label={t('Category status')}>
+						<button
+							class="support-catalog-view-option"
+							type="button"
+							aria-pressed={categoryView === 'active'}
+							onclick={() => updateCategoryView('active')}
+						>
+							<span>{t('Active categories')}</span>
+							<strong>{activeCategoryCount}</strong>
+						</button>
+						<button
+							class="support-catalog-view-option"
+							type="button"
+							aria-pressed={categoryView === 'archived'}
+							onclick={() => updateCategoryView('archived')}
+						>
+							<span>{t('Archived categories')}</span>
+							<strong>{archivedCategoryCount}</strong>
+						</button>
+					</div>
+
 					<div class="support-catalog-toolbar">
 						<label class="support-catalog-search">
 							<span>{t('Search {item}', { item: lower(t('Category')) })}</span>
@@ -770,7 +818,9 @@
 					</div>
 
 					<div class="support-catalog-list-heading">
-						<strong>{t('Categories')}</strong>
+						<strong
+							>{categoryView === 'archived' ? t('Archived categories') : t('Categories')}</strong
+						>
 						<span>
 							{t('{start}-{end} of {total}', {
 								start: categoryResultStart,
@@ -826,28 +876,49 @@
 										<span>{t('Save')}</span>
 									</button>
 								</form>
-								{#if !category.isArchived}
+								{#if category.isArchived}
 									<form
 										method="post"
-										action="?/archiveCategory"
+										action="?/unarchiveCategory"
 										class="support-catalog-remove-form"
 									>
 										<input type="hidden" name="returnTo" value={data.returnTo} />
 										<input type="hidden" name="id" value={category.id} />
 										<button
-											class="text-button danger"
+											class="button secondary"
 											type="submit"
-											aria-label={`${t('Archive category')} ${category.name}`}
+											aria-label={`${t('Restore category')} ${category.name}`}
 										>
-											<Trash2 size={15} />
-											<span>{t('Archive')}</span>
+											<ArchiveRestore size={15} />
+											<span>{t('Restore')}</span>
+										</button>
+									</form>
+								{:else}
+									<form method="post" action="?/removeCategory" class="support-catalog-remove-form">
+										<input type="hidden" name="returnTo" value={data.returnTo} />
+										<input type="hidden" name="id" value={category.id} />
+										<button
+											class="button secondary danger"
+											type="submit"
+											aria-label={categoryRemoveAriaLabel(category)}
+										>
+											{#if categoryHasAssociations(category)}
+												<Archive size={15} />
+											{:else}
+												<Trash2 size={15} />
+											{/if}
+											<span>{categoryRemoveLabel(category)}</span>
 										</button>
 									</form>
 								{/if}
 							</div>
 						{:else}
 							<p class="support-catalog-empty">
-								{categoryQuery ? t('No search results.') : t('No category found.')}
+								{categoryQuery
+									? t('No search results.')
+									: categoryView === 'archived'
+										? t('No archived category found.')
+										: t('No category found.')}
 							</p>
 						{/each}
 					</div>
@@ -1072,7 +1143,7 @@
 				<span>{t('Category')}</span>
 				<select name="categoryId" aria-label={t('Category')}>
 					<option value="">{t('All categories')}</option>
-					{#each data.categories as category (category.id)}
+					{#each activeCategories as category (category.id)}
 						<option value={category.id} selected={data.filters.categoryId === category.id}
 							>{category.icon ?? '💼'} {category.name}</option
 						>
@@ -1257,7 +1328,7 @@
 									<label>
 										<span>{t('Category')}</span>
 										<select name="categoryId" required>
-											{#each data.categories as category (category.id)}
+											{#each activeCategories as category (category.id)}
 												<option value={category.id} selected={category.id === expense.categoryId}
 													>{category.icon ?? '💼'} {category.name}</option
 												>

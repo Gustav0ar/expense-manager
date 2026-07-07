@@ -32,6 +32,7 @@ import {
 	matchCategoryRule,
 	matchCategoryRuleFromRules
 } from './category-rules';
+import { createCategory, listCategories, removeCategory, unarchiveCategory } from './categories';
 import {
 	deleteBudget,
 	getBudgetSummary,
@@ -1282,6 +1283,55 @@ describe('server service integration', () => {
 				paymentMethodId: otherPix.id
 			})
 		).rejects.toMatchObject({ status: 400 });
+	});
+
+	it('deletes unused categories, archives used categories and restores archived categories', async () => {
+		const fixture = await createWorkspaceFixture();
+		const unused = await createCategory(fixture.context, {
+			name: 'Sem uso',
+			color: '#2563eb',
+			icon: '💼'
+		});
+		const used = await createCategory(fixture.context, {
+			name: 'Com despesas',
+			color: '#dc2626',
+			icon: '🧮'
+		});
+
+		await expect(removeCategory(fixture.context, unused.id)).resolves.toMatchObject({
+			mode: 'deleted',
+			item: expect.objectContaining({ id: unused.id, associationCount: 0 })
+		});
+		await expect(
+			db.select({ id: category.id }).from(category).where(eq(category.id, unused.id))
+		).resolves.toEqual([]);
+
+		await createExpense(fixture.context, {
+			categoryId: used.id,
+			description: 'Imposto vinculado',
+			amount: '10,00',
+			expenseDate: '2026-06-10'
+		});
+
+		await expect(removeCategory(fixture.context, used.id)).resolves.toMatchObject({
+			mode: 'archived',
+			item: expect.objectContaining({ id: used.id, associationCount: 1, expenseCount: 1 })
+		});
+		await expect(listCategories(fixture.context)).resolves.not.toEqual(
+			expect.arrayContaining([expect.objectContaining({ id: used.id })])
+		);
+		await expect(listCategories(fixture.context, true)).resolves.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: used.id, isArchived: true, associationCount: 1 })
+			])
+		);
+
+		await unarchiveCategory(fixture.context, used.id);
+		await expect(listCategories(fixture.context)).resolves.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: used.id, isArchived: false, associationCount: 1 })
+			])
+		);
 	});
 
 	it('sends budget alerts from approved spending only', async () => {

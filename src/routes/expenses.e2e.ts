@@ -299,10 +299,26 @@ test('manages categories from the expenses support dialog', async ({ page }) => 
 	await expect(categoriesTab).toHaveAttribute('aria-selected', 'true');
 
 	const createForm = dialog.locator('form.support-catalog-category-form');
-	await createForm.getByLabel('Nova categoria').fill('Categoria Dialog');
+	await createForm.getByLabel('Nova categoria').fill('Categoria Sem Uso');
 	await createForm.getByLabel('Cor').fill('#0f766e');
 	await createForm.getByLabel('Emoji').selectOption('🧾');
 	await createForm.getByRole('button', { name: 'Criar' }).click();
+
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('status')).toHaveText('Categoria criada com sucesso.');
+	await expect(dialog.getByLabel('Editar categoria Categoria Sem Uso')).toBeVisible();
+	await dialog.getByRole('button', { name: 'Excluir categoria Categoria Sem Uso' }).click();
+
+	await expect(page).toHaveURL(/\/app\/expenses$/);
+	dialog = await openSupportCatalogDialog(page);
+	await dialog.getByRole('tab', { name: /Categorias/ }).click();
+	await expect(dialog.getByLabel('Editar categoria Categoria Sem Uso')).toHaveCount(0);
+
+	const categoryCreateForm = dialog.locator('form.support-catalog-category-form');
+	await categoryCreateForm.getByLabel('Nova categoria').fill('Categoria Dialog');
+	await categoryCreateForm.getByLabel('Cor').fill('#0f766e');
+	await categoryCreateForm.getByLabel('Emoji').selectOption('🧾');
+	await categoryCreateForm.getByRole('button', { name: 'Criar' }).click();
 
 	await expect(dialog).toBeVisible();
 	await expect(dialog.getByRole('status')).toHaveText('Categoria criada com sucesso.');
@@ -327,6 +343,13 @@ test('manages categories from the expenses support dialog', async ({ page }) => 
 		page.locator('form.expense-create-form select[name="categoryId"]')
 	).not.toContainText('Categoria Dialog');
 
+	await createExpenseFromForm(page, {
+		description: 'Categoria vinculada',
+		amount: '25,00',
+		date: '2026-06-12',
+		category: '🧰 Categoria Revisada'
+	});
+
 	dialog = await openSupportCatalogDialog(page);
 	await dialog.getByRole('tab', { name: /Categorias/ }).click();
 	await expect(dialog.getByLabel('Editar categoria Categoria Revisada')).toBeVisible();
@@ -340,6 +363,14 @@ test('manages categories from the expenses support dialog', async ({ page }) => 
 	dialog = await openSupportCatalogDialog(page);
 	await dialog.getByRole('tab', { name: /Categorias/ }).click();
 	await expect(dialog.getByLabel('Editar categoria Categoria Revisada')).toHaveCount(0);
+	await dialog.getByRole('button', { name: /Categorias arquivadas/ }).click();
+	await expect(dialog.getByLabel('Editar categoria Categoria Revisada')).toBeVisible();
+	await dialog.getByRole('button', { name: 'Restaurar categoria Categoria Revisada' }).click();
+
+	await expect(page).toHaveURL(/\/app\/expenses$/);
+	await expect(page.locator('form.expense-create-form select[name="categoryId"]')).toContainText(
+		'Categoria Revisada'
+	);
 });
 
 test('validates support catalog errors, search and pagination', async ({ page }) => {

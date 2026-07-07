@@ -1,9 +1,10 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import {
-	archiveCategory,
 	createCategory,
 	listCategories,
+	removeCategory,
+	unarchiveCategory,
 	updateCategory
 } from '$lib/server/services/categories';
 import {
@@ -48,13 +49,22 @@ export const actions: Actions = {
 		await updateCategory(context, id.data, parsed.data);
 		throw redirect(303, '/app/categories');
 	},
-	archive: async (event) => {
+	remove: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const id = idSchema.safeParse((await event.request.formData()).get('id'));
 		if (!id.success)
 			return fail(400, { message: translate(event.locals.locale, 'Invalid category.') });
 
-		await archiveCategory(context, id.data);
+		await removeCategory(context, id.data);
+		throw redirect(303, '/app/categories');
+	},
+	unarchive: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const id = idSchema.safeParse((await event.request.formData()).get('id'));
+		if (!id.success)
+			return fail(400, { message: translate(event.locals.locale, 'Invalid category.') });
+
+		await unarchiveCategory(context, id.data);
 		throw redirect(303, '/app/categories');
 	},
 	createRule: async (event) => {

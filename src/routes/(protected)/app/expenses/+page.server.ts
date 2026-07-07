@@ -1,9 +1,10 @@
 import { error, fail, isHttpError, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import {
-	archiveCategory as archiveCategoryService,
 	createCategory as createCategoryService,
 	listCategories,
+	removeCategory as removeCategoryService,
+	unarchiveCategory as unarchiveCategoryService,
 	updateCategory as updateCategoryService
 } from '$lib/server/services/categories';
 import {
@@ -48,7 +49,7 @@ export const load: PageServerLoad = async (event) => {
 		throw error(400, translate(event.locals.locale, 'Filters are invalid.'));
 
 	const [categories, catalogs, expenses, expenseSummary] = await Promise.all([
-		listCategories(context),
+		listCategories(context, true),
 		listExpenseCatalogs(context),
 		listExpenses(context, parsedFilters.data),
 		getExpenseListSummary(context, parsedFilters.data)
@@ -199,7 +200,7 @@ export const actions: Actions = {
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
-	archiveCategory: async (event) => {
+	removeCategory: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const id = idSchema.safeParse(formData.get('id'));
@@ -207,7 +208,24 @@ export const actions: Actions = {
 			return fail(400, { message: translate(event.locals.locale, 'Invalid category.') });
 
 		try {
-			await archiveCategoryService(context, id.data);
+			await removeCategoryService(context, id.data);
+		} catch (categoryError) {
+			if (isHttpError(categoryError) && categoryError.status < 500) {
+				return fail(categoryError.status, { message: categoryError.body.message });
+			}
+			throw categoryError;
+		}
+		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
+	},
+	unarchiveCategory: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const formData = await event.request.formData();
+		const id = idSchema.safeParse(formData.get('id'));
+		if (!id.success)
+			return fail(400, { message: translate(event.locals.locale, 'Invalid category.') });
+
+		try {
+			await unarchiveCategoryService(context, id.data);
 		} catch (categoryError) {
 			if (isHttpError(categoryError) && categoryError.status < 500) {
 				return fail(categoryError.status, { message: categoryError.body.message });

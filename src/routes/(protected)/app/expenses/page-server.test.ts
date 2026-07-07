@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { actions } from './+page.server';
 
 const mocks = vi.hoisted(() => ({
-	archiveCategory: vi.fn(),
 	createCategory: vi.fn(),
 	createExpenseCatalogItem: vi.fn(),
+	removeCategory: vi.fn(),
 	requireWorkspaceContext: vi.fn(),
+	unarchiveCategory: vi.fn(),
 	updateCategory: vi.fn(),
 	context: {
 		workspaceId: 12,
@@ -17,9 +18,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('$lib/server/services/categories', () => ({
-	archiveCategory: mocks.archiveCategory,
 	createCategory: mocks.createCategory,
 	listCategories: vi.fn(),
+	removeCategory: mocks.removeCategory,
+	unarchiveCategory: mocks.unarchiveCategory,
 	updateCategory: mocks.updateCategory
 }));
 
@@ -92,6 +94,22 @@ async function createCategory(fields: Record<string, string>, locale = 'pt-BR', 
 	const action = actions.createCategory;
 	if (!action) throw new Error('createCategory action is not registered');
 	return action(createEvent(fields, locale, enhanced, 'createCategory'));
+}
+
+async function removeCategory(fields: Record<string, string>, locale = 'pt-BR', enhanced = true) {
+	const action = actions.removeCategory;
+	if (!action) throw new Error('removeCategory action is not registered');
+	return action(createEvent(fields, locale, enhanced, 'removeCategory'));
+}
+
+async function unarchiveCategory(
+	fields: Record<string, string>,
+	locale = 'pt-BR',
+	enhanced = true
+) {
+	const action = actions.unarchiveCategory;
+	if (!action) throw new Error('unarchiveCategory action is not registered');
+	return action(createEvent(fields, locale, enhanced, 'unarchiveCategory'));
 }
 
 describe('expenses page createCatalog action', () => {
@@ -290,5 +308,69 @@ describe('expenses page createCategory action', () => {
 				location: '/app/expenses?from=2026-07-01'
 			});
 		}
+	});
+});
+
+describe('expenses page category management actions', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mocks.requireWorkspaceContext.mockResolvedValue(mocks.context);
+	});
+
+	it('removes categories through the service and redirects back to expenses', async () => {
+		mocks.removeCategory.mockResolvedValue({
+			mode: 'deleted',
+			item: { id: 77, name: 'Sem uso' }
+		});
+
+		try {
+			await removeCategory({
+				id: '77',
+				returnTo: '/app/expenses?categoryId=3'
+			});
+			throw new Error('Expected removeCategory to redirect');
+		} catch (redirectError) {
+			expect(mocks.removeCategory).toHaveBeenCalledWith(mocks.context, 77);
+			expect(isRedirect(redirectError)).toBe(true);
+			expect(redirectError).toMatchObject({
+				status: 303,
+				location: '/app/expenses?categoryId=3'
+			});
+		}
+	});
+
+	it('restores archived categories and redirects back to expenses', async () => {
+		mocks.unarchiveCategory.mockResolvedValue(undefined);
+
+		try {
+			await unarchiveCategory({
+				id: '88',
+				returnTo: '/app/expenses'
+			});
+			throw new Error('Expected unarchiveCategory to redirect');
+		} catch (redirectError) {
+			expect(mocks.unarchiveCategory).toHaveBeenCalledWith(mocks.context, 88);
+			expect(isRedirect(redirectError)).toBe(true);
+			expect(redirectError).toMatchObject({
+				status: 303,
+				location: '/app/expenses'
+			});
+		}
+	});
+
+	it('maps category restore conflicts to form failures', async () => {
+		mocks.unarchiveCategory.mockRejectedValue(createHttpError(400, 'Categoria já existe.'));
+
+		const result = await unarchiveCategory({
+			id: '88',
+			returnTo: '/app/expenses'
+		});
+
+		expect(result).toMatchObject({
+			status: 400,
+			data: {
+				message: 'Categoria já existe.'
+			}
+		});
 	});
 });
