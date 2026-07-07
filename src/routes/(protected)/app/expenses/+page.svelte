@@ -11,11 +11,11 @@
 		Archive,
 		ArchiveRestore,
 		CheckCircle2,
+		ChevronDown,
 		ChevronLeft,
 		ChevronRight,
 		CreditCard,
 		Paperclip,
-		Pencil,
 		Plus,
 		RotateCcw,
 		Search,
@@ -25,6 +25,7 @@
 	} from '@lucide/svelte';
 	import type { Attachment } from 'svelte/attachments';
 	import { SvelteSet } from 'svelte/reactivity';
+	import { tick } from 'svelte';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { ActionData, PageData } from './$types';
 
@@ -199,14 +200,37 @@
 		};
 	};
 
-	function prepareExpenseDetails(id: number, event: Event) {
+	async function prepareExpenseDetails(id: number, event: Event) {
 		const details = event.currentTarget as HTMLDetailsElement;
-		if (!details.open || preparedExpenseDetails.includes(id)) return;
-		preparedExpenseDetails = [...preparedExpenseDetails, id];
+		if (!details.open) return;
+		if (!preparedExpenseDetails.includes(id)) {
+			preparedExpenseDetails = [...preparedExpenseDetails, id];
+		}
+		await tick();
+		scrollExpenseActionsIntoView(details);
 	}
 
 	function hasPreparedExpenseDetails(id: number) {
 		return preparedExpenseDetails.includes(id);
+	}
+
+	function scrollExpenseActionsIntoView(details: HTMLDetailsElement) {
+		if (typeof window === 'undefined' || !window.matchMedia('(max-width: 640px)').matches) return;
+		const target = details.querySelector('.expense-workflow-panel') ?? details;
+		const bottomNav = document.querySelector('.sidebar');
+		const targetBox = target.getBoundingClientRect();
+		const navTop = bottomNav?.getBoundingClientRect().top ?? window.innerHeight;
+		const margin = 14;
+		const bottomOverlap = targetBox.bottom - (navTop - margin);
+
+		if (bottomOverlap > 0) {
+			window.scrollBy({ top: bottomOverlap, behavior: 'smooth' });
+			return;
+		}
+
+		if (targetBox.top < margin) {
+			window.scrollBy({ top: targetBox.top - margin, behavior: 'smooth' });
+		}
 	}
 
 	function amountInputValue(cents: number) {
@@ -501,6 +525,78 @@
 <svelte:head>
 	<title>{t('Expenses')} | Expense Manager</title>
 </svelte:head>
+
+{#snippet expenseWorkflowPanel(expense: PageData['expenses']['items'][number])}
+	<div class="expense-workflow-panel">
+		<div class="workflow-summary">
+			<span class={reviewClass(expense.reviewStatus)}>
+				{reviewLabel(expense.reviewStatus, t)}
+			</span>
+			<span class={paymentClass(expense.paymentStatus)}>
+				{paymentLabel(expense.paymentStatus, t)}
+			</span>
+		</div>
+		{#if data.permissions.canReview}
+			<form method="post" action="?/review" class="workflow-form workflow-approve-form">
+				<input type="hidden" name="id" value={expense.id} />
+				<input type="hidden" name="returnTo" value={data.returnTo} />
+				<input type="hidden" name="reviewStatus" value="approved" />
+				<button
+					class="button review-approve"
+					type="submit"
+					disabled={expense.reviewStatus === 'approved'}
+				>
+					<CheckCircle2 size={16} />
+					<span>{t('Approve')}</span>
+				</button>
+			</form>
+			<form method="post" action="?/review" class="workflow-form reject-form">
+				<input type="hidden" name="id" value={expense.id} />
+				<input type="hidden" name="returnTo" value={data.returnTo} />
+				<input type="hidden" name="reviewStatus" value="rejected" />
+				<input
+					name="reason"
+					aria-label={t('Rejection reason')}
+					placeholder={t('Reason')}
+					maxlength="500"
+					required
+				/>
+				<button
+					class="button secondary danger"
+					type="submit"
+					disabled={expense.reviewStatus === 'rejected'}
+				>
+					<XCircle size={16} />
+					<span>{t('Reject')}</span>
+				</button>
+			</form>
+		{/if}
+
+		{#if data.permissions.canReconcile && expense.reviewStatus === 'approved'}
+			<form method="post" action="?/payment" class="workflow-form">
+				<input type="hidden" name="id" value={expense.id} />
+				<input type="hidden" name="returnTo" value={data.returnTo} />
+				<select name="paymentStatus" aria-label={t('Payment status')}>
+					<option value="unpaid" selected={expense.paymentStatus === 'unpaid'}>{t('Open')}</option>
+					<option value="paid" selected={expense.paymentStatus === 'paid'}>{t('Paid')}</option>
+					<option value="reconciled" selected={expense.paymentStatus === 'reconciled'}
+						>{t('Reconciled')}</option
+					>
+				</select>
+				<input
+					name="paidAt"
+					type="date"
+					value={expense.paidAt ?? ''}
+					aria-label={t('Payment date')}
+				/>
+				<button class="button secondary" type="submit">
+					<CreditCard size={16} />
+					<span>{t('Save payment')}</span>
+				</button>
+			</form>
+		{/if}
+	</div>
+{/snippet}
 
 <section class="page-section">
 	<div class="section-heading">
@@ -1225,23 +1321,28 @@
 		{#if data.expenses.items.length === 0}
 			<p class="empty">{t('No expense found.')}</p>
 		{:else}
-			<div class="expense-table" aria-label={t('Expenses registered')}>
+			<div
+				class={['expense-table', data.permissions.canReview && 'with-select']}
+				aria-label={t('Expenses registered')}
+			>
 				<div class="expense-table-header" aria-hidden="true">
 					{#if data.permissions.canReview}<span></span>{/if}
 					<span>{t('Date')}</span>
 					<span>{t('Description')}</span>
 					<span>{t('Category')}</span>
 					<span>{t('Payment')}</span>
-					<span>{t('Notes')}</span>
+					<span>{t('Details')}</span>
 					<span>{t('Value')}</span>
 					<span>{t('Actions')}</span>
 				</div>
 
 				{#each data.expenses.items as expense (expense.id)}
-					<article class="expense-table-item">
+					<article
+						class={['expense-table-item', expense.reviewStatus === 'pending' && 'pending-review']}
+					>
 						{#if data.permissions.canReview && expense.reviewStatus === 'pending'}
 							<label
-								class="expense-select-label"
+								class={['expense-select-label', selectedIds.has(expense.id) && 'selected']}
 								aria-label={t('Select {description}', { description: expense.description })}
 							>
 								<input
@@ -1250,6 +1351,7 @@
 									checked={selectedIds.has(expense.id)}
 									onchange={() => toggleSelect(expense.id)}
 								/>
+								<span class="expense-select-text">{t('Review')}</span>
 							</label>
 						{:else if data.permissions.canReview}
 							<span class="expense-select-placeholder"></span>
@@ -1300,241 +1402,170 @@
 								</span>
 								<span class="expense-table-amount">{money(expense.amountCents)}</span>
 								<span class="expense-table-action">
-									<Pencil size={15} />
-									{t('Edit')}
+									<ChevronDown size={15} />
+									{t('Actions')}
 								</span>
 							</summary>
 
 							{#if hasPreparedExpenseDetails(expense.id)}
-								<form
-									method="post"
-									action="?/update"
-									class="expense-edit-form expense-edit-form-table"
-								>
-									<input type="hidden" name="id" value={expense.id} />
-									<input type="hidden" name="returnTo" value={data.returnTo} />
-									<label>
-										<span>{t('Description')}</span>
-										<input name="description" value={expense.description} required />
-									</label>
-									<label>
-										<span>{t('Value')}</span>
-										<input name="amount" value={amountInputValue(expense.amountCents)} required />
-									</label>
-									<label>
-										<span>{t('Date')}</span>
-										<input name="expenseDate" type="date" value={expense.expenseDate} required />
-									</label>
-									<label>
-										<span>{t('Category')}</span>
-										<select name="categoryId" required>
-											{#each activeCategories as category (category.id)}
-												<option value={category.id} selected={category.id === expense.categoryId}
-													>{category.icon ?? '💼'} {category.name}</option
-												>
-											{/each}
-										</select>
-									</label>
-									<label>
-										<span>{t('Payment')}</span>
-										<select name="paymentMethodId">
-											<option value="">{t('Select')}</option>
-											{#if expense.paymentMethodId && !hasCatalogOption(data.catalogs.paymentMethods, expense.paymentMethodId)}
-												<option value={expense.paymentMethodId} selected
-													>{expense.paymentMethod ?? t('Archived payment method')} ({lower(
-														t('Archived')
-													)})</option
-												>
-											{/if}
-											{#each data.catalogs.paymentMethods as paymentMethod (paymentMethod.id)}
-												<option
-													value={paymentMethod.id}
-													selected={paymentMethod.id === expense.paymentMethodId}
-													>{paymentMethod.name}</option
-												>
-											{/each}
-										</select>
-									</label>
-									<SearchableSelect
-										id={`expense-edit-vendor-${expense.id}`}
-										name="vendorId"
-										label={t('Vendor')}
-										options={catalogOptionsWithCurrent(
-											data.catalogs.vendors,
-											expense.vendorId,
-											expense.vendor,
-											'Archived vendor'
-										)}
-										selectedId={expense.vendorId}
-										selectedLabel={expense.vendor}
-										placeholder={t('Select')}
-										empty={t('No vendor found.')}
-										locale={data.locale}
-									/>
-									<SearchableSelect
-										id={`expense-edit-cost-center-${expense.id}`}
-										name="costCenterId"
-										label={t('Cost center')}
-										options={catalogOptionsWithCurrent(
-											data.catalogs.costCenters,
-											expense.costCenterId,
-											expense.costCenter,
-											'Archived cost center'
-										)}
-										selectedId={expense.costCenterId}
-										selectedLabel={expense.costCenter}
-										placeholder={t('Select')}
-										empty={t('No cost center found.')}
-										locale={data.locale}
-									/>
-									<label>
-										<span>{t('Competency')}</span>
-										<input
-											name="competencyMonth"
-											type="month"
-											value={expense.competencyMonth?.slice(0, 7) ?? ''}
-										/>
-									</label>
-									<label class="edit-notes">
-										<span>{t('Notes')}</span>
-										<input name="notes" value={expense.notes ?? ''} />
-									</label>
-									<button class="button primary" type="submit">
-										<Save size={17} />
-										<span>{t('Update')}</span>
-									</button>
-								</form>
-
-								{#if data.permissions.canReview || data.permissions.canReconcile}
-									<div class="expense-workflow-panel">
-										<div class="workflow-summary">
-											<span class={reviewClass(expense.reviewStatus)}>
-												{reviewLabel(expense.reviewStatus, t)}
-											</span>
-											<span class={paymentClass(expense.paymentStatus)}>
-												{paymentLabel(expense.paymentStatus, t)}
-											</span>
-										</div>
-										{#if data.permissions.canReview}
-											<form method="post" action="?/review" class="workflow-form">
-												<input type="hidden" name="id" value={expense.id} />
-												<input type="hidden" name="returnTo" value={data.returnTo} />
-												<input type="hidden" name="reviewStatus" value="approved" />
-												<button
-													class="button secondary"
-													type="submit"
-													disabled={expense.reviewStatus === 'approved'}
-												>
-													<CheckCircle2 size={16} />
-													<span>{t('Approve')}</span>
-												</button>
-											</form>
-											<form method="post" action="?/review" class="workflow-form reject-form">
-												<input type="hidden" name="id" value={expense.id} />
-												<input type="hidden" name="returnTo" value={data.returnTo} />
-												<input type="hidden" name="reviewStatus" value="rejected" />
-												<input
-													name="reason"
-													aria-label={t('Rejection reason')}
-													placeholder={t('Reason')}
-													maxlength="500"
-													required
-												/>
-												<button
-													class="button secondary danger"
-													type="submit"
-													disabled={expense.reviewStatus === 'rejected'}
-												>
-													<XCircle size={16} />
-													<span>{t('Reject')}</span>
-												</button>
-											</form>
-										{/if}
-
-										{#if data.permissions.canReconcile && expense.reviewStatus === 'approved'}
-											<form method="post" action="?/payment" class="workflow-form">
-												<input type="hidden" name="id" value={expense.id} />
-												<input type="hidden" name="returnTo" value={data.returnTo} />
-												<select name="paymentStatus" aria-label={t('Payment status')}>
-													<option value="unpaid" selected={expense.paymentStatus === 'unpaid'}
-														>{t('Open')}</option
-													>
-													<option value="paid" selected={expense.paymentStatus === 'paid'}
-														>{t('Paid')}</option
-													>
-													<option
-														value="reconciled"
-														selected={expense.paymentStatus === 'reconciled'}
-														>{t('Reconciled')}</option
-													>
-												</select>
-												<input
-													name="paidAt"
-													type="date"
-													value={expense.paidAt ?? ''}
-													aria-label={t('Payment date')}
-												/>
-												<button class="button secondary" type="submit">
-													<CreditCard size={16} />
-													<span>{t('Save payment')}</span>
-												</button>
-											</form>
-										{/if}
-									</div>
-								{/if}
-
-								<div class="attachment-panel">
-									<div class="attachment-list">
-										{#each expense.attachments as attachment (attachment.id)}
-											<div class="attachment-chip-row">
-												<a
-													class="attachment-chip"
-													href={resolve(`/app/expenses/attachments/${attachment.id}`)}
-												>
-													<Paperclip size={15} />
-													<span>{attachment.originalName}</span>
-												</a>
-												<form
-													method="post"
-													action="?/deleteAttachment"
-													onsubmit={(e) => {
-														if (!window.confirm(t('Delete attachment?'))) e.preventDefault();
-													}}
-												>
-													<input type="hidden" name="id" value={attachment.id} />
-													<input type="hidden" name="returnTo" value={data.returnTo} />
-													<button
-														class="icon-button danger"
-														type="submit"
-														aria-label={`${t('Delete')} ${attachment.originalName}`}
-													>
-														<Trash2 size={14} />
-													</button>
-												</form>
-											</div>
-										{:else}
-											<span class="empty">{t('No attachments added.')}</span>
-										{/each}
-									</div>
+								<div class="expense-details-body">
+									{#if data.permissions.canReview || data.permissions.canReconcile}
+										{@render expenseWorkflowPanel(expense)}
+									{/if}
 									<form
 										method="post"
-										action="?/attach"
-										enctype="multipart/form-data"
-										class="attachment-form"
+										action="?/update"
+										class="expense-edit-form expense-edit-form-table"
 									>
 										<input type="hidden" name="id" value={expense.id} />
 										<input type="hidden" name="returnTo" value={data.returnTo} />
-										<input
-											name="attachment"
-											type="file"
-											accept="application/pdf,image/png,image/jpeg,image/webp,text/plain"
-											aria-label={t('Receipt')}
+										<label class="expense-edit-description">
+											<span>{t('Description')}</span>
+											<input name="description" value={expense.description} required />
+										</label>
+										<label class="expense-edit-amount">
+											<span>{t('Value')}</span>
+											<input name="amount" value={amountInputValue(expense.amountCents)} required />
+										</label>
+										<label class="expense-edit-date">
+											<span>{t('Date')}</span>
+											<input name="expenseDate" type="date" value={expense.expenseDate} required />
+										</label>
+										<label class="expense-edit-category">
+											<span>{t('Category')}</span>
+											<select name="categoryId" required>
+												{#each activeCategories as category (category.id)}
+													<option value={category.id} selected={category.id === expense.categoryId}
+														>{category.icon ?? '💼'} {category.name}</option
+													>
+												{/each}
+											</select>
+										</label>
+										<label class="expense-edit-payment">
+											<span>{t('Payment')}</span>
+											<select name="paymentMethodId">
+												<option value="">{t('Select')}</option>
+												{#if expense.paymentMethodId && !hasCatalogOption(data.catalogs.paymentMethods, expense.paymentMethodId)}
+													<option value={expense.paymentMethodId} selected
+														>{expense.paymentMethod ?? t('Archived payment method')} ({lower(
+															t('Archived')
+														)})</option
+													>
+												{/if}
+												{#each data.catalogs.paymentMethods as paymentMethod (paymentMethod.id)}
+													<option
+														value={paymentMethod.id}
+														selected={paymentMethod.id === expense.paymentMethodId}
+														>{paymentMethod.name}</option
+													>
+												{/each}
+											</select>
+										</label>
+										<SearchableSelect
+											id={`expense-edit-vendor-${expense.id}`}
+											name="vendorId"
+											label={t('Vendor')}
+											options={catalogOptionsWithCurrent(
+												data.catalogs.vendors,
+												expense.vendorId,
+												expense.vendor,
+												'Archived vendor'
+											)}
+											selectedId={expense.vendorId}
+											selectedLabel={expense.vendor}
+											placeholder={t('Select')}
+											empty={t('No vendor found.')}
+											wrapperClass="expense-edit-vendor"
+											locale={data.locale}
 										/>
-										<button class="button secondary" type="submit">
-											<Paperclip size={16} />
-											<span>{t('Attach')}</span>
+										<SearchableSelect
+											id={`expense-edit-cost-center-${expense.id}`}
+											name="costCenterId"
+											label={t('Cost center')}
+											options={catalogOptionsWithCurrent(
+												data.catalogs.costCenters,
+												expense.costCenterId,
+												expense.costCenter,
+												'Archived cost center'
+											)}
+											selectedId={expense.costCenterId}
+											selectedLabel={expense.costCenter}
+											placeholder={t('Select')}
+											empty={t('No cost center found.')}
+											wrapperClass="expense-edit-cost-center"
+											locale={data.locale}
+										/>
+										<label class="expense-edit-competency">
+											<span>{t('Competency')}</span>
+											<input
+												name="competencyMonth"
+												type="month"
+												value={expense.competencyMonth?.slice(0, 7) ?? ''}
+											/>
+										</label>
+										<label class="edit-notes">
+											<span>{t('Notes')}</span>
+											<input name="notes" value={expense.notes ?? ''} />
+										</label>
+										<button class="button primary" type="submit">
+											<Save size={17} />
+											<span>{t('Update')}</span>
 										</button>
 									</form>
+
+									<div class="attachment-panel">
+										<div class="attachment-list">
+											{#each expense.attachments as attachment (attachment.id)}
+												<div class="attachment-chip-row">
+													<a
+														class="attachment-chip"
+														href={resolve(`/app/expenses/attachments/${attachment.id}`)}
+													>
+														<Paperclip size={15} />
+														<span>{attachment.originalName}</span>
+													</a>
+													<form
+														method="post"
+														action="?/deleteAttachment"
+														onsubmit={(e) => {
+															if (!window.confirm(t('Delete attachment?'))) e.preventDefault();
+														}}
+													>
+														<input type="hidden" name="id" value={attachment.id} />
+														<input type="hidden" name="returnTo" value={data.returnTo} />
+														<button
+															class="icon-button danger"
+															type="submit"
+															aria-label={`${t('Delete')} ${attachment.originalName}`}
+														>
+															<Trash2 size={14} />
+														</button>
+													</form>
+												</div>
+											{:else}
+												<span class="empty">{t('No attachments added.')}</span>
+											{/each}
+										</div>
+										<form
+											method="post"
+											action="?/attach"
+											enctype="multipart/form-data"
+											class="attachment-form"
+										>
+											<input type="hidden" name="id" value={expense.id} />
+											<input type="hidden" name="returnTo" value={data.returnTo} />
+											<input
+												name="attachment"
+												type="file"
+												accept="application/pdf,image/png,image/jpeg,image/webp,text/plain"
+												aria-label={t('Receipt')}
+											/>
+											<button class="button secondary" type="submit">
+												<Paperclip size={16} />
+												<span>{t('Attach')}</span>
+											</button>
+										</form>
+									</div>
 								</div>
 							{/if}
 						</details>
@@ -1567,7 +1598,7 @@
 				{#each [...selectedIds] as id (id)}
 					<input type="hidden" name="id" value={id} />
 				{/each}
-				<button class="button secondary" type="submit">
+				<button class="button review-approve" type="submit">
 					<CheckCircle2 size={16} />
 					<span>{t('Approve')}</span>
 				</button>

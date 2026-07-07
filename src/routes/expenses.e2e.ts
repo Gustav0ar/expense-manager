@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page, test } from '@playwright/test';
+import { expect, type Browser, type Locator, type Page, test } from '@playwright/test';
 
 test.describe.configure({ mode: 'serial' });
 test.use({
@@ -24,6 +24,46 @@ async function registerAndCreateWorkspace(page: Page, workspaceName = 'Despesas 
 	await page.getByLabel('Nome').fill(workspaceName);
 	await page.getByRole('button', { name: 'Criar workspace' }).click();
 	await expect(page).toHaveURL(/\/app\/dashboard/);
+}
+
+async function registerAccount(page: Page, input: { email: string; name: string; next?: string }) {
+	const target = input.next ? `/register?next=${encodeURIComponent(input.next)}` : '/register';
+	await page.goto(target);
+	await page.getByLabel('Nome').fill(input.name);
+	await page.getByLabel('Email').fill(input.email);
+	await page.locator('input[name="password"]').fill(['test', 'password', '123'].join('-'));
+	await page
+		.locator('input[name="passwordConfirmation"]')
+		.fill(['test', 'password', '123'].join('-'));
+	await page.getByRole('button', { name: 'Criar conta' }).click();
+}
+
+async function inviteAndAcceptMember(browser: Browser, page: Page) {
+	await page.goto('/app/settings/users');
+	const email = uniqueEmail('expenses-member');
+	const inviteForm = page.locator('form[action="?/invite"]');
+	await inviteForm.getByLabel('Email').fill(email);
+	await inviteForm.getByLabel('Papel').selectOption('member');
+	await inviteForm.getByRole('button', { name: 'Convidar' }).click();
+	const inviteUrl = (await page.locator('.invite-url-row .invite-url-code').textContent())?.trim();
+	expect(inviteUrl).toBeTruthy();
+
+	const context = await browser.newContext({
+		locale: 'pt-BR',
+		extraHTTPHeaders: { 'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8' }
+	});
+	const memberPage = await context.newPage();
+	const invitePath = new URL(inviteUrl!, 'http://localhost:4173').pathname;
+	await registerAccount(memberPage, {
+		email,
+		name: 'Expense Member',
+		next: invitePath
+	});
+	await expect(memberPage).toHaveURL(/\/invite\//);
+	await memberPage.getByRole('button', { name: 'Aceitar convite' }).click();
+	await expect(memberPage).toHaveURL(/\/app\/dashboard/);
+
+	return { context, page: memberPage };
 }
 
 async function createCategory(
@@ -201,6 +241,17 @@ async function expectExpenseResults(page: Page, visible: string[], hidden: strin
 	}
 }
 
+async function visibleBox(locator: Locator, name: string) {
+	await expect(locator, `${name} should be visible`).toBeVisible();
+	const box = await locator.boundingBox();
+	expect(box, `${name} should have a rendered box`).not.toBeNull();
+	return box!;
+}
+
+function expectCloseTo(actual: number, expected: number, label: string, tolerance = 4) {
+	expect(Math.abs(actual - expected), label).toBeLessThanOrEqual(tolerance);
+}
+
 async function updateExpensePaymentStatus(
 	page: Page,
 	description: string,
@@ -226,6 +277,315 @@ async function rejectExpense(page: Page, description: string) {
 	row = expenseRow(page, description);
 	await expect(row).toContainText('Rejeitada');
 }
+
+test('keeps desktop expense table columns and delete action aligned', async ({ page }) => {
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await registerAndCreateWorkspace(page);
+	await createCategory(page, { name: 'Layout', emoji: '🧰', color: '#2563eb' });
+	await createCatalogByRequest(page, 'paymentMethod', 'Pix Layout');
+	await createCatalogByRequest(page, 'vendor', 'Fornecedor Layout');
+	await createCatalogByRequest(page, 'costCenter', 'Centro Layout');
+	await createExpenseFromForm(page, {
+		description: 'Alinhamento desktop',
+		amount: '123,45',
+		date: '2026-06-16',
+		category: '🧰 Layout',
+		payment: 'Pix Layout',
+		vendor: 'Fornecedor Layout',
+		costCenter: 'Centro Layout',
+		notes: 'Observação de layout'
+	});
+
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await page.goto(`/app/expenses?q=${encodeURIComponent('Alinhamento desktop')}`);
+
+	const table = page.locator('.expense-table');
+	await expect(table).toHaveClass(/with-select/);
+	const headerCells = table.locator('.expense-table-header > span');
+	await expect(headerCells).toHaveText([
+		'',
+		'Data',
+		'Descrição',
+		'Categoria',
+		'Pagamento',
+		'Detalhes',
+		'Valor',
+		'Ações'
+	]);
+
+	const row = expenseRow(page, 'Alinhamento desktop').first();
+	await expect(row).toBeVisible();
+	const rowSummary = row.locator('.expense-table-row');
+	const rowBox = await visibleBox(rowSummary, 'expense row');
+	const columns = [
+		{ header: 1, cell: row.locator('.expense-table-date'), label: 'date column left edge' },
+		{
+			header: 2,
+			cell: row.locator('.expense-table-description'),
+			label: 'description column left edge'
+		},
+		{ header: 3, cell: row.locator('.expense-table-category'), label: 'category column left edge' },
+		{ header: 4, cell: row.locator('.expense-table-payment'), label: 'payment column left edge' },
+		{ header: 5, cell: row.locator('.expense-table-note'), label: 'details column left edge' },
+		{ header: 7, cell: row.locator('.expense-table-action'), label: 'actions column left edge' }
+	];
+
+	for (const column of columns) {
+		const headerBox = await visibleBox(headerCells.nth(column.header), `${column.label} header`);
+		const cellBox = await visibleBox(column.cell, `${column.label} cell`);
+		expectCloseTo(cellBox.x, headerBox.x, column.label);
+	}
+
+	const valueHeaderBox = await visibleBox(headerCells.nth(6), 'value column header');
+	const amountBox = await visibleBox(row.locator('.expense-table-amount'), 'amount column cell');
+	expectCloseTo(
+		amountBox.x + amountBox.width,
+		valueHeaderBox.x + valueHeaderBox.width,
+		'value column right edge'
+	);
+
+	const actionBox = await visibleBox(row.locator('.expense-table-action'), 'actions column cell');
+	const deleteBox = await visibleBox(
+		row.getByRole('button', { name: 'Excluir Alinhamento desktop' }),
+		'delete action'
+	);
+	const rowCenter = rowBox.y + rowBox.height / 2;
+	const actionCenter = actionBox.y + actionBox.height / 2;
+	const deleteCenter = deleteBox.y + deleteBox.height / 2;
+	expectCloseTo(deleteCenter, rowCenter, 'delete action row vertical center');
+	expectCloseTo(deleteCenter, actionCenter, 'delete action field vertical center');
+
+	await row.locator('summary').click();
+	const editForm = row.locator('.expense-edit-form-table');
+	const workflowPanel = row.locator('.expense-workflow-panel');
+	await expect(editForm).toBeVisible();
+	await expect(workflowPanel).toBeVisible();
+	const editFormBox = await visibleBox(editForm, 'desktop edit form');
+	const workflowPanelBox = await visibleBox(workflowPanel, 'desktop workflow panel');
+	expectCloseTo(editFormBox.y, workflowPanelBox.y, 'expanded desktop panels top edge', 8);
+	expect(
+		editFormBox.x + editFormBox.width,
+		'edit form should sit before workflow rail'
+	).toBeLessThanOrEqual(workflowPanelBox.x + 1);
+	expect(
+		workflowPanelBox.width,
+		'workflow rail should be compact instead of spanning the full row'
+	).toBeLessThan(rowBox.width * 0.35);
+});
+
+test('keeps tablet expense actions compact above the edit form', async ({ page }) => {
+	await page.setViewportSize({ width: 820, height: 1180 });
+	await registerAndCreateWorkspace(page);
+	await createCategory(page, { name: 'Tablet', emoji: '🧰', color: '#2563eb' });
+	const tabletCategoryId = await categoryIdByLabel(page, 'Tablet');
+	await createExpenseByRequest(page, {
+		categoryId: tabletCategoryId,
+		description: 'Alinhamento tablet',
+		amount: '554,69',
+		expenseDate: '2026-07-07'
+	});
+
+	await page.setViewportSize({ width: 820, height: 1180 });
+	await page.goto(`/app/expenses?q=${encodeURIComponent('Alinhamento tablet')}`);
+	const row = expenseRow(page, 'Alinhamento tablet').first();
+	await expect(row).toBeVisible();
+	await row.locator('summary').click();
+
+	const rowBox = await visibleBox(row, 'tablet expense row');
+	const workflowPanel = row.locator('.expense-workflow-panel');
+	const editForm = row.locator('.expense-edit-form-table');
+	const workflowBox = await visibleBox(workflowPanel, 'tablet workflow panel');
+	const editFormBox = await visibleBox(editForm, 'tablet edit form');
+	const summaryBox = await visibleBox(
+		workflowPanel.locator('.workflow-summary'),
+		'tablet workflow summary'
+	);
+	const approveBox = await visibleBox(
+		workflowPanel.locator('.workflow-approve-form'),
+		'tablet approve form'
+	);
+	const rejectBox = await visibleBox(workflowPanel.locator('.reject-form'), 'tablet reject form');
+	const paymentBox = await visibleBox(
+		workflowPanel.locator("form[action='?/payment']"),
+		'tablet payment form'
+	);
+
+	expect(workflowBox.width, 'tablet workflow panel should use the row width').toBeGreaterThan(
+		rowBox.width * 0.9
+	);
+	expect(editFormBox.width, 'tablet edit form should align to the workflow width').toBeGreaterThan(
+		rowBox.width * 0.9
+	);
+	expect(summaryBox.y, 'status summary should be the first workflow row').toBeLessThan(
+		approveBox.y
+	);
+	expectCloseTo(approveBox.y, rejectBox.y, 'tablet approve and reject row alignment', 8);
+	expect(paymentBox.y, 'payment controls should sit below review controls').toBeGreaterThan(
+		approveBox.y
+	);
+	expect(
+		paymentBox.width,
+		'payment controls should span the tablet workflow panel'
+	).toBeGreaterThan(workflowBox.width * 0.9);
+	expect(
+		editFormBox.y,
+		'edit form should start below tablet workflow panel'
+	).toBeGreaterThanOrEqual(workflowBox.y + workflowBox.height - 8);
+	expect(
+		workflowBox.height,
+		'tablet workflow panel should stay compact instead of creating a large empty band'
+	).toBeLessThan(230);
+});
+
+test('keeps mobile expense cards and review actions aligned above navigation', async ({
+	browser,
+	page
+}) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await registerAndCreateWorkspace(page);
+	await createCategory(page, { name: 'Mobile', emoji: '🧰', color: '#2563eb' });
+	await createCatalogByRequest(page, 'paymentMethod', 'Pix Mobile');
+	await createCatalogByRequest(page, 'vendor', 'Fornecedor Mobile');
+	await createCatalogByRequest(page, 'costCenter', 'Centro Mobile');
+	const mobileCategoryId = await categoryIdByLabel(page, 'Mobile');
+	const memberSession = await inviteAndAcceptMember(browser, page);
+	try {
+		await createExpenseByRequest(memberSession.page, {
+			categoryId: mobileCategoryId,
+			description: 'Mobile revisão',
+			amount: '554,69',
+			expenseDate: '2026-07-07'
+		});
+		await createExpenseByRequest(memberSession.page, {
+			categoryId: mobileCategoryId,
+			description: 'Mobile revisão meio',
+			amount: '13,86',
+			expenseDate: '2026-07-05'
+		});
+		await createExpenseByRequest(memberSession.page, {
+			categoryId: mobileCategoryId,
+			description: 'Mobile revisão baixa',
+			amount: '16,46',
+			expenseDate: '2026-07-03'
+		});
+	} finally {
+		await memberSession.context.close();
+	}
+
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto('/app/expenses');
+	await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+	const row = expenseRow(page, 'Mobile revisão baixa').first();
+	await expect(row).toBeVisible();
+
+	const dateBox = await visibleBox(row.locator('.expense-table-date'), 'mobile date');
+	const amountBox = await visibleBox(row.locator('.expense-table-amount'), 'mobile amount');
+	const deleteBox = await visibleBox(
+		row.getByRole('button', { name: 'Excluir Mobile revisão baixa' }),
+		'mobile delete action'
+	);
+	expectCloseTo(
+		dateBox.y + dateBox.height / 2,
+		amountBox.y + amountBox.height / 2,
+		'mobile date and amount vertical center',
+		8
+	);
+	expectCloseTo(
+		deleteBox.y + deleteBox.height / 2,
+		amountBox.y + amountBox.height / 2,
+		'mobile delete and amount vertical center',
+		14
+	);
+
+	const categoryBox = await visibleBox(row.locator('.expense-table-category'), 'mobile category');
+	const editBox = await visibleBox(row.locator('.expense-table-action'), 'mobile edit action');
+	await expect(row.locator('.expense-table-action')).toContainText('Ações');
+	expectCloseTo(
+		categoryBox.y + categoryBox.height / 2,
+		editBox.y + editBox.height / 2,
+		'mobile category and edit vertical center',
+		10
+	);
+
+	const selectLabel = row.locator('.expense-select-label');
+	const unselectedStyle = await selectLabel.evaluate((element) => {
+		const style = getComputedStyle(element);
+		return {
+			backgroundColor: style.backgroundColor,
+			borderColor: style.borderColor,
+			boxShadow: style.boxShadow
+		};
+	});
+	const primaryColor = await page.evaluate(() => {
+		const probe = document.createElement('span');
+		probe.style.color = getComputedStyle(document.documentElement)
+			.getPropertyValue('--color-primary')
+			.trim();
+		document.body.append(probe);
+		const color = getComputedStyle(probe).color;
+		probe.remove();
+		return color;
+	});
+	const selectCheckbox = row.locator('.expense-select-checkbox');
+	await selectCheckbox.check();
+	await expect(selectCheckbox).toBeChecked();
+	await expect(selectLabel).toHaveClass(/selected/);
+	await expect
+		.poll(async () => {
+			const selectedStyle = await selectLabel.evaluate((element) => {
+				const style = getComputedStyle(element);
+				return {
+					backgroundColor: style.backgroundColor,
+					borderColor: style.borderColor,
+					boxShadow: style.boxShadow
+				};
+			});
+			const checkboxStyle = await selectCheckbox.evaluate((element) => {
+				const style = getComputedStyle(element);
+				return {
+					backgroundColor: style.backgroundColor,
+					borderColor: style.borderColor
+				};
+			});
+			return (
+				selectedStyle.backgroundColor === primaryColor &&
+				checkboxStyle.backgroundColor === 'rgba(0, 0, 0, 0)' &&
+				selectedStyle.borderColor !== unselectedStyle.borderColor &&
+				selectedStyle.boxShadow !== unselectedStyle.boxShadow
+			);
+		}, 'selected checkbox control should fill with the primary color')
+		.toBe(true);
+	const bulkActionBar = page.locator('.bulk-action-bar');
+	await expect(bulkActionBar).toBeVisible();
+	await expect
+		.poll(async () => {
+			const bulkBox = await bulkActionBar.boundingBox();
+			const bottomNavBox = await page.locator('.sidebar').boundingBox();
+			if (!bulkBox || !bottomNavBox) return false;
+			return bulkBox.y + bulkBox.height <= bottomNavBox.y - 10;
+		}, 'bulk review actions should stay above mobile nav after selecting a pending expense')
+		.toBe(true);
+	await expect(bulkActionBar.getByRole('button', { name: 'Aprovar' })).toHaveClass(
+		/review-approve/
+	);
+	await bulkActionBar.getByRole('button', { name: 'Limpar' }).click();
+	await expect(bulkActionBar).toBeHidden();
+
+	await row.locator('summary').click();
+	const workflowPanel = row.locator('.expense-workflow-panel');
+	await expect(workflowPanel).toBeVisible();
+	const approveButton = row.getByRole('button', { name: 'Aprovar' });
+	await expect(approveButton).toBeVisible();
+	await expect
+		.poll(async () => {
+			const workflowBox = await workflowPanel.boundingBox();
+			const bottomNavBox = await page.locator('.sidebar').boundingBox();
+			if (!workflowBox || !bottomNavBox) return false;
+			return workflowBox.y + workflowBox.height <= bottomNavBox.y - 4;
+		}, 'expanded workflow actions should move above mobile nav after opening')
+		.toBe(true);
+	await expect(approveButton).toHaveClass(/review-approve/);
+});
 
 test('manages support catalogs from expenses', async ({ page }) => {
 	await registerAndCreateWorkspace(page);
