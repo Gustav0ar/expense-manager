@@ -1704,6 +1704,10 @@ describe('server service integration', () => {
 		}
 	});
 
+	it('limits expense attachments to 2 MiB', () => {
+		expect(maxAttachmentBytes).toBe(2 * 1024 * 1024);
+	});
+
 	it('deletes attachments from DB and disk when expense is deleted', async () => {
 		const fixture = await createWorkspaceFixture();
 		const previousUploadDir = process.env.UPLOAD_DIR;

@@ -55,6 +55,7 @@ export const ptBrMessages = {
 	'Confirm password': 'Confirmar senha',
 	Contains: 'Contém',
 	contains: 'contém',
+	'Compressing image...': 'Comprimindo imagem...',
 	Competency: 'Competência',
 	Control: 'Controle',
 	'Cost center': 'Centro de custo',
@@ -241,6 +242,7 @@ export const ptBrMessages = {
 	Transfer: 'Trocar',
 	Update: 'Atualizar',
 	Upload: 'Upload',
+	'Uploading attachment...': 'Enviando anexo...',
 	User: 'Usuário',
 	Users: 'Usuários',
 	Value: 'Valor',
@@ -375,6 +377,9 @@ export const ptBrMessages = {
 		'Conta criada. Confira seu email para verificar sua conta antes de entrar.',
 	'If the account exists and needs verification, we sent a new verification link.':
 		'Se a conta existir e precisar de verificação, enviamos um novo link de verificação.',
+	'Image compressed from {from} to {to}.': 'Imagem comprimida de {from} para {to}.',
+	'Image is still larger than 2 MB after compression.':
+		'A imagem ainda está acima de 2 MB após a compressão.',
 	'Attachment not found.': 'Anexo não encontrado.',
 	'Attachment type is not allowed.': 'Tipo de anexo não permitido.',
 	'Budget not found.': 'Orçamento não encontrado.',
@@ -428,6 +433,8 @@ export const ptBrMessages = {
 	'Provide the MFA code.': 'Informe o código MFA.',
 	'Rule not found.': 'Regra não encontrada.',
 	'Could not create the account.': 'Não foi possível criar a conta.',
+	'Could not compress image. Try a smaller file.':
+		'Não foi possível comprimir a imagem. Tente um arquivo menor.',
 	'Could not save the catalog.': 'Não foi possível salvar o cadastro.',
 	'Could not save the category.': 'Não foi possível salvar a categoria.',
 	'Delete category': 'Excluir categoria',
@@ -456,7 +463,7 @@ export const ptBrMessages = {
 	'File is required.': 'Arquivo obrigatório.',
 	'File is larger than 1 MB.': 'Arquivo acima de 1 MB.',
 	'Import at most {count} rows at a time.': 'Importe no máximo {count} linhas por vez.',
-	'Attachment is larger than 5 MB.': 'Anexo acima de 5 MB.',
+	'Attachment is larger than 2 MB.': 'Anexo acima de 2 MB.',
 	'Attachment is empty.': 'Anexo vazio.',
 	'Attachment file not found.': 'Arquivo do anexo não encontrado.',
 	'Attachment file already exists.': 'Arquivo de anexo já existe.',

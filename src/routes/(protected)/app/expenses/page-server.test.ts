@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
 	createExpenseCatalogItem: vi.fn(),
 	removeCategory: vi.fn(),
 	requireWorkspaceContext: vi.fn(),
+	saveExpenseAttachment: vi.fn(),
 	unarchiveCategory: vi.fn(),
 	updateCategory: vi.fn(),
 	context: {
@@ -45,7 +46,7 @@ vi.mock('$lib/server/services/expenses', () => ({
 
 vi.mock('$lib/server/services/attachments', () => ({
 	deleteExpenseAttachment: vi.fn(),
-	saveExpenseAttachment: vi.fn()
+	saveExpenseAttachment: mocks.saveExpenseAttachment
 }));
 
 vi.mock('$lib/server/services/workspaces', () => ({
@@ -110,6 +111,25 @@ async function unarchiveCategory(
 	const action = actions.unarchiveCategory;
 	if (!action) throw new Error('unarchiveCategory action is not registered');
 	return action(createEvent(fields, locale, enhanced, 'unarchiveCategory'));
+}
+
+async function attachExpense(file: File, fields: Record<string, string> = {}, locale = 'pt-BR') {
+	const action = actions.attach;
+	if (!action) throw new Error('attach action is not registered');
+
+	const formData = new FormData();
+	formData.set('id', fields.id ?? '123');
+	formData.set('returnTo', fields.returnTo ?? '/app/expenses');
+	formData.set('attachment', file);
+
+	return action({
+		request: new Request('http://localhost/app/expenses?/attach', {
+			method: 'POST',
+			body: formData,
+			headers: new Headers({ 'x-sveltekit-action': 'true' })
+		}),
+		locals: { locale }
+	} as Parameters<NonNullable<typeof actions.attach>>[0]);
 }
 
 describe('expenses page createCatalog action', () => {
@@ -370,6 +390,31 @@ describe('expenses page category management actions', () => {
 			status: 400,
 			data: {
 				message: 'Categoria já existe.'
+			}
+		});
+	});
+});
+
+describe('expenses page attachment actions', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mocks.requireWorkspaceContext.mockResolvedValue(mocks.context);
+	});
+
+	it('maps oversized attachment service errors to form failures', async () => {
+		mocks.saveExpenseAttachment.mockRejectedValue(createHttpError(400, 'Anexo acima de 2 MB.'));
+
+		const result = await attachExpense(
+			new File(['receipt'], 'recibo.txt', {
+				type: 'text/plain'
+			})
+		);
+
+		expect(mocks.saveExpenseAttachment).toHaveBeenCalledWith(mocks.context, 123, expect.any(File));
+		expect(result).toMatchObject({
+			status: 400,
+			data: {
+				message: 'Anexo acima de 2 MB.'
 			}
 		});
 	});

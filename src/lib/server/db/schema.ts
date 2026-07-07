@@ -522,7 +522,7 @@ export const expenseAttachment = pgTable(
 		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 	},
 	(table) => [
-		check('expense_attachment_size_bytes_check', sql`${table.sizeBytes} between 1 and 5242880`),
+		check('expense_attachment_size_bytes_check', sql`${table.sizeBytes} between 1 and 2097152`),
 		index('expense_attachment_workspace_expense_idx').on(table.workspaceId, table.expenseId),
 		index('expense_attachment_expense_idx').on(table.expenseId),
 		index('expense_attachment_uploaded_by_idx').on(table.uploadedByUserId)

@@ -352,8 +352,8 @@ export const actions: Actions = {
 		try {
 			await saveExpenseAttachment(context, id.data, file);
 		} catch (err) {
-			if (isHttpError(err) && err.status === 409) {
-				return fail(409, { message: err.body.message });
+			if (isHttpError(err) && err.status !== 403 && err.status < 500) {
+				return fail(err.status, { message: err.body.message });
 			}
 			throw err;
 		}

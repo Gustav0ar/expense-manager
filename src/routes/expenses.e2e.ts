@@ -174,6 +174,40 @@ async function createExpenseFromForm(
 	await expect(expenseRow(page, input.description).first()).toBeVisible();
 }
 
+async function createLargePngAttachment(page: Page) {
+	const bytes = await page.evaluate(async () => {
+		const width = 1400;
+		const height = 1400;
+		const canvas = document.createElement('canvas');
+		canvas.width = width;
+		canvas.height = height;
+		const context = canvas.getContext('2d');
+		if (!context) throw new Error('Canvas is unavailable');
+		const imageData = context.createImageData(width, height);
+		let seed = 7;
+
+		for (let index = 0; index < imageData.data.length; index += 4) {
+			seed = (seed * 1664525 + 1013904223) >>> 0;
+			imageData.data[index] = seed & 255;
+			imageData.data[index + 1] = (seed >>> 8) & 255;
+			imageData.data[index + 2] = (seed >>> 16) & 255;
+			imageData.data[index + 3] = 255;
+		}
+
+		context.putImageData(imageData, 0, 0);
+		const blob = await new Promise<Blob>((resolve, reject) => {
+			canvas.toBlob((value) => {
+				if (value) resolve(value);
+				else reject(new Error('Could not create PNG attachment'));
+			}, 'image/png');
+		});
+		return Array.from(new Uint8Array(await blob.arrayBuffer()));
+	});
+
+	expect(bytes.length).toBeGreaterThan(2 * 1024 * 1024);
+	return Buffer.from(bytes);
+}
+
 async function openCatalogDialog(page: Page, kind: 'paymentMethod' | 'vendor' | 'costCenter') {
 	const dialog = await openSupportCatalogDialog(page);
 	await dialog.getByRole('tab', { name: new RegExp(tabLabel(kind)) }).click();
@@ -1113,6 +1147,43 @@ test('edits, reviews, pays, attaches and deletes an expense', async ({ page }) =
 	await page.getByRole('button', { name: 'Excluir', exact: true }).click();
 	await expect(expenseRow(page, 'Fluxo atualizado')).toBeHidden();
 	await expect(page.getByText('Nenhuma despesa encontrada.')).toBeVisible();
+});
+
+test('compresses image attachments in the browser before upload', async ({ page }) => {
+	await registerAndCreateWorkspace(page);
+	await createCategory(page);
+	await createExpenseFromForm(page, {
+		description: 'Despesa com imagem',
+		amount: '90,00',
+		date: '2026-06-23',
+		category: '🧰 Operacional'
+	});
+
+	const originalImage = await createLargePngAttachment(page);
+	let row = expenseRow(page, 'Despesa com imagem');
+	await row.locator('summary').click();
+	await row.locator('input[type="file"]').setInputFiles({
+		name: 'recibo-grande.png',
+		mimeType: 'image/png',
+		buffer: originalImage
+	});
+	await row.getByRole('button', { name: 'Anexar' }).click();
+
+	row = expenseRow(page, 'Despesa com imagem');
+	await expect(row.locator('.expense-attachment-count')).toContainText('1');
+	if ((await row.locator('details').getAttribute('open')) === null) {
+		await row.locator('summary').click();
+	}
+	const attachment = row.locator('.attachment-chip').filter({ hasText: 'recibo-grande.jpg' });
+	await expect(attachment).toBeVisible();
+	const attachmentHref = await attachment.first().getAttribute('href');
+	expect(attachmentHref).toBeTruthy();
+	const attachmentResponse = await page.request.get(attachmentHref!);
+	await expect(attachmentResponse).toBeOK();
+	expect(attachmentResponse.headers()['content-type']).toContain('image/jpeg');
+	const compressedImage = await attachmentResponse.body();
+	expect(compressedImage.length).toBeLessThan(originalImage.length);
+	expect(compressedImage.length).toBeLessThan(2 * 1024 * 1024);
 });
 
 test('keeps the page stable on update and attachment errors', async ({ page }) => {

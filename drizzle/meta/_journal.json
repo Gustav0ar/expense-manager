@@ -71,6 +71,13 @@
       "when": 1751500000000,
       "tag": "0009_totp_replay_prevention",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783464062738,
+      "tag": "0010_attachment_size_2mb",
+      "breakpoints": true
     }
   ]
 }

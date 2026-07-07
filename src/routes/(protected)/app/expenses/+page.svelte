@@ -7,6 +7,7 @@
 	import { translate } from '$lib/i18n';
 	import { formatCents } from '$lib/utils/format';
 	import { reviewLabel, reviewClass, paymentLabel, paymentClass } from '$lib/utils/status';
+	import { maxAttachmentBytes } from '$lib/attachment-limits';
 	import {
 		Archive,
 		ArchiveRestore,
@@ -15,6 +16,7 @@
 		ChevronLeft,
 		ChevronRight,
 		CreditCard,
+		LoaderCircle,
 		Paperclip,
 		Plus,
 		RotateCcw,
@@ -44,6 +46,12 @@
 		message?: string;
 		categoryAction?: 'createCategory';
 		categoryMessage?: string;
+	};
+	type ActionMessageData = { message?: string };
+	type AttachmentUploadState = {
+		tone: 'info' | 'danger';
+		stage: 'compressing' | 'uploading' | 'error';
+		message: string;
 	};
 
 	let { data, form } = $props<{ data: PageData; form: ActionData }>();
@@ -110,6 +118,7 @@
 	let categoryView = $state<'active' | 'archived'>('active');
 	let categoryNotice = $state<SupportCatalogNotice | null>(null);
 	let categoryCreating = $state(false);
+	let attachmentUploadState = $state<Record<number, AttachmentUploadState>>({});
 	let selectedIds = new SvelteSet<number>();
 
 	function toggleSelect(id: number) {
@@ -436,6 +445,121 @@
 		if (typeof value !== 'object' || value == null) return null;
 		const data = value as CategoryActionData;
 		return data.categoryAction === 'createCategory' ? data : null;
+	}
+
+	function actionMessageData(value: unknown): ActionMessageData | null {
+		if (typeof value !== 'object' || value == null) return null;
+		const data = value as ActionMessageData;
+		return typeof data.message === 'string' ? data : null;
+	}
+
+	function setAttachmentUploadState(expenseId: number, state: AttachmentUploadState) {
+		attachmentUploadState[expenseId] = state;
+	}
+
+	function clearAttachmentUploadState(expenseId: number) {
+		delete attachmentUploadState[expenseId];
+	}
+
+	function enhanceAttachmentUpload(expenseId: number): SubmitFunction {
+		return async ({ formData, controller, cancel }) => {
+			const file = formData.get('attachment');
+			if (!(file instanceof File) || file.size === 0) return;
+
+			setAttachmentUploadState(expenseId, {
+				tone: 'info',
+				stage: 'uploading',
+				message: t('Uploading attachment...')
+			});
+
+			if (file.type.toLowerCase().startsWith('image/')) {
+				setAttachmentUploadState(expenseId, {
+					tone: 'info',
+					stage: 'compressing',
+					message: t('Compressing image...')
+				});
+
+				try {
+					const {
+						compressImageAttachment,
+						formatFileSize,
+						isCompressibleImage,
+						maxImageAttachmentBytes
+					} = await import('$lib/client/image-compression');
+
+					if (isCompressibleImage(file)) {
+						const compressed = await compressImageAttachment(file, { signal: controller.signal });
+						if (controller.signal.aborted) return;
+
+						if (compressed.file.size > maxImageAttachmentBytes) {
+							cancel();
+							setAttachmentUploadState(expenseId, {
+								tone: 'danger',
+								stage: 'error',
+								message: t('Image is still larger than 2 MB after compression.')
+							});
+							return;
+						}
+
+						if (compressed.compressed) {
+							formData.set('attachment', compressed.file, compressed.file.name);
+							setAttachmentUploadState(expenseId, {
+								tone: 'info',
+								stage: 'uploading',
+								message: t('Image compressed from {from} to {to}.', {
+									from: formatFileSize(compressed.originalSize),
+									to: formatFileSize(compressed.compressedSize)
+								})
+							});
+						}
+					}
+				} catch {
+					if (controller.signal.aborted) return;
+					if (file.size > maxAttachmentBytes) {
+						cancel();
+						setAttachmentUploadState(expenseId, {
+							tone: 'danger',
+							stage: 'error',
+							message: t('Could not compress image. Try a smaller file.')
+						});
+						return;
+					}
+				}
+			}
+
+			if (attachmentUploadState[expenseId]?.stage !== 'uploading') {
+				setAttachmentUploadState(expenseId, {
+					tone: 'info',
+					stage: 'uploading',
+					message: t('Uploading attachment...')
+				});
+			}
+
+			return async ({ result, update }) => {
+				if (result.type === 'failure') {
+					const actionData = actionMessageData(result.data);
+					setAttachmentUploadState(expenseId, {
+						tone: 'danger',
+						stage: 'error',
+						message: actionData?.message ?? t('Invalid attachment.')
+					});
+					await update({ reset: false, invalidateAll: false });
+					return;
+				}
+
+				if (result.type === 'error') {
+					setAttachmentUploadState(expenseId, {
+						tone: 'danger',
+						stage: 'error',
+						message: t('Something went wrong.')
+					});
+					return;
+				}
+
+				clearAttachmentUploadState(expenseId);
+				await update({ reset: true, invalidateAll: true });
+			};
+		};
 	}
 
 	const enhanceSupportCatalogCreate: SubmitFunction = () => {
@@ -1551,6 +1675,7 @@
 											action="?/attach"
 											enctype="multipart/form-data"
 											class="attachment-form"
+											use:enhance={enhanceAttachmentUpload(expense.id)}
 										>
 											<input type="hidden" name="id" value={expense.id} />
 											<input type="hidden" name="returnTo" value={data.returnTo} />
@@ -1559,11 +1684,41 @@
 												type="file"
 												accept="application/pdf,image/png,image/jpeg,image/webp,text/plain"
 												aria-label={t('Receipt')}
+												disabled={attachmentUploadState[expense.id]?.stage === 'compressing' ||
+													attachmentUploadState[expense.id]?.stage === 'uploading'}
+												onchange={() => clearAttachmentUploadState(expense.id)}
 											/>
-											<button class="button secondary" type="submit">
-												<Paperclip size={16} />
-												<span>{t('Attach')}</span>
+											<button
+												class="button secondary"
+												type="submit"
+												disabled={attachmentUploadState[expense.id]?.stage === 'compressing' ||
+													attachmentUploadState[expense.id]?.stage === 'uploading'}
+											>
+												{#if attachmentUploadState[expense.id]?.stage === 'compressing' || attachmentUploadState[expense.id]?.stage === 'uploading'}
+													<LoaderCircle class="attachment-progress-spinner" size={16} />
+												{:else}
+													<Paperclip size={16} />
+												{/if}
+												<span>
+													{attachmentUploadState[expense.id]?.stage === 'compressing'
+														? t('Compressing image...')
+														: t('Attach')}
+												</span>
 											</button>
+											{#if attachmentUploadState[expense.id]}
+												<p
+													class={['attachment-status', attachmentUploadState[expense.id]?.tone]}
+													role={attachmentUploadState[expense.id]?.tone === 'danger'
+														? 'alert'
+														: 'status'}
+													aria-live="polite"
+												>
+													{#if attachmentUploadState[expense.id]?.stage === 'compressing' || attachmentUploadState[expense.id]?.stage === 'uploading'}
+														<LoaderCircle class="attachment-progress-spinner" size={15} />
+													{/if}
+													<span>{attachmentUploadState[expense.id]?.message}</span>
+												</p>
+											{/if}
 										</form>
 									</div>
 								</div>
