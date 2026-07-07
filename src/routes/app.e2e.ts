@@ -734,11 +734,6 @@ test('nav has exactly 5 items, Settings tab is active for all settings sub-route
 	const expensesItem = page.locator('.nav-item[href="/app/expenses"]');
 	await expect(expensesItem).toHaveClass(/active/);
 
-	// Back-link on Categories goes to /expenses
-	await expect(
-		page.locator('#main-content').getByRole('link', { name: /Despesas/i })
-	).toHaveAttribute('href', '/app/expenses');
-
 	// Users page has back link to settings
 	await page.goto('/app/settings/users');
 	await expect(
@@ -757,7 +752,12 @@ test('nav has exactly 5 items, Settings tab is active for all settings sub-route
 	await page.getByRole('button', { name: 'Cadastros' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Cadastros de apoio' });
 	await expect(dialog).toBeVisible();
-	await expect(dialog.getByRole('tab', { name: /Categorias/ })).toBeVisible();
+	const categoriesTab = dialog.getByRole('tab', { name: /Categorias/ });
+	await expect(categoriesTab).toBeVisible();
+	await expect(categoriesTab).toHaveAttribute('type', 'button');
+	await expect(categoriesTab).toHaveAttribute('aria-controls', 'support-catalog-panel-category');
+	await categoriesTab.click();
+	await expect(categoriesTab).toHaveAttribute('aria-selected', 'true');
 });
 
 test('keeps core app screens responsive without horizontal overflow', async ({ page }) => {

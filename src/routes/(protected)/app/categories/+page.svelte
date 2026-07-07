@@ -1,8 +1,6 @@
 <script lang="ts">
-	import { resolve } from '$app/paths';
 	import { categoryEmojiLabels, categoryEmojiValues } from '$lib/category-emojis';
 	import { translate } from '$lib/i18n';
-	import { ArrowLeft } from '@lucide/svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form } = $props<{ data: PageData; form: ActionData }>();
@@ -34,10 +32,6 @@
 <section class="page-section">
 	<div class="section-heading">
 		<div>
-			<a class="breadcrumb" href={resolve('/app/expenses')}>
-				<ArrowLeft size={13} />
-				{t('Expenses')}
-			</a>
 			<span class="eyebrow">{t('Organization')}</span>
 			<h2>{t('Categories')}</h2>
 		</div>

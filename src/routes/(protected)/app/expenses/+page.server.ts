@@ -1,6 +1,11 @@
 import { error, fail, isHttpError, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { listCategories } from '$lib/server/services/categories';
+import {
+	archiveCategory as archiveCategoryService,
+	createCategory as createCategoryService,
+	listCategories,
+	updateCategory as updateCategoryService
+} from '$lib/server/services/categories';
 import {
 	createExpenseCatalogItem,
 	listExpenseCatalogs,
@@ -21,6 +26,7 @@ import { saveExpenseAttachment, deleteExpenseAttachment } from '$lib/server/serv
 import { requireWorkspaceContext } from '$lib/server/services/workspaces';
 import {
 	expenseFilterSchema,
+	categorySchema,
 	expenseCatalogArchiveSchema,
 	expenseCatalogSchema,
 	expenseCatalogUpdateSchema,
@@ -136,6 +142,79 @@ export const actions: Actions = {
 			}
 			throw catalogError;
 		}
+	},
+	createCategory: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const formData = await event.request.formData();
+		const parsed = parseForm(formData, categorySchema);
+		if (!parsed.success) {
+			const message = translate(event.locals.locale, 'Check category data.');
+			return fail(400, {
+				message,
+				categoryAction: 'createCategory',
+				categoryMessage: message
+			});
+		}
+
+		try {
+			await createCategoryService(context, parsed.data);
+			if (!isEnhancedAction(event)) {
+				throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
+			}
+
+			return {
+				categoryAction: 'createCategory',
+				categoryMessage: translate(event.locals.locale, 'Category created successfully.')
+			};
+		} catch (categoryError) {
+			if (
+				isHttpError(categoryError) &&
+				categoryError.status < 500 &&
+				categoryError.status !== 403
+			) {
+				return fail(categoryError.status, {
+					message: categoryError.body.message,
+					categoryAction: 'createCategory',
+					categoryMessage: categoryError.body.message
+				});
+			}
+			throw categoryError;
+		}
+	},
+	updateCategory: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const formData = await event.request.formData();
+		const id = idSchema.safeParse(formData.get('id'));
+		const parsed = parseForm(formData, categorySchema);
+		if (!id.success || !parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Check category data.') });
+
+		try {
+			await updateCategoryService(context, id.data, parsed.data);
+		} catch (categoryError) {
+			if (isHttpError(categoryError) && categoryError.status < 500) {
+				return fail(categoryError.status, { message: categoryError.body.message });
+			}
+			throw categoryError;
+		}
+		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
+	},
+	archiveCategory: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const formData = await event.request.formData();
+		const id = idSchema.safeParse(formData.get('id'));
+		if (!id.success)
+			return fail(400, { message: translate(event.locals.locale, 'Invalid category.') });
+
+		try {
+			await archiveCategoryService(context, id.data);
+		} catch (categoryError) {
+			if (isHttpError(categoryError) && categoryError.status < 500) {
+				return fail(categoryError.status, { message: categoryError.body.message });
+			}
+			throw categoryError;
+		}
+		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
 	updateCatalog: async (event) => {
 		const context = await requireWorkspaceContext(event);

@@ -1161,6 +1161,10 @@ th {
 	grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.support-catalog-category-form {
+	grid-template-columns: 3.5rem minmax(0, 1fr) minmax(7rem, 1fr) auto;
+}
+
 .support-catalog-form .button {
 	min-height: 2.75rem;
 }
@@ -1262,6 +1266,10 @@ th {
 	grid-template-columns: minmax(0, 1fr) auto;
 	align-items: end;
 	gap: 0.5rem;
+}
+
+.support-catalog-category-edit {
+	grid-template-columns: 3.5rem minmax(0, 1fr) minmax(7rem, 1fr) auto;
 }
 
 .support-catalog-edit-form label span {
@@ -2824,10 +2832,12 @@ th {
 	.support-catalog-tabs,
 	.support-catalog-toolbar,
 	.support-catalog-create-form,
+	.support-catalog-category-form,
 	.support-catalog-form,
 	.support-catalog-form.compact-support,
 	.support-catalog-row,
 	.support-catalog-edit-form,
+	.support-catalog-category-edit,
 	.compact-edit,
 	.theme-options,
 	.recurring-item,
