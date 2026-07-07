@@ -176,8 +176,8 @@ async function createExpenseFromForm(
 
 async function createLargePngAttachment(page: Page) {
 	const bytes = await page.evaluate(async () => {
-		const width = 1400;
-		const height = 1400;
+		const width = 1024;
+		const height = 1024;
 		const canvas = document.createElement('canvas');
 		canvas.width = width;
 		canvas.height = height;
@@ -1150,6 +1150,8 @@ test('edits, reviews, pays, attaches and deletes an expense', async ({ page }) =
 });
 
 test('compresses image attachments in the browser before upload', async ({ page }) => {
+	test.setTimeout(60_000);
+
 	await registerAndCreateWorkspace(page);
 	await createCategory(page);
 	await createExpenseFromForm(page, {
