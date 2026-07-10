@@ -41,6 +41,24 @@ Playwright configurations are split by runtime mode:
 
 Functional `*.e2e.ts` specs are colocated under `src/routes/` so route behavior and its coverage move together. Cross-cutting quality specs live under `tests/quality/`.
 
+### Expense dialog actions
+
+Support-catalog and category forms use SvelteKit progressive enhancement. Enhanced create, update, archive, delete and restore actions return a scoped `catalogAction` or `categoryAction` payload so the dialog can refresh its data and display the result without closing. Native form submissions still redirect to the validated `returnTo` URL. Keep both paths covered when adding a dialog mutation.
+
+Attachment upload failures are rendered by the attachment panel when JavaScript is active and by the page action fallback otherwise. Do not also apply an enhanced failure to the page-level form state, or the same error will be announced twice.
+
+Expense selection and lazily prepared detail state are cleared when the list URL changes (filters, pagination or route navigation), but retained when a same-URL action refreshes the current row.
+
+### Expense accessibility contracts
+
+The support-catalog picker follows the ARIA tab pattern: one tab is in the keyboard tab order, arrow keys wrap between tabs, and Home/End move to the first/last tab. Every tab controls the stable `support-catalog-panel` element.
+
+The expense list is exposed as an ARIA table with explicit column indexes, expandable rows and a full-width details row. Responsive CSS may visually hide the header, but must keep it in the accessibility tree so column relationships remain available to assistive technology.
+
+### CSS ownership
+
+`src/routes/layout.css` contains application-wide primitives and styles shared by multiple routes. Expense-page, support-catalog, attachment and bulk-review rules live in `src/routes/(protected)/app/expenses/expenses.css`, which is imported by the expense page and emitted as a route-only CSS asset. Add new expense-specific responsive rules there instead of growing the global stylesheet.
+
 ## Run Quality Gates
 
 The quality gates add screenshot regression, performance budget, infrastructure failure and smoke coverage on top of the functional E2E suite:

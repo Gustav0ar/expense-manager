@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { afterNavigate } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import './expenses.css';
 	import LocalizedDate from '$lib/components/LocalizedDate.svelte';
 	import SearchableSelect from '$lib/components/SearchableSelect.svelte';
 	import { translate } from '$lib/i18n';
@@ -35,7 +37,15 @@
 	let deleteDialog: DeleteExpenseDialog | undefined = $state();
 	let supportCatalogDialog: SupportCatalogDialog | undefined = $state();
 	let preparedExpenseDetails = $state<number[]>([]);
+	let expandedExpenseIds = new SvelteSet<number>();
 	let selectedIds = new SvelteSet<number>();
+
+	afterNavigate(({ from, to }) => {
+		if (from && to && from.url.href === to.url.href) return;
+		selectedIds.clear();
+		expandedExpenseIds.clear();
+		preparedExpenseDetails = [];
+	});
 
 	function toggleSelect(id: number) {
 		if (selectedIds.has(id)) selectedIds.delete(id);
@@ -44,7 +54,11 @@
 
 	async function prepareExpenseDetails(id: number, event: Event) {
 		const details = event.currentTarget as HTMLDetailsElement;
-		if (!details.open) return;
+		if (!details.open) {
+			expandedExpenseIds.delete(id);
+			return;
+		}
+		expandedExpenseIds.add(id);
 		if (!preparedExpenseDetails.includes(id)) {
 			preparedExpenseDetails = [...preparedExpenseDetails, id];
 		}
@@ -245,7 +259,7 @@
 		</div>
 	</div>
 
-	{#if form?.message && form.catalogAction !== 'createCatalog' && form.categoryAction !== 'createCategory'}
+	{#if form?.message && !form.catalogAction && !form.categoryAction}
 		<p class="notice danger" role="alert">{form.message}</p>
 	{/if}
 
@@ -518,48 +532,108 @@
 		{:else}
 			<div
 				class={['expense-table', data.permissions.canReview && 'with-select']}
+				role="table"
 				aria-label={t('Expenses registered')}
+				aria-colcount={data.permissions.canReview ? 8 : 7}
 			>
-				<div class="expense-table-header" aria-hidden="true">
-					{#if data.permissions.canReview}<span></span>{/if}
-					<span>{t('Date')}</span>
-					<span>{t('Description')}</span>
-					<span>{t('Category')}</span>
-					<span>{t('Payment')}</span>
-					<span>{t('Details')}</span>
-					<span>{t('Value')}</span>
-					<span>{t('Actions')}</span>
+				<div class="expense-table-header" role="row">
+					{#if data.permissions.canReview}
+						<span role="columnheader" aria-colindex="1"
+							><span class="sr-only">{t('Review')}</span></span
+						>
+					{/if}
+					<span role="columnheader" aria-colindex={data.permissions.canReview ? 2 : 1}
+						>{t('Date')}</span
+					>
+					<span role="columnheader" aria-colindex={data.permissions.canReview ? 3 : 2}
+						>{t('Description')}</span
+					>
+					<span role="columnheader" aria-colindex={data.permissions.canReview ? 4 : 3}
+						>{t('Category')}</span
+					>
+					<span role="columnheader" aria-colindex={data.permissions.canReview ? 5 : 4}
+						>{t('Payment')}</span
+					>
+					<span role="columnheader" aria-colindex={data.permissions.canReview ? 6 : 5}
+						>{t('Details')}</span
+					>
+					<span role="columnheader" aria-colindex={data.permissions.canReview ? 7 : 6}
+						>{t('Value')}</span
+					>
+					<span role="columnheader" aria-colindex={data.permissions.canReview ? 8 : 7}
+						>{t('Actions')}</span
+					>
 				</div>
 
 				{#each data.expenses.items as expense (expense.id)}
 					<article
 						class={['expense-table-item', expense.reviewStatus === 'pending' && 'pending-review']}
+						role="rowgroup"
 					>
-						{#if data.permissions.canReview && expense.reviewStatus === 'pending'}
-							<label
-								class={['expense-select-label', selectedIds.has(expense.id) && 'selected']}
-								aria-label={t('Select {description}', { description: expense.description })}
-							>
-								<input
-									type="checkbox"
-									class="expense-select-checkbox"
-									checked={selectedIds.has(expense.id)}
-									onchange={() => toggleSelect(expense.id)}
-								/>
-								<span class="expense-select-text">{t('Review')}</span>
-							</label>
-						{:else if data.permissions.canReview}
-							<span class="expense-select-placeholder"></span>
-						{/if}
 						<details
 							class="expense-table-details"
+							role="presentation"
 							ontoggle={(event) => prepareExpenseDetails(expense.id, event)}
 						>
-							<summary class="expense-table-row">
-								<span class="expense-table-date">
+							<summary
+								class="expense-table-row"
+								role="row"
+								aria-expanded={expandedExpenseIds.has(expense.id)}
+							>
+								{#if data.permissions.canReview && expense.reviewStatus === 'pending'}
+									<span
+										class={['expense-select-label', selectedIds.has(expense.id) && 'selected']}
+										role="cell"
+										aria-colindex="1"
+										tabindex="-1"
+										onclick={(event) => {
+											if (event.target instanceof HTMLInputElement) {
+												event.stopPropagation();
+												return;
+											}
+											event.preventDefault();
+											event.stopPropagation();
+											toggleSelect(expense.id);
+										}}
+										onkeydown={(event) => {
+											if (event.target instanceof HTMLInputElement) {
+												event.stopPropagation();
+												return;
+											}
+											if (event.key !== ' ' && event.key !== 'Enter') return;
+											event.preventDefault();
+											event.stopPropagation();
+											toggleSelect(expense.id);
+										}}
+									>
+										<input
+											type="checkbox"
+											class="expense-select-checkbox"
+											checked={selectedIds.has(expense.id)}
+											onchange={() => toggleSelect(expense.id)}
+											aria-label={t('Select {description}', {
+												description: expense.description
+											})}
+										/>
+										<span class="expense-select-text">{t('Review')}</span>
+									</span>
+								{:else if data.permissions.canReview}
+									<span class="expense-select-placeholder" role="cell" aria-colindex="1">
+										<span class="sr-only">{reviewLabel(expense.reviewStatus, t)}</span>
+									</span>
+								{/if}
+								<span
+									class="expense-table-date"
+									role="cell"
+									aria-colindex={data.permissions.canReview ? 2 : 1}
+								>
 									<LocalizedDate value={expense.expenseDate} />
 								</span>
-								<span class="expense-table-description">
+								<span
+									class="expense-table-description"
+									role="cell"
+									aria-colindex={data.permissions.canReview ? 3 : 2}
+								>
 									<strong>{expense.description}</strong>
 									{#if expense.installmentsTotal}
 										<small>{expense.installmentNumber}/{expense.installmentsTotal}</small>
@@ -576,18 +650,28 @@
 								</span>
 								<span
 									class="expense-category expense-table-category"
+									role="cell"
+									aria-colindex={data.permissions.canReview ? 4 : 3}
 									style={`--category-color:${expense.categoryColor}`}
 								>
 									<span>{expense.categoryIcon ?? '💼'}</span>
 									{expense.categoryName}
 								</span>
-								<span class="expense-table-muted expense-table-payment">
+								<span
+									class="expense-table-muted expense-table-payment"
+									role="cell"
+									aria-colindex={data.permissions.canReview ? 5 : 4}
+								>
 									{expense.paymentMethod || '-'}
 									<span class={paymentClass(expense.paymentStatus)}
 										>{paymentLabel(expense.paymentStatus, t)}</span
 									>
 								</span>
-								<span class="expense-table-muted expense-table-note">
+								<span
+									class="expense-table-muted expense-table-note"
+									role="cell"
+									aria-colindex={data.permissions.canReview ? 6 : 5}
+								>
 									{expense.vendor || expense.costCenter || expense.notes || '-'}
 									{#if expense.vendor && expense.costCenter}
 										<small>{expense.costCenter}</small>
@@ -595,137 +679,167 @@
 										<small>{expense.reviewRejectionReason}</small>
 									{/if}
 								</span>
-								<span class="expense-table-amount">{money(expense.amountCents)}</span>
-								<span class="expense-table-action">
+								<span
+									class="expense-table-amount"
+									role="cell"
+									aria-colindex={data.permissions.canReview ? 7 : 6}
+									>{money(expense.amountCents)}</span
+								>
+								<span
+									class="expense-table-action"
+									role="cell"
+									aria-colindex={data.permissions.canReview ? 8 : 7}
+								>
 									<ChevronDown size={15} />
 									{t('Actions')}
+									<button
+										class="icon-button danger expense-table-delete"
+										type="button"
+										aria-label={`${t('Delete')} ${expense.description}`}
+										onclick={(event) => {
+											event.preventDefault();
+											event.stopPropagation();
+											openDeleteDialog(expense);
+										}}
+									>
+										<Trash2 size={17} />
+									</button>
 								</span>
 							</summary>
 
 							{#if hasPreparedExpenseDetails(expense.id)}
-								<div class="expense-details-body">
-									{#if data.permissions.canReview || data.permissions.canReconcile}
-										{@render expenseWorkflowPanel(expense)}
-									{/if}
-									<form
-										method="post"
-										action="?/update"
-										class="expense-edit-form expense-edit-form-table"
+								<div class="expense-details-body" role="row">
+									<div
+										class="expense-details-cell"
+										role="cell"
+										aria-colindex="1"
+										aria-colspan={data.permissions.canReview ? 8 : 7}
 									>
-										<input type="hidden" name="id" value={expense.id} />
-										<input type="hidden" name="returnTo" value={data.returnTo} />
-										<label class="expense-edit-description">
-											<span>{t('Description')}</span>
-											<input name="description" value={expense.description} required />
-										</label>
-										<label class="expense-edit-amount">
-											<span>{t('Value')}</span>
-											<input name="amount" value={amountInputValue(expense.amountCents)} required />
-										</label>
-										<label class="expense-edit-date">
-											<span>{t('Date')}</span>
-											<input name="expenseDate" type="date" value={expense.expenseDate} required />
-										</label>
-										<label class="expense-edit-category">
-											<span>{t('Category')}</span>
-											<select name="categoryId" required>
-												{#each activeCategories as category (category.id)}
-													<option value={category.id} selected={category.id === expense.categoryId}
-														>{category.icon ?? '💼'} {category.name}</option
-													>
-												{/each}
-											</select>
-										</label>
-										<label class="expense-edit-payment">
-											<span>{t('Payment')}</span>
-											<select name="paymentMethodId">
-												<option value="">{t('Select')}</option>
-												{#if expense.paymentMethodId && !hasCatalogOption(data.catalogs.paymentMethods, expense.paymentMethodId)}
-													<option value={expense.paymentMethodId} selected
-														>{expense.paymentMethod ?? t('Archived payment method')} ({lower(
-															t('Archived')
-														)})</option
-													>
-												{/if}
-												{#each data.catalogs.paymentMethods as paymentMethod (paymentMethod.id)}
-													<option
-														value={paymentMethod.id}
-														selected={paymentMethod.id === expense.paymentMethodId}
-														>{paymentMethod.name}</option
-													>
-												{/each}
-											</select>
-										</label>
-										<SearchableSelect
-											id={`expense-edit-vendor-${expense.id}`}
-											name="vendorId"
-											label={t('Vendor')}
-											options={catalogOptionsWithCurrent(
-												data.catalogs.vendors,
-												expense.vendorId,
-												expense.vendor,
-												'Archived vendor'
-											)}
-											selectedId={expense.vendorId}
-											selectedLabel={expense.vendor}
-											placeholder={t('Select')}
-											empty={t('No vendor found.')}
-											wrapperClass="expense-edit-vendor"
-											locale={data.locale}
-										/>
-										<SearchableSelect
-											id={`expense-edit-cost-center-${expense.id}`}
-											name="costCenterId"
-											label={t('Cost center')}
-											options={catalogOptionsWithCurrent(
-												data.catalogs.costCenters,
-												expense.costCenterId,
-												expense.costCenter,
-												'Archived cost center'
-											)}
-											selectedId={expense.costCenterId}
-											selectedLabel={expense.costCenter}
-											placeholder={t('Select')}
-											empty={t('No cost center found.')}
-											wrapperClass="expense-edit-cost-center"
-											locale={data.locale}
-										/>
-										<label class="expense-edit-competency">
-											<span>{t('Competency')}</span>
-											<input
-												name="competencyMonth"
-												type="month"
-												value={expense.competencyMonth?.slice(0, 7) ?? ''}
+										{#if data.permissions.canReview || data.permissions.canReconcile}
+											{@render expenseWorkflowPanel(expense)}
+										{/if}
+										<form
+											method="post"
+											action="?/update"
+											class="expense-edit-form expense-edit-form-table"
+										>
+											<input type="hidden" name="id" value={expense.id} />
+											<input type="hidden" name="returnTo" value={data.returnTo} />
+											<label class="expense-edit-description">
+												<span>{t('Description')}</span>
+												<input name="description" value={expense.description} required />
+											</label>
+											<label class="expense-edit-amount">
+												<span>{t('Value')}</span>
+												<input
+													name="amount"
+													value={amountInputValue(expense.amountCents)}
+													required
+												/>
+											</label>
+											<label class="expense-edit-date">
+												<span>{t('Date')}</span>
+												<input
+													name="expenseDate"
+													type="date"
+													value={expense.expenseDate}
+													required
+												/>
+											</label>
+											<label class="expense-edit-category">
+												<span>{t('Category')}</span>
+												<select name="categoryId" required>
+													{#each activeCategories as category (category.id)}
+														<option
+															value={category.id}
+															selected={category.id === expense.categoryId}
+															>{category.icon ?? '💼'} {category.name}</option
+														>
+													{/each}
+												</select>
+											</label>
+											<label class="expense-edit-payment">
+												<span>{t('Payment')}</span>
+												<select name="paymentMethodId">
+													<option value="">{t('Select')}</option>
+													{#if expense.paymentMethodId && !hasCatalogOption(data.catalogs.paymentMethods, expense.paymentMethodId)}
+														<option value={expense.paymentMethodId} selected
+															>{expense.paymentMethod ?? t('Archived payment method')} ({lower(
+																t('Archived')
+															)})</option
+														>
+													{/if}
+													{#each data.catalogs.paymentMethods as paymentMethod (paymentMethod.id)}
+														<option
+															value={paymentMethod.id}
+															selected={paymentMethod.id === expense.paymentMethodId}
+															>{paymentMethod.name}</option
+														>
+													{/each}
+												</select>
+											</label>
+											<SearchableSelect
+												id={`expense-edit-vendor-${expense.id}`}
+												name="vendorId"
+												label={t('Vendor')}
+												options={catalogOptionsWithCurrent(
+													data.catalogs.vendors,
+													expense.vendorId,
+													expense.vendor,
+													'Archived vendor'
+												)}
+												selectedId={expense.vendorId}
+												selectedLabel={expense.vendor}
+												placeholder={t('Select')}
+												empty={t('No vendor found.')}
+												wrapperClass="expense-edit-vendor"
+												locale={data.locale}
 											/>
-										</label>
-										<label class="edit-notes">
-											<span>{t('Notes')}</span>
-											<input name="notes" value={expense.notes ?? ''} />
-										</label>
-										<button class="button primary" type="submit">
-											<Save size={17} />
-											<span>{t('Update')}</span>
-										</button>
-									</form>
+											<SearchableSelect
+												id={`expense-edit-cost-center-${expense.id}`}
+												name="costCenterId"
+												label={t('Cost center')}
+												options={catalogOptionsWithCurrent(
+													data.catalogs.costCenters,
+													expense.costCenterId,
+													expense.costCenter,
+													'Archived cost center'
+												)}
+												selectedId={expense.costCenterId}
+												selectedLabel={expense.costCenter}
+												placeholder={t('Select')}
+												empty={t('No cost center found.')}
+												wrapperClass="expense-edit-cost-center"
+												locale={data.locale}
+											/>
+											<label class="expense-edit-competency">
+												<span>{t('Competency')}</span>
+												<input
+													name="competencyMonth"
+													type="month"
+													value={expense.competencyMonth?.slice(0, 7) ?? ''}
+												/>
+											</label>
+											<label class="edit-notes">
+												<span>{t('Notes')}</span>
+												<input name="notes" value={expense.notes ?? ''} />
+											</label>
+											<button class="button primary" type="submit">
+												<Save size={17} />
+												<span>{t('Update')}</span>
+											</button>
+										</form>
 
-									<AttachmentPanel
-										expenseId={expense.id}
-										attachments={expense.attachments}
-										returnTo={data.returnTo}
-										{t}
-									/>
+										<AttachmentPanel
+											expenseId={expense.id}
+											attachments={expense.attachments}
+											returnTo={data.returnTo}
+											{t}
+										/>
+									</div>
 								</div>
 							{/if}
 						</details>
-
-						<button
-							class="icon-button danger expense-table-delete"
-							type="button"
-							aria-label={`${t('Delete')} ${expense.description}`}
-							onclick={() => openDeleteDialog(expense)}
-						>
-							<Trash2 size={17} />
-						</button>
 					</article>
 				{/each}
 			</div>

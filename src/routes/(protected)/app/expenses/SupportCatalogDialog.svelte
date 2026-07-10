@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { ChevronLeft, ChevronRight, Plus, Save, Search, Trash2 } from '@lucide/svelte';
+	import { Archive, ChevronLeft, ChevronRight, Plus, Save, Search, Trash2 } from '@lucide/svelte';
 	import CategoryManagerDialog from './CategoryManagerDialog.svelte';
 	import type { Attachment } from 'svelte/attachments';
 	import type { SubmitFunction } from '@sveltejs/kit';
@@ -25,7 +25,7 @@
 	type Notice = { tone: 'success' | 'danger'; message: string };
 	type SupportCatalogActionData = {
 		message?: string;
-		catalogAction?: 'createCatalog';
+		catalogAction?: 'createCatalog' | 'updateCatalog' | 'removeCatalog';
 		catalogKind?: ExpenseCatalogKind;
 		catalogName?: string;
 		catalogMessage?: string;
@@ -45,6 +45,7 @@
 	let { catalogs, categories, returnTo, locale, t }: Props = $props();
 
 	const pageSize = 8;
+	const tabOrder: SupportCatalogKind[] = ['paymentMethod', 'vendor', 'costCenter', 'category'];
 
 	// ── dialog element ───────────────────────────────────────────────────────────
 	let dialogEl: HTMLDialogElement | undefined = $state();
@@ -77,9 +78,12 @@
 	}
 
 	function close() {
+		dialogEl?.close();
+	}
+
+	function clearDialogNotices() {
 		catalogNotice = null;
 		categoryManager?.clearNotice();
-		dialogEl?.close();
 	}
 
 	function closeFromBackdrop(event: MouseEvent) {
@@ -131,6 +135,33 @@
 		categoryManager?.clearNotice();
 	}
 
+	function handleTabKeydown(event: KeyboardEvent, kind: SupportCatalogKind) {
+		const currentIndex = tabOrder.indexOf(kind);
+		let targetIndex: number;
+
+		switch (event.key) {
+			case 'ArrowRight':
+				targetIndex = (currentIndex + 1) % tabOrder.length;
+				break;
+			case 'ArrowLeft':
+				targetIndex = (currentIndex - 1 + tabOrder.length) % tabOrder.length;
+				break;
+			case 'Home':
+				targetIndex = 0;
+				break;
+			case 'End':
+				targetIndex = tabOrder.length - 1;
+				break;
+			default:
+				return;
+		}
+
+		event.preventDefault();
+		const targetKind = tabOrder[targetIndex];
+		setActiveTab(targetKind);
+		dialogEl?.querySelector<HTMLButtonElement>(`#support-catalog-tab-${targetKind}`)?.focus();
+	}
+
 	// ── catalog tab derived ───────────────────────────────────────────────────────
 	let activeCatalogKind = $derived(
 		isExpenseCatalogKind(activeTab) ? activeTab : ('paymentMethod' as ExpenseCatalogKind)
@@ -172,6 +203,12 @@
 		return kind === 'category' ? activeCategoryCount : catalogItems(kind).length;
 	}
 
+	function tabLabel(kind: SupportCatalogKind) {
+		return kind === 'category'
+			? t('Categories')
+			: (tabs.find((tab) => tab.kind === kind)?.label ?? '');
+	}
+
 	// ── catalog action helpers ────────────────────────────────────────────────────
 	function catalogUsageLabel(item: SupportCatalogItem) {
 		const expensePart =
@@ -187,57 +224,70 @@
 	}
 
 	function catalogRemoveLabel(item: SupportCatalogItem) {
-		return item.expenseCount > 0 ? t('Archive') : t('Delete');
+		return item.expenseCount > 0 || item.recurringCount > 0 ? t('Archive') : t('Delete');
+	}
+
+	function catalogHasAssociations(item: SupportCatalogItem) {
+		return item.expenseCount > 0 || item.recurringCount > 0;
 	}
 
 	// ── action data extractors ────────────────────────────────────────────────────
 	function supportCatalogActionData(value: unknown): SupportCatalogActionData | null {
 		if (typeof value !== 'object' || value == null) return null;
 		const d = value as SupportCatalogActionData;
-		return d.catalogAction === 'createCatalog' ? d : null;
+		return d.catalogAction ? d : null;
 	}
 
 	// ── enhance handlers ──────────────────────────────────────────────────────────
-	const enhanceCatalogCreate: SubmitFunction = () => {
-		catalogCreating = true;
-		catalogNotice = null;
+	function enhanceCatalogAction(resetOnSuccess: boolean): SubmitFunction {
+		return () => {
+			if (resetOnSuccess) catalogCreating = true;
+			catalogNotice = null;
 
-		return async ({ result, update }) => {
-			catalogCreating = false;
+			return async ({ result, update }) => {
+				if (resetOnSuccess) catalogCreating = false;
 
-			if (result.type === 'success') {
-				const d = supportCatalogActionData(result.data);
-				await update({ reset: true, invalidateAll: true });
-				if (d?.catalogKind) {
-					activeTab = d.catalogKind;
-					catalogSearch[d.catalogKind] = '';
-					catalogPage[d.catalogKind] = 1;
+				if (result.type === 'success') {
+					const d = supportCatalogActionData(result.data);
+					await update({ reset: resetOnSuccess, invalidateAll: true });
+					if (resetOnSuccess && d?.catalogKind) {
+						activeTab = d.catalogKind;
+						catalogSearch[d.catalogKind] = '';
+						catalogPage[d.catalogKind] = 1;
+					}
+					catalogNotice = {
+						tone: 'success',
+						message:
+							d?.catalogMessage ??
+							(resetOnSuccess
+								? t('Catalog item added successfully.')
+								: t('Catalog item updated successfully.'))
+					};
+					return;
 				}
-				catalogNotice = {
-					tone: 'success',
-					message: d?.catalogMessage ?? t('Catalog item added successfully.')
-				};
-				return;
-			}
 
-			if (result.type === 'failure') {
-				const d = supportCatalogActionData(result.data);
+				if (result.type === 'failure') {
+					const d = supportCatalogActionData(result.data);
+					await update({ reset: false, invalidateAll: false });
+					catalogNotice = {
+						tone: 'danger',
+						message: d?.catalogMessage ?? d?.message ?? t('Check auxiliary catalog.')
+					};
+					return;
+				}
+
+				if (result.type === 'error') {
+					catalogNotice = { tone: 'danger', message: t('Could not save the catalog.') };
+					return;
+				}
+
 				await update({ reset: false, invalidateAll: false });
-				catalogNotice = {
-					tone: 'danger',
-					message: d?.catalogMessage ?? d?.message ?? t('Check auxiliary catalog.')
-				};
-				return;
-			}
-
-			if (result.type === 'error') {
-				catalogNotice = { tone: 'danger', message: t('Could not save the catalog.') };
-				return;
-			}
-
-			await update({ reset: false, invalidateAll: false });
+			};
 		};
-	};
+	}
+
+	const enhanceCatalogCreate = enhanceCatalogAction(true);
+	const enhanceCatalogMutation = enhanceCatalogAction(false);
 </script>
 
 <dialog
@@ -245,6 +295,7 @@
 	class="app-dialog support-catalog-dialog"
 	aria-labelledby="support-catalog-title"
 	onclick={closeFromBackdrop}
+	onclose={clearDialogNotices}
 >
 	<div class="dialog-card support-catalog-card">
 		<div class="dialog-heading">
@@ -265,51 +316,50 @@
 		</div>
 
 		<div class="support-catalog-tabs" role="tablist" aria-label={t('Catalog type')}>
-			{#each tabs as tab (tab.kind)}
+			{#each tabOrder as kind (kind)}
 				<button
 					class="support-catalog-tab"
 					type="button"
 					role="tab"
-					id={`support-catalog-tab-${tab.kind}`}
-					aria-selected={activeTab === tab.kind}
-					aria-controls={`support-catalog-panel-${tab.kind}`}
-					onclick={() => setActiveTab(tab.kind)}
+					id={`support-catalog-tab-${kind}`}
+					aria-selected={activeTab === kind}
+					aria-controls={kind === 'category'
+						? 'support-catalog-panel-category'
+						: 'support-catalog-panel'}
+					tabindex={activeTab === kind ? 0 : -1}
+					onclick={() => setActiveTab(kind)}
+					onkeydown={(event) => handleTabKeydown(event, kind)}
 				>
-					<span>{tab.label}</span>
-					<strong>{tabCount(tab.kind)}</strong>
+					<span>{tabLabel(kind)}</span>
+					<strong>{tabCount(kind)}</strong>
 				</button>
 			{/each}
-			<button
-				class="support-catalog-tab"
-				type="button"
-				role="tab"
-				id="support-catalog-tab-category"
-				aria-selected={activeTab === 'category'}
-				aria-controls="support-catalog-panel-category"
-				onclick={() => setActiveTab('category')}
-			>
-				<span>{t('Categories')}</span>
-				<strong>{tabCount('category')}</strong>
-			</button>
 		</div>
 
 		<div
 			class="support-catalog-active-panel"
-			id={`support-catalog-panel-${activeTab}`}
+			id="support-catalog-panel-category"
 			role="tabpanel"
-			aria-labelledby={`support-catalog-tab-${activeTab}`}
+			aria-labelledby="support-catalog-tab-category"
+			hidden={activeTab !== 'category'}
 		>
-			<div class="support-catalog-category-panel" hidden={activeTab !== 'category'}>
-				<CategoryManagerDialog
-					bind:this={categoryManager}
-					active={activeTab === 'category'}
-					{categories}
-					{returnTo}
-					{locale}
-					{t}
-				/>
-			</div>
+			<CategoryManagerDialog
+				bind:this={categoryManager}
+				active={activeTab === 'category'}
+				{categories}
+				{returnTo}
+				{locale}
+				{t}
+			/>
+		</div>
 
+		<div
+			class="support-catalog-active-panel"
+			id="support-catalog-panel"
+			role="tabpanel"
+			aria-labelledby={`support-catalog-tab-${activeCatalogKind}`}
+			hidden={activeTab === 'category'}
+		>
 			{#if activeTab !== 'category'}
 				<!-- ── Catalog (payment / vendor / cost center) tab ──────────────── -->
 				<form
@@ -385,7 +435,12 @@
 				<div class="support-catalog-list">
 					{#each paginatedCatalogItems as item (item.id)}
 						<div class="support-catalog-row">
-							<form method="post" action="?/updateCatalog" class="support-catalog-edit-form">
+							<form
+								method="post"
+								action="?/updateCatalog"
+								class="support-catalog-edit-form"
+								use:enhance={enhanceCatalogMutation}
+							>
 								<input type="hidden" name="returnTo" value={returnTo} />
 								<input type="hidden" name="kind" value={activeCatalogKind} />
 								<input type="hidden" name="id" value={item.id} />
@@ -405,7 +460,12 @@
 									<span>{t('Save')}</span>
 								</button>
 							</form>
-							<form method="post" action="?/removeCatalog" class="support-catalog-remove-form">
+							<form
+								method="post"
+								action="?/removeCatalog"
+								class="support-catalog-remove-form"
+								use:enhance={enhanceCatalogMutation}
+							>
 								<input type="hidden" name="returnTo" value={returnTo} />
 								<input type="hidden" name="kind" value={activeCatalogKind} />
 								<input type="hidden" name="id" value={item.id} />
@@ -414,7 +474,11 @@
 									type="submit"
 									aria-label={`${catalogRemoveLabel(item)} ${activeCatalogMeta.singular} ${item.name}`}
 								>
-									<Trash2 size={15} />
+									{#if catalogHasAssociations(item)}
+										<Archive size={15} />
+									{:else}
+										<Trash2 size={15} />
+									{/if}
 									<span>{catalogRemoveLabel(item)}</span>
 								</button>
 							</form>

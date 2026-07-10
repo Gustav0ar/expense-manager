@@ -34,7 +34,15 @@
 
 	const enhanceUpload: SubmitFunction = async ({ formData, controller, cancel }) => {
 		const file = formData.get('attachment');
-		if (!(file instanceof File) || file.size === 0) return;
+		if (!(file instanceof File) || file.size === 0) {
+			cancel();
+			uploadState = {
+				tone: 'danger',
+				stage: 'error',
+				message: t('Invalid attachment.')
+			};
+			return;
+		}
 
 		uploadState = {
 			tone: 'info',
@@ -112,7 +120,6 @@
 					stage: 'error',
 					message: actionMessage(result.data) ?? t('Invalid attachment.')
 				};
-				await update({ reset: false, invalidateAll: false });
 				return;
 			}
 
