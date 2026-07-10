@@ -8,6 +8,8 @@ type ProxyTrustConfig = {
 };
 
 let cachedProxyTrustConfig: ProxyTrustConfig | null | undefined;
+let lastUntrustedPeerWarningConfig: string | null = null;
+let lastInvalidForwardedWarningConfig: string | null = null;
 
 function privateEnv(name: 'TRUST_PROXY_HEADERS' | 'TRUSTED_PROXY_CIDR' | 'NODE_ENV') {
 	return env[name] ?? process.env[name];
@@ -34,10 +36,15 @@ function parseProxyTrustConfig(
 	if (cachedProxyTrustConfig?.raw === raw) return cachedProxyTrustConfig;
 
 	const blockList = new BlockList();
-	for (const entry of raw
+	const entries = raw
 		.split(',')
 		.map((value) => value.trim())
-		.filter(Boolean)) {
+		.filter(Boolean);
+	if (entries.length === 0) {
+		throw new Error('TRUSTED_PROXY_CIDR must contain at least one CIDR.');
+	}
+
+	for (const entry of entries) {
 		const [network, prefixText, ...extra] = entry.split('/');
 		const family = isIP(network);
 		const prefix = Number(prefixText);
@@ -79,11 +86,41 @@ export function getClientIp(event: Pick<RequestEvent, 'request' | 'getClientAddr
 	if (proxyHeadersEnabled() && requestCameFromTrustedProxy(directAddress)) {
 		const forwarded = event.request.headers.get('x-forwarded-for');
 		const realIp = event.request.headers.get('x-real-ip');
-		if (forwarded) return forwarded.split(',').at(-1)!.trim() || directAddress;
-		if (realIp) return realIp.trim() || directAddress;
+		const candidate = forwarded?.split(',').at(-1)?.trim() || realIp?.trim();
+		if (!candidate) return directAddress;
+
+		const normalized = normalizeAddress(candidate);
+		if (isIP(normalized) !== 0) return normalized;
+		warnInvalidForwardedAddress();
+		return directAddress;
 	}
+	if (proxyHeadersEnabled()) warnUntrustedProxyPeer();
 
 	return directAddress;
+}
+
+function warnUntrustedProxyPeer() {
+	const raw = privateEnv('TRUSTED_PROXY_CIDR')?.trim() || '<missing>';
+	if (lastUntrustedPeerWarningConfig === raw) return;
+	lastUntrustedPeerWarningConfig = raw;
+	console.warn(
+		JSON.stringify({
+			level: 'warn',
+			message: 'proxy_trust: immediate peer did not match TRUSTED_PROXY_CIDR'
+		})
+	);
+}
+
+function warnInvalidForwardedAddress() {
+	const raw = privateEnv('TRUSTED_PROXY_CIDR')?.trim() || '<missing>';
+	if (lastInvalidForwardedWarningConfig === raw) return;
+	lastInvalidForwardedWarningConfig = raw;
+	console.warn(
+		JSON.stringify({
+			level: 'warn',
+			message: 'proxy_trust: trusted proxy supplied an invalid client address'
+		})
+	);
 }
 
 /**
