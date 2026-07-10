@@ -88,49 +88,60 @@
 		if (typeof value !== 'object' || value == null) return null;
 		const data = value as {
 			message?: string;
-			categoryAction?: 'createCategory';
+			categoryAction?: 'createCategory' | 'updateCategory' | 'removeCategory' | 'unarchiveCategory';
 			categoryMessage?: string;
 		};
-		return data.categoryAction === 'createCategory' ? data : null;
+		return data.categoryAction ? data : null;
 	}
 
-	const enhanceCreate: SubmitFunction = () => {
-		creating = true;
-		notice = null;
+	function enhanceCategoryAction(resetOnSuccess: boolean): SubmitFunction {
+		return () => {
+			if (resetOnSuccess) creating = true;
+			notice = null;
 
-		return async ({ result, update }) => {
-			creating = false;
+			return async ({ result, update }) => {
+				if (resetOnSuccess) creating = false;
 
-			if (result.type === 'success') {
-				const data = categoryActionData(result.data);
-				await update({ reset: true, invalidateAll: true });
-				search = '';
-				page = 1;
-				notice = {
-					tone: 'success',
-					message: data?.categoryMessage ?? t('Category created successfully.')
-				};
-				return;
-			}
+				if (result.type === 'success') {
+					const data = categoryActionData(result.data);
+					await update({ reset: resetOnSuccess, invalidateAll: true });
+					if (resetOnSuccess) {
+						search = '';
+						page = 1;
+					}
+					notice = {
+						tone: 'success',
+						message:
+							data?.categoryMessage ??
+							(resetOnSuccess
+								? t('Category created successfully.')
+								: t('Category updated successfully.'))
+					};
+					return;
+				}
 
-			if (result.type === 'failure') {
-				const data = categoryActionData(result.data);
+				if (result.type === 'failure') {
+					const data = categoryActionData(result.data);
+					await update({ reset: false, invalidateAll: false });
+					notice = {
+						tone: 'danger',
+						message: data?.categoryMessage ?? data?.message ?? t('Check category data.')
+					};
+					return;
+				}
+
+				if (result.type === 'error') {
+					notice = { tone: 'danger', message: t('Could not save the category.') };
+					return;
+				}
+
 				await update({ reset: false, invalidateAll: false });
-				notice = {
-					tone: 'danger',
-					message: data?.categoryMessage ?? data?.message ?? t('Check category data.')
-				};
-				return;
-			}
-
-			if (result.type === 'error') {
-				notice = { tone: 'danger', message: t('Could not save the category.') };
-				return;
-			}
-
-			await update({ reset: false, invalidateAll: false });
+			};
 		};
-	};
+	}
+
+	const enhanceCreate = enhanceCategoryAction(true);
+	const enhanceMutation = enhanceCategoryAction(false);
 </script>
 
 {#if active}
@@ -243,6 +254,7 @@
 					method="post"
 					action="?/updateCategory"
 					class="support-catalog-edit-form support-catalog-category-edit"
+					use:enhance={enhanceMutation}
 				>
 					<input type="hidden" name="returnTo" value={returnTo} />
 					<input type="hidden" name="id" value={category.id} />
@@ -284,7 +296,12 @@
 					</button>
 				</form>
 				{#if category.isArchived}
-					<form method="post" action="?/unarchiveCategory" class="support-catalog-remove-form">
+					<form
+						method="post"
+						action="?/unarchiveCategory"
+						class="support-catalog-remove-form"
+						use:enhance={enhanceMutation}
+					>
 						<input type="hidden" name="returnTo" value={returnTo} />
 						<input type="hidden" name="id" value={category.id} />
 						<button
@@ -297,7 +314,12 @@
 						</button>
 					</form>
 				{:else}
-					<form method="post" action="?/removeCategory" class="support-catalog-remove-form">
+					<form
+						method="post"
+						action="?/removeCategory"
+						class="support-catalog-remove-form"
+						use:enhance={enhanceMutation}
+					>
 						<input type="hidden" name="returnTo" value={returnTo} />
 						<input type="hidden" name="id" value={category.id} />
 						<button

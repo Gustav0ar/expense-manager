@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { ChevronLeft, ChevronRight, Plus, Save, Search, Trash2 } from '@lucide/svelte';
+	import { Archive, ChevronLeft, ChevronRight, Plus, Save, Search, Trash2 } from '@lucide/svelte';
 	import CategoryManagerDialog from './CategoryManagerDialog.svelte';
 	import type { Attachment } from 'svelte/attachments';
 	import type { SubmitFunction } from '@sveltejs/kit';
@@ -25,7 +25,7 @@
 	type Notice = { tone: 'success' | 'danger'; message: string };
 	type SupportCatalogActionData = {
 		message?: string;
-		catalogAction?: 'createCatalog';
+		catalogAction?: 'createCatalog' | 'updateCatalog' | 'removeCatalog';
 		catalogKind?: ExpenseCatalogKind;
 		catalogName?: string;
 		catalogMessage?: string;
@@ -77,9 +77,12 @@
 	}
 
 	function close() {
+		dialogEl?.close();
+	}
+
+	function clearDialogNotices() {
 		catalogNotice = null;
 		categoryManager?.clearNotice();
-		dialogEl?.close();
 	}
 
 	function closeFromBackdrop(event: MouseEvent) {
@@ -187,57 +190,70 @@
 	}
 
 	function catalogRemoveLabel(item: SupportCatalogItem) {
-		return item.expenseCount > 0 ? t('Archive') : t('Delete');
+		return item.expenseCount > 0 || item.recurringCount > 0 ? t('Archive') : t('Delete');
+	}
+
+	function catalogHasAssociations(item: SupportCatalogItem) {
+		return item.expenseCount > 0 || item.recurringCount > 0;
 	}
 
 	// ── action data extractors ────────────────────────────────────────────────────
 	function supportCatalogActionData(value: unknown): SupportCatalogActionData | null {
 		if (typeof value !== 'object' || value == null) return null;
 		const d = value as SupportCatalogActionData;
-		return d.catalogAction === 'createCatalog' ? d : null;
+		return d.catalogAction ? d : null;
 	}
 
 	// ── enhance handlers ──────────────────────────────────────────────────────────
-	const enhanceCatalogCreate: SubmitFunction = () => {
-		catalogCreating = true;
-		catalogNotice = null;
+	function enhanceCatalogAction(resetOnSuccess: boolean): SubmitFunction {
+		return () => {
+			if (resetOnSuccess) catalogCreating = true;
+			catalogNotice = null;
 
-		return async ({ result, update }) => {
-			catalogCreating = false;
+			return async ({ result, update }) => {
+				if (resetOnSuccess) catalogCreating = false;
 
-			if (result.type === 'success') {
-				const d = supportCatalogActionData(result.data);
-				await update({ reset: true, invalidateAll: true });
-				if (d?.catalogKind) {
-					activeTab = d.catalogKind;
-					catalogSearch[d.catalogKind] = '';
-					catalogPage[d.catalogKind] = 1;
+				if (result.type === 'success') {
+					const d = supportCatalogActionData(result.data);
+					await update({ reset: resetOnSuccess, invalidateAll: true });
+					if (resetOnSuccess && d?.catalogKind) {
+						activeTab = d.catalogKind;
+						catalogSearch[d.catalogKind] = '';
+						catalogPage[d.catalogKind] = 1;
+					}
+					catalogNotice = {
+						tone: 'success',
+						message:
+							d?.catalogMessage ??
+							(resetOnSuccess
+								? t('Catalog item added successfully.')
+								: t('Catalog item updated successfully.'))
+					};
+					return;
 				}
-				catalogNotice = {
-					tone: 'success',
-					message: d?.catalogMessage ?? t('Catalog item added successfully.')
-				};
-				return;
-			}
 
-			if (result.type === 'failure') {
-				const d = supportCatalogActionData(result.data);
+				if (result.type === 'failure') {
+					const d = supportCatalogActionData(result.data);
+					await update({ reset: false, invalidateAll: false });
+					catalogNotice = {
+						tone: 'danger',
+						message: d?.catalogMessage ?? d?.message ?? t('Check auxiliary catalog.')
+					};
+					return;
+				}
+
+				if (result.type === 'error') {
+					catalogNotice = { tone: 'danger', message: t('Could not save the catalog.') };
+					return;
+				}
+
 				await update({ reset: false, invalidateAll: false });
-				catalogNotice = {
-					tone: 'danger',
-					message: d?.catalogMessage ?? d?.message ?? t('Check auxiliary catalog.')
-				};
-				return;
-			}
-
-			if (result.type === 'error') {
-				catalogNotice = { tone: 'danger', message: t('Could not save the catalog.') };
-				return;
-			}
-
-			await update({ reset: false, invalidateAll: false });
+			};
 		};
-	};
+	}
+
+	const enhanceCatalogCreate = enhanceCatalogAction(true);
+	const enhanceCatalogMutation = enhanceCatalogAction(false);
 </script>
 
 <dialog
@@ -245,6 +261,7 @@
 	class="app-dialog support-catalog-dialog"
 	aria-labelledby="support-catalog-title"
 	onclick={closeFromBackdrop}
+	onclose={clearDialogNotices}
 >
 	<div class="dialog-card support-catalog-card">
 		<div class="dialog-heading">
@@ -385,7 +402,12 @@
 				<div class="support-catalog-list">
 					{#each paginatedCatalogItems as item (item.id)}
 						<div class="support-catalog-row">
-							<form method="post" action="?/updateCatalog" class="support-catalog-edit-form">
+							<form
+								method="post"
+								action="?/updateCatalog"
+								class="support-catalog-edit-form"
+								use:enhance={enhanceCatalogMutation}
+							>
 								<input type="hidden" name="returnTo" value={returnTo} />
 								<input type="hidden" name="kind" value={activeCatalogKind} />
 								<input type="hidden" name="id" value={item.id} />
@@ -405,7 +427,12 @@
 									<span>{t('Save')}</span>
 								</button>
 							</form>
-							<form method="post" action="?/removeCatalog" class="support-catalog-remove-form">
+							<form
+								method="post"
+								action="?/removeCatalog"
+								class="support-catalog-remove-form"
+								use:enhance={enhanceCatalogMutation}
+							>
 								<input type="hidden" name="returnTo" value={returnTo} />
 								<input type="hidden" name="kind" value={activeCatalogKind} />
 								<input type="hidden" name="id" value={item.id} />
@@ -414,7 +441,11 @@
 									type="submit"
 									aria-label={`${catalogRemoveLabel(item)} ${activeCatalogMeta.singular} ${item.name}`}
 								>
-									<Trash2 size={15} />
+									{#if catalogHasAssociations(item)}
+										<Archive size={15} />
+									{:else}
+										<Trash2 size={15} />
+									{/if}
 									<span>{catalogRemoveLabel(item)}</span>
 								</button>
 							</form>

@@ -163,71 +163,149 @@ export const actions: Actions = {
 		const formData = await event.request.formData();
 		const id = idSchema.safeParse(formData.get('id'));
 		const parsed = parseForm(formData, categorySchema);
-		if (!id.success || !parsed.success)
-			return fail(400, { message: translate(event.locals.locale, 'Check category data.') });
+		if (!id.success || !parsed.success) {
+			const message = translate(event.locals.locale, 'Check category data.');
+			return fail(400, {
+				message,
+				categoryAction: 'updateCategory',
+				categoryMessage: message
+			});
+		}
 
 		try {
 			await updateCategoryService(context, id.data, parsed.data);
+			if (!isEnhancedAction(event)) {
+				throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
+			}
+			return {
+				categoryAction: 'updateCategory',
+				categoryMessage: translate(event.locals.locale, 'Category updated successfully.')
+			};
 		} catch (categoryError) {
-			return handleServiceError(categoryError);
+			return handleServiceError(categoryError, { categoryAction: 'updateCategory' });
 		}
-		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
 	removeCategory: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const id = idSchema.safeParse(formData.get('id'));
-		if (!id.success)
-			return fail(400, { message: translate(event.locals.locale, 'Invalid category.') });
+		if (!id.success) {
+			const message = translate(event.locals.locale, 'Invalid category.');
+			return fail(400, {
+				message,
+				categoryAction: 'removeCategory',
+				categoryMessage: message
+			});
+		}
 
 		try {
-			await removeCategoryService(context, id.data);
+			const removed = await removeCategoryService(context, id.data);
+			if (!isEnhancedAction(event)) {
+				throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
+			}
+			return {
+				categoryAction: 'removeCategory',
+				categoryMessage: translate(
+					event.locals.locale,
+					removed.mode === 'archived'
+						? 'Category archived successfully.'
+						: 'Category deleted successfully.'
+				)
+			};
 		} catch (categoryError) {
-			return handleServiceError(categoryError);
+			return handleServiceError(categoryError, { categoryAction: 'removeCategory' });
 		}
-		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
 	unarchiveCategory: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const id = idSchema.safeParse(formData.get('id'));
-		if (!id.success)
-			return fail(400, { message: translate(event.locals.locale, 'Invalid category.') });
+		if (!id.success) {
+			const message = translate(event.locals.locale, 'Invalid category.');
+			return fail(400, {
+				message,
+				categoryAction: 'unarchiveCategory',
+				categoryMessage: message
+			});
+		}
 
 		try {
 			await unarchiveCategoryService(context, id.data);
+			if (!isEnhancedAction(event)) {
+				throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
+			}
+			return {
+				categoryAction: 'unarchiveCategory',
+				categoryMessage: translate(event.locals.locale, 'Category restored successfully.')
+			};
 		} catch (categoryError) {
-			return handleServiceError(categoryError);
+			return handleServiceError(categoryError, { categoryAction: 'unarchiveCategory' });
 		}
-		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
 	updateCatalog: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, expenseCatalogUpdateSchema);
-		if (!parsed.success)
-			return fail(400, { message: translate(event.locals.locale, 'Check auxiliary catalog.') });
+		if (!parsed.success) {
+			const message = translate(event.locals.locale, 'Check auxiliary catalog.');
+			return fail(400, {
+				message,
+				catalogAction: 'updateCatalog',
+				catalogMessage: message
+			});
+		}
 
 		try {
 			await updateExpenseCatalogItem(context, parsed.data);
+			if (!isEnhancedAction(event)) {
+				throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
+			}
+			return {
+				catalogAction: 'updateCatalog',
+				catalogKind: parsed.data.kind,
+				catalogMessage: translate(event.locals.locale, 'Catalog item updated successfully.')
+			};
 		} catch (catalogError) {
-			return handleServiceError(catalogError);
+			return handleServiceError(catalogError, {
+				catalogAction: 'updateCatalog',
+				catalogKind: parsed.data.kind
+			});
 		}
-		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
 	removeCatalog: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, expenseCatalogArchiveSchema);
-		if (!parsed.success)
-			return fail(400, { message: translate(event.locals.locale, 'Invalid auxiliary catalog.') });
+		if (!parsed.success) {
+			const message = translate(event.locals.locale, 'Invalid auxiliary catalog.');
+			return fail(400, {
+				message,
+				catalogAction: 'removeCatalog',
+				catalogMessage: message
+			});
+		}
 
 		try {
-			await removeExpenseCatalogItem(context, parsed.data);
+			const removed = await removeExpenseCatalogItem(context, parsed.data);
+			if (!isEnhancedAction(event)) {
+				throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
+			}
+			return {
+				catalogAction: 'removeCatalog',
+				catalogKind: parsed.data.kind,
+				catalogMessage: translate(
+					event.locals.locale,
+					removed.mode === 'archived'
+						? 'Catalog item archived successfully.'
+						: 'Catalog item deleted successfully.'
+				)
+			};
 		} catch (catalogError) {
-			return handleServiceError(catalogError);
+			return handleServiceError(catalogError, {
+				catalogAction: 'removeCatalog',
+				catalogKind: parsed.data.kind
+			});
 		}
-		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
 	update: async (event) => {
 		const context = await requireWorkspaceContext(event);

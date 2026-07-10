@@ -41,6 +41,14 @@ Playwright configurations are split by runtime mode:
 
 Functional `*.e2e.ts` specs are colocated under `src/routes/` so route behavior and its coverage move together. Cross-cutting quality specs live under `tests/quality/`.
 
+### Expense dialog actions
+
+Support-catalog and category forms use SvelteKit progressive enhancement. Enhanced create, update, archive, delete and restore actions return a scoped `catalogAction` or `categoryAction` payload so the dialog can refresh its data and display the result without closing. Native form submissions still redirect to the validated `returnTo` URL. Keep both paths covered when adding a dialog mutation.
+
+Attachment upload failures are rendered by the attachment panel when JavaScript is active and by the page action fallback otherwise. Do not also apply an enhanced failure to the page-level form state, or the same error will be announced twice.
+
+Expense selection and lazily prepared detail state are cleared when the list URL changes (filters, pagination or route navigation), but retained when a same-URL action refreshes the current row.
+
 ## Run Quality Gates
 
 The quality gates add screenshot regression, performance budget, infrastructure failure and smoke coverage on top of the functional E2E suite:

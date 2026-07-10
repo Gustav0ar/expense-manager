@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { afterNavigate } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import LocalizedDate from '$lib/components/LocalizedDate.svelte';
 	import SearchableSelect from '$lib/components/SearchableSelect.svelte';
@@ -36,6 +37,12 @@
 	let supportCatalogDialog: SupportCatalogDialog | undefined = $state();
 	let preparedExpenseDetails = $state<number[]>([]);
 	let selectedIds = new SvelteSet<number>();
+
+	afterNavigate(({ from, to }) => {
+		if (from && to && from.url.href === to.url.href) return;
+		selectedIds.clear();
+		preparedExpenseDetails = [];
+	});
 
 	function toggleSelect(id: number) {
 		if (selectedIds.has(id)) selectedIds.delete(id);
@@ -245,7 +252,7 @@
 		</div>
 	</div>
 
-	{#if form?.message && form.catalogAction !== 'createCatalog' && form.categoryAction !== 'createCategory'}
+	{#if form?.message && !form.catalogAction && !form.categoryAction}
 		<p class="notice danger" role="alert">{form.message}</p>
 	{/if}
 
