@@ -203,6 +203,12 @@
 		return kind === 'category' ? activeCategoryCount : catalogItems(kind).length;
 	}
 
+	function tabLabel(kind: SupportCatalogKind) {
+		return kind === 'category'
+			? t('Categories')
+			: (tabs.find((tab) => tab.kind === kind)?.label ?? '');
+	}
+
 	// ── catalog action helpers ────────────────────────────────────────────────────
 	function catalogUsageLabel(item: SupportCatalogItem) {
 		const expensePart =
@@ -310,40 +316,28 @@
 		</div>
 
 		<div class="support-catalog-tabs" role="tablist" aria-label={t('Catalog type')}>
-			{#each tabs as tab (tab.kind)}
+			{#each tabOrder as kind (kind)}
 				<button
 					class="support-catalog-tab"
 					type="button"
 					role="tab"
-					id={`support-catalog-tab-${tab.kind}`}
-					aria-selected={activeTab === tab.kind}
-					aria-controls="support-catalog-panel"
-					tabindex={activeTab === tab.kind ? 0 : -1}
-					onclick={() => setActiveTab(tab.kind)}
-					onkeydown={(event) => handleTabKeydown(event, tab.kind)}
+					id={`support-catalog-tab-${kind}`}
+					aria-selected={activeTab === kind}
+					aria-controls={kind === 'category'
+						? 'support-catalog-panel-category'
+						: 'support-catalog-panel'}
+					tabindex={activeTab === kind ? 0 : -1}
+					onclick={() => setActiveTab(kind)}
+					onkeydown={(event) => handleTabKeydown(event, kind)}
 				>
-					<span>{tab.label}</span>
-					<strong>{tabCount(tab.kind)}</strong>
+					<span>{tabLabel(kind)}</span>
+					<strong>{tabCount(kind)}</strong>
 				</button>
 			{/each}
-			<button
-				class="support-catalog-tab"
-				type="button"
-				role="tab"
-				id="support-catalog-tab-category"
-				aria-selected={activeTab === 'category'}
-				aria-controls="support-catalog-panel-category"
-				tabindex={activeTab === 'category' ? 0 : -1}
-				onclick={() => setActiveTab('category')}
-				onkeydown={(event) => handleTabKeydown(event, 'category')}
-			>
-				<span>{t('Categories')}</span>
-				<strong>{tabCount('category')}</strong>
-			</button>
 		</div>
 
 		<div
-			class="support-catalog-active-panel support-catalog-category-panel"
+			class="support-catalog-active-panel"
 			id="support-catalog-panel-category"
 			role="tabpanel"
 			aria-labelledby="support-catalog-tab-category"
