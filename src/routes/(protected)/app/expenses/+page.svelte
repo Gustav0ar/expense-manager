@@ -1,213 +1,46 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
-	import { categoryEmojiLabels, categoryEmojiValues } from '$lib/category-emojis';
 	import LocalizedDate from '$lib/components/LocalizedDate.svelte';
 	import SearchableSelect from '$lib/components/SearchableSelect.svelte';
 	import { translate } from '$lib/i18n';
 	import { formatCents } from '$lib/utils/format';
 	import { reviewLabel, reviewClass, paymentLabel, paymentClass } from '$lib/utils/status';
-	import { maxAttachmentBytes } from '$lib/attachment-limits';
+	import AttachmentPanel from './AttachmentPanel.svelte';
+	import BulkReviewBar from './BulkReviewBar.svelte';
+	import DeleteExpenseDialog from './DeleteExpenseDialog.svelte';
+	import SupportCatalogDialog from './SupportCatalogDialog.svelte';
 	import {
-		Archive,
-		ArchiveRestore,
 		CheckCircle2,
 		ChevronDown,
-		ChevronLeft,
-		ChevronRight,
 		CreditCard,
-		LoaderCircle,
 		Paperclip,
 		Plus,
 		RotateCcw,
-		Search,
 		Save,
+		Search,
 		Trash2,
 		XCircle
 	} from '@lucide/svelte';
-	import type { Attachment } from 'svelte/attachments';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { tick } from 'svelte';
-	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { ActionData, PageData } from './$types';
-
-	type SupportCatalogKind = 'paymentMethod' | 'vendor' | 'costCenter' | 'category';
-	type ExpenseCatalogKind = Exclude<SupportCatalogKind, 'category'>;
-	type SupportCatalogItem = PageData['catalogs']['paymentMethods'][number];
-	type SupportCatalogNotice = { tone: 'success' | 'danger'; message: string };
-	type SupportCatalogActionData = {
-		message?: string;
-		catalogAction?: 'createCatalog';
-		catalogKind?: ExpenseCatalogKind;
-		catalogName?: string;
-		catalogMessage?: string;
-	};
-	type CategoryActionData = {
-		message?: string;
-		categoryAction?: 'createCategory';
-		categoryMessage?: string;
-	};
-	type ActionMessageData = { message?: string };
-	type AttachmentUploadState = {
-		tone: 'info' | 'danger';
-		stage: 'compressing' | 'uploading' | 'error';
-		message: string;
-	};
 
 	let { data, form } = $props<{ data: PageData; form: ActionData }>();
 	const expensesPath = resolve('/app/expenses');
-	const supportCatalogPageSize = 8;
 	const currency = $derived(data.currentWorkspace?.currency ?? 'USD');
-	const supportCatalogTabs = $derived([
-		{
-			kind: 'paymentMethod',
-			label: t('Payments'),
-			singular: lower(t('Payment')),
-			createLabel: t('New payment'),
-			placeholder: t('Example payment'),
-			maxLength: 80,
-			empty: t('No payment method found.')
-		},
-		{
-			kind: 'vendor',
-			label: t('Vendors'),
-			singular: lower(t('Vendor')),
-			createLabel: t('New vendor'),
-			placeholder: t('Example vendor'),
-			maxLength: 120,
-			empty: t('No vendor found.')
-		},
-		{
-			kind: 'costCenter',
-			label: t('Cost centers'),
-			singular: lower(t('Cost center')),
-			createLabel: t('New cost center'),
-			placeholder: t('Example cost center'),
-			maxLength: 120,
-			empty: t('No cost center found.')
-		}
-	] satisfies Array<{
-		kind: ExpenseCatalogKind;
-		label: string;
-		singular: string;
-		createLabel: string;
-		placeholder: string;
-		maxLength: number;
-		empty: string;
-	}>);
+	const activeCategories = $derived(
+		data.categories.filter((c: PageData['categories'][number]) => !c.isArchived)
+	);
 
-	let deleteDialog: HTMLDialogElement | undefined = $state();
-	let supportCatalogDialog: HTMLDialogElement | undefined = $state();
-	let pendingDelete = $state<{ id: number; description: string; amount: string } | null>(null);
+	let deleteDialog: DeleteExpenseDialog | undefined = $state();
+	let supportCatalogDialog: SupportCatalogDialog | undefined = $state();
 	let preparedExpenseDetails = $state<number[]>([]);
-	let supportCatalogTab = $state<SupportCatalogKind>('paymentMethod');
-	let supportCatalogSearch = $state<Record<ExpenseCatalogKind, string>>({
-		paymentMethod: '',
-		vendor: '',
-		costCenter: ''
-	});
-	let supportCatalogNotice = $state<SupportCatalogNotice | null>(null);
-	let supportCatalogCreating = $state(false);
-	let supportCatalogPage = $state<Record<ExpenseCatalogKind, number>>({
-		paymentMethod: 1,
-		vendor: 1,
-		costCenter: 1
-	});
-	let categorySearch = $state('');
-	let categoryPage = $state(1);
-	let categoryView = $state<'active' | 'archived'>('active');
-	let categoryNotice = $state<SupportCatalogNotice | null>(null);
-	let categoryCreating = $state(false);
-	let attachmentUploadState = $state<Record<number, AttachmentUploadState>>({});
 	let selectedIds = new SvelteSet<number>();
 
 	function toggleSelect(id: number) {
 		if (selectedIds.has(id)) selectedIds.delete(id);
 		else selectedIds.add(id);
 	}
-
-	function clearSelection() {
-		selectedIds.clear();
-	}
-	let activeExpenseCatalogTab = $derived(
-		isExpenseCatalogKind(supportCatalogTab) ? supportCatalogTab : 'paymentMethod'
-	);
-	let activeCatalogMeta = $derived(
-		supportCatalogTabs.find((tab) => tab.kind === activeExpenseCatalogTab) ?? supportCatalogTabs[0]
-	);
-	let activeCatalogItems = $derived(catalogItems(activeExpenseCatalogTab));
-	let activeCatalogQuery = $derived(
-		supportCatalogSearch[activeExpenseCatalogTab].trim().toLocaleLowerCase(data.locale)
-	);
-	let filteredSupportCatalogItems = $derived.by(() => {
-		if (!activeCatalogQuery) return activeCatalogItems;
-		return activeCatalogItems.filter((item) =>
-			item.name.toLocaleLowerCase(data.locale).includes(activeCatalogQuery)
-		);
-	});
-	let supportCatalogPageCount = $derived(
-		Math.max(1, Math.ceil(filteredSupportCatalogItems.length / supportCatalogPageSize))
-	);
-	let activeSupportCatalogPage = $derived(
-		Math.min(supportCatalogPage[activeExpenseCatalogTab], supportCatalogPageCount)
-	);
-	let paginatedSupportCatalogItems = $derived(
-		filteredSupportCatalogItems.slice(
-			(activeSupportCatalogPage - 1) * supportCatalogPageSize,
-			activeSupportCatalogPage * supportCatalogPageSize
-		)
-	);
-	let supportCatalogResultStart = $derived(
-		filteredSupportCatalogItems.length === 0
-			? 0
-			: (activeSupportCatalogPage - 1) * supportCatalogPageSize + 1
-	);
-	let supportCatalogResultEnd = $derived(
-		Math.min(filteredSupportCatalogItems.length, activeSupportCatalogPage * supportCatalogPageSize)
-	);
-	let activeCategories = $derived(data.categories.filter(isActiveCategory));
-	let activeCategoryCount = $derived(activeCategories.length);
-	let archivedCategoryCount = $derived(data.categories.length - activeCategoryCount);
-	let visibleCategories = $derived(
-		data.categories.filter((category: PageData['categories'][number]) =>
-			categoryView === 'archived' ? category.isArchived : !category.isArchived
-		)
-	);
-	let categoryQuery = $derived(categorySearch.trim().toLocaleLowerCase(data.locale));
-	let filteredCategories = $derived.by(() => {
-		if (!categoryQuery) return visibleCategories;
-		return visibleCategories.filter((category: PageData['categories'][number]) =>
-			category.name.toLocaleLowerCase(data.locale).includes(categoryQuery)
-		);
-	});
-	let categoryPageCount = $derived(
-		Math.max(1, Math.ceil(filteredCategories.length / supportCatalogPageSize))
-	);
-	let activeCategoryPage = $derived(Math.min(categoryPage, categoryPageCount));
-	let paginatedCategories = $derived(
-		filteredCategories.slice(
-			(activeCategoryPage - 1) * supportCatalogPageSize,
-			activeCategoryPage * supportCatalogPageSize
-		)
-	);
-	let categoryResultStart = $derived(
-		filteredCategories.length === 0 ? 0 : (activeCategoryPage - 1) * supportCatalogPageSize + 1
-	);
-	let categoryResultEnd = $derived(
-		Math.min(filteredCategories.length, activeCategoryPage * supportCatalogPageSize)
-	);
-	const captureDeleteDialog: Attachment<HTMLDialogElement> = (element) => {
-		deleteDialog = element;
-		return () => {
-			if (deleteDialog === element) deleteDialog = undefined;
-		};
-	};
-	const captureSupportCatalogDialog: Attachment<HTMLDialogElement> = (element) => {
-		supportCatalogDialog = element;
-		return () => {
-			if (supportCatalogDialog === element) supportCatalogDialog = undefined;
-		};
-	};
 
 	async function prepareExpenseDetails(id: number, event: Event) {
 		const details = event.currentTarget as HTMLDetailsElement;
@@ -260,30 +93,6 @@
 		return value.toLocaleLowerCase(data.locale);
 	}
 
-	function isActiveCategory(category: PageData['categories'][number]) {
-		return !category.isArchived;
-	}
-
-	function categoryHasAssociations(category: PageData['categories'][number]) {
-		return category.associationCount > 0;
-	}
-
-	function categoryRemoveLabel(category: PageData['categories'][number]) {
-		return categoryHasAssociations(category) ? t('Archive') : t('Delete');
-	}
-
-	function categoryRemoveAriaLabel(category: PageData['categories'][number]) {
-		return `${categoryHasAssociations(category) ? t('Archive category') : t('Delete category')} ${category.name}`;
-	}
-
-	function isExpenseCatalogKind(kind: SupportCatalogKind): kind is ExpenseCatalogKind {
-		return kind !== 'category';
-	}
-
-	function emojiLabel(emoji: (typeof categoryEmojiValues)[number]) {
-		return t(categoryEmojiLabels[emoji]);
-	}
-
 	function hasActiveFilters() {
 		return Boolean(
 			data.filters.from ||
@@ -299,31 +108,34 @@
 	}
 
 	function openDeleteDialog(expense: PageData['expenses']['items'][number]) {
-		pendingDelete = {
+		deleteDialog?.open({
 			id: expense.id,
 			description: expense.description,
 			amount: money(expense.amountCents)
-		};
-
-		if (!deleteDialog?.open) deleteDialog?.showModal();
-	}
-
-	function closeDeleteDialog() {
-		deleteDialog?.close();
+		});
 	}
 
 	function openSupportCatalogDialog() {
-		if (!supportCatalogDialog?.open) supportCatalogDialog?.showModal();
+		supportCatalogDialog?.open();
 	}
 
-	function closeSupportCatalogDialog() {
-		supportCatalogNotice = null;
-		categoryNotice = null;
-		supportCatalogDialog?.close();
+	function hasCatalogOption(items: { id: number }[], id?: number | null) {
+		return id ? items.some((item) => item.id === id) : false;
 	}
 
-	function clearDeleteDialog() {
-		pendingDelete = null;
+	function catalogOptions(items: { id: number; name: string }[]) {
+		return items.map((item) => ({ id: item.id, label: item.name }));
+	}
+
+	function catalogOptionsWithCurrent(
+		items: { id: number; name: string }[],
+		id?: number | null,
+		label?: string | null,
+		archivedLabel = 'Archived item'
+	) {
+		const options = catalogOptions(items);
+		if (!id || hasCatalogOption(items, id)) return options;
+		return [{ id, label: `${label ?? t(archivedLabel)} (${lower(t('Archived'))})` }, ...options];
 	}
 
 	function nextPageHref() {
@@ -347,303 +159,6 @@
 		const query = params.join('&');
 		return query ? `${expensesPath}?${query}` : expensesPath;
 	}
-
-	function closeDeleteDialogFromBackdrop(event: MouseEvent) {
-		if (event.target === deleteDialog) closeDeleteDialog();
-	}
-
-	function closeSupportCatalogDialogFromBackdrop(event: MouseEvent) {
-		if (event.target === supportCatalogDialog) closeSupportCatalogDialog();
-	}
-
-	function catalogUsageLabel(item: PageData['catalogs']['paymentMethods'][number]) {
-		const expensePart =
-			item.expenseCount === 1
-				? t('{count} expense', { count: item.expenseCount })
-				: t('{count} expenses', { count: item.expenseCount });
-		if (item.recurringCount === 0) return item.expenseCount === 0 ? t('No usage') : expensePart;
-
-		const recurringPart =
-			item.recurringCount === 1
-				? t('{count} recurrence', { count: item.recurringCount })
-				: t('{count} recurrences', { count: item.recurringCount });
-		return item.expenseCount === 0 ? recurringPart : `${expensePart} + ${recurringPart}`;
-	}
-
-	function catalogRemoveLabel(item: PageData['catalogs']['paymentMethods'][number]) {
-		return item.expenseCount > 0 ? t('Archive') : t('Delete');
-	}
-
-	function hasCatalogOption(items: { id: number }[], id?: number | null) {
-		return id ? items.some((item) => item.id === id) : false;
-	}
-
-	function catalogOptions(items: { id: number; name: string }[]) {
-		return items.map((item) => ({ id: item.id, label: item.name }));
-	}
-
-	function catalogOptionsWithCurrent(
-		items: { id: number; name: string }[],
-		id?: number | null,
-		label?: string | null,
-		archivedLabel = 'Archived item'
-	) {
-		const options = catalogOptions(items);
-		if (!id || hasCatalogOption(items, id)) return options;
-		return [{ id, label: `${label ?? t(archivedLabel)} (${lower(t('Archived'))})` }, ...options];
-	}
-
-	function catalogItems(kind: ExpenseCatalogKind): SupportCatalogItem[] {
-		if (kind === 'paymentMethod') return data.catalogs.paymentMethods;
-		if (kind === 'vendor') return data.catalogs.vendors;
-		return data.catalogs.costCenters;
-	}
-
-	function supportCatalogCount(kind: SupportCatalogKind) {
-		return kind === 'category' ? activeCategoryCount : catalogItems(kind).length;
-	}
-
-	function setSupportCatalogTab(kind: SupportCatalogKind) {
-		supportCatalogTab = kind;
-		supportCatalogNotice = null;
-		categoryNotice = null;
-	}
-
-	function updateSupportCatalogSearch(kind: ExpenseCatalogKind, value: string) {
-		supportCatalogSearch[kind] = value;
-		supportCatalogPage[kind] = 1;
-	}
-
-	function goToSupportCatalogPage(page: number) {
-		supportCatalogPage[activeExpenseCatalogTab] = Math.min(
-			Math.max(page, 1),
-			supportCatalogPageCount
-		);
-	}
-
-	function updateCategorySearch(value: string) {
-		categorySearch = value;
-		categoryPage = 1;
-	}
-
-	function updateCategoryView(view: 'active' | 'archived') {
-		categoryView = view;
-		categoryPage = 1;
-	}
-
-	function goToCategoryPage(page: number) {
-		categoryPage = Math.min(Math.max(page, 1), categoryPageCount);
-	}
-
-	function supportCatalogActionData(value: unknown): SupportCatalogActionData | null {
-		if (typeof value !== 'object' || value == null) return null;
-		const data = value as SupportCatalogActionData;
-		return data.catalogAction === 'createCatalog' ? data : null;
-	}
-
-	function categoryActionData(value: unknown): CategoryActionData | null {
-		if (typeof value !== 'object' || value == null) return null;
-		const data = value as CategoryActionData;
-		return data.categoryAction === 'createCategory' ? data : null;
-	}
-
-	function actionMessageData(value: unknown): ActionMessageData | null {
-		if (typeof value !== 'object' || value == null) return null;
-		const data = value as ActionMessageData;
-		return typeof data.message === 'string' ? data : null;
-	}
-
-	function setAttachmentUploadState(expenseId: number, state: AttachmentUploadState) {
-		attachmentUploadState[expenseId] = state;
-	}
-
-	function clearAttachmentUploadState(expenseId: number) {
-		delete attachmentUploadState[expenseId];
-	}
-
-	function enhanceAttachmentUpload(expenseId: number): SubmitFunction {
-		return async ({ formData, controller, cancel }) => {
-			const file = formData.get('attachment');
-			if (!(file instanceof File) || file.size === 0) return;
-
-			setAttachmentUploadState(expenseId, {
-				tone: 'info',
-				stage: 'uploading',
-				message: t('Uploading attachment...')
-			});
-
-			if (file.type.toLowerCase().startsWith('image/')) {
-				setAttachmentUploadState(expenseId, {
-					tone: 'info',
-					stage: 'compressing',
-					message: t('Compressing image...')
-				});
-
-				try {
-					const {
-						compressImageAttachment,
-						formatFileSize,
-						isCompressibleImage,
-						maxImageAttachmentBytes
-					} = await import('$lib/client/image-compression');
-
-					if (isCompressibleImage(file)) {
-						const compressed = await compressImageAttachment(file, { signal: controller.signal });
-						if (controller.signal.aborted) return;
-
-						if (compressed.file.size > maxImageAttachmentBytes) {
-							cancel();
-							setAttachmentUploadState(expenseId, {
-								tone: 'danger',
-								stage: 'error',
-								message: t('Image is still larger than 2 MB after compression.')
-							});
-							return;
-						}
-
-						if (compressed.compressed) {
-							formData.set('attachment', compressed.file, compressed.file.name);
-							setAttachmentUploadState(expenseId, {
-								tone: 'info',
-								stage: 'uploading',
-								message: t('Image compressed from {from} to {to}.', {
-									from: formatFileSize(compressed.originalSize),
-									to: formatFileSize(compressed.compressedSize)
-								})
-							});
-						}
-					}
-				} catch {
-					if (controller.signal.aborted) return;
-					if (file.size > maxAttachmentBytes) {
-						cancel();
-						setAttachmentUploadState(expenseId, {
-							tone: 'danger',
-							stage: 'error',
-							message: t('Could not compress image. Try a smaller file.')
-						});
-						return;
-					}
-				}
-			}
-
-			if (attachmentUploadState[expenseId]?.stage !== 'uploading') {
-				setAttachmentUploadState(expenseId, {
-					tone: 'info',
-					stage: 'uploading',
-					message: t('Uploading attachment...')
-				});
-			}
-
-			return async ({ result, update }) => {
-				if (result.type === 'failure') {
-					const actionData = actionMessageData(result.data);
-					setAttachmentUploadState(expenseId, {
-						tone: 'danger',
-						stage: 'error',
-						message: actionData?.message ?? t('Invalid attachment.')
-					});
-					await update({ reset: false, invalidateAll: false });
-					return;
-				}
-
-				if (result.type === 'error') {
-					setAttachmentUploadState(expenseId, {
-						tone: 'danger',
-						stage: 'error',
-						message: t('Something went wrong.')
-					});
-					return;
-				}
-
-				clearAttachmentUploadState(expenseId);
-				await update({ reset: true, invalidateAll: true });
-			};
-		};
-	}
-
-	const enhanceSupportCatalogCreate: SubmitFunction = () => {
-		supportCatalogCreating = true;
-		supportCatalogNotice = null;
-
-		return async ({ result, update }) => {
-			supportCatalogCreating = false;
-
-			if (result.type === 'success') {
-				const catalogData = supportCatalogActionData(result.data);
-				await update({ reset: true, invalidateAll: true });
-
-				if (catalogData?.catalogKind) {
-					supportCatalogTab = catalogData.catalogKind;
-					supportCatalogSearch[catalogData.catalogKind] = '';
-					supportCatalogPage[catalogData.catalogKind] = 1;
-				}
-
-				supportCatalogNotice = {
-					tone: 'success',
-					message: catalogData?.catalogMessage ?? t('Catalog item added successfully.')
-				};
-				return;
-			}
-
-			if (result.type === 'failure') {
-				const catalogData = supportCatalogActionData(result.data);
-				await update({ reset: false, invalidateAll: false });
-				supportCatalogNotice = {
-					tone: 'danger',
-					message:
-						catalogData?.catalogMessage ?? catalogData?.message ?? t('Check auxiliary catalog.')
-				};
-				return;
-			}
-
-			if (result.type === 'error') {
-				supportCatalogNotice = { tone: 'danger', message: t('Could not save the catalog.') };
-				return;
-			}
-
-			await update({ reset: false, invalidateAll: false });
-		};
-	};
-
-	const enhanceCategoryCreate: SubmitFunction = () => {
-		categoryCreating = true;
-		categoryNotice = null;
-
-		return async ({ result, update }) => {
-			categoryCreating = false;
-
-			if (result.type === 'success') {
-				const categoryData = categoryActionData(result.data);
-				await update({ reset: true, invalidateAll: true });
-				categorySearch = '';
-				categoryPage = 1;
-				categoryNotice = {
-					tone: 'success',
-					message: categoryData?.categoryMessage ?? t('Category created successfully.')
-				};
-				return;
-			}
-
-			if (result.type === 'failure') {
-				const categoryData = categoryActionData(result.data);
-				await update({ reset: false, invalidateAll: false });
-				categoryNotice = {
-					tone: 'danger',
-					message:
-						categoryData?.categoryMessage ?? categoryData?.message ?? t('Check category data.')
-				};
-				return;
-			}
-
-			if (result.type === 'error') {
-				categoryNotice = { tone: 'danger', message: t('Could not save the category.') };
-				return;
-			}
-
-			await update({ reset: false, invalidateAll: false });
-		};
-	};
 </script>
 
 <svelte:head>
@@ -883,458 +398,14 @@
 		</form>
 	</section>
 
-	<dialog
-		{@attach captureSupportCatalogDialog}
-		class="app-dialog support-catalog-dialog"
-		aria-labelledby="support-catalog-title"
-		onclick={closeSupportCatalogDialogFromBackdrop}
-	>
-		<div class="dialog-card support-catalog-card">
-			<div class="dialog-heading">
-				<span class="dialog-icon">
-					<Plus size={20} />
-				</span>
-				<div>
-					<h3 id="support-catalog-title">{t('Support catalogs')}</h3>
-					<p>{t('Add options for payment, vendor, cost center and category.')}</p>
-				</div>
-			</div>
-
-			<div class="support-catalog-summary" aria-label={t('Totals registered')}>
-				<span>{t('{count} payments', { count: data.catalogs.paymentMethods.length })}</span>
-				<span>{t('{count} vendors', { count: data.catalogs.vendors.length })}</span>
-				<span>{t('{count} cost centers', { count: data.catalogs.costCenters.length })}</span>
-				<span>{t('{count} categories', { count: activeCategoryCount })}</span>
-			</div>
-
-			<div class="support-catalog-tabs" role="tablist" aria-label={t('Catalog type')}>
-				{#each supportCatalogTabs as tab (tab.kind)}
-					<button
-						class="support-catalog-tab"
-						type="button"
-						role="tab"
-						id={`support-catalog-tab-${tab.kind}`}
-						aria-selected={supportCatalogTab === tab.kind}
-						aria-controls={`support-catalog-panel-${tab.kind}`}
-						onclick={() => setSupportCatalogTab(tab.kind)}
-					>
-						<span>{tab.label}</span>
-						<strong>{supportCatalogCount(tab.kind)}</strong>
-					</button>
-				{/each}
-				<button
-					class="support-catalog-tab"
-					type="button"
-					role="tab"
-					id="support-catalog-tab-category"
-					aria-selected={supportCatalogTab === 'category'}
-					aria-controls="support-catalog-panel-category"
-					onclick={() => setSupportCatalogTab('category')}
-				>
-					<span>{t('Categories')}</span>
-					<strong>{supportCatalogCount('category')}</strong>
-				</button>
-			</div>
-
-			<div
-				class="support-catalog-active-panel"
-				id={`support-catalog-panel-${supportCatalogTab}`}
-				role="tabpanel"
-				aria-labelledby={`support-catalog-tab-${supportCatalogTab}`}
-			>
-				{#if supportCatalogTab === 'category'}
-					<form
-						method="post"
-						action="?/createCategory"
-						class="support-catalog-form support-catalog-create-form support-catalog-category-form"
-						use:enhance={enhanceCategoryCreate}
-					>
-						<input type="hidden" name="returnTo" value={data.returnTo} />
-						<label>
-							<span>{t('Color')}</span>
-							<input
-								class="color-picker compact"
-								name="color"
-								type="color"
-								value="#2563eb"
-								aria-label={t('Color')}
-								required
-							/>
-						</label>
-						<label>
-							<span>{t('New category')}</span>
-							<input
-								name="name"
-								required
-								minlength="2"
-								maxlength="80"
-								placeholder={t('New category')}
-							/>
-						</label>
-						<label>
-							<span>{t('Emoji')}</span>
-							<select name="icon" aria-label={t('Emoji')} required>
-								{#each categoryEmojiValues as emoji (emoji)}
-									<option value={emoji}>{emoji} {emojiLabel(emoji)}</option>
-								{/each}
-							</select>
-						</label>
-						<button class="button secondary" type="submit" disabled={categoryCreating}>
-							<Plus size={16} />
-							<span>{t('Create')}</span>
-						</button>
-					</form>
-
-					{#if categoryNotice}
-						<p
-							class={`notice ${categoryNotice.tone}`}
-							role={categoryNotice.tone === 'danger' ? 'alert' : 'status'}
-						>
-							{categoryNotice.message}
-						</p>
-					{/if}
-
-					<div class="support-catalog-view-toggle" role="group" aria-label={t('Category status')}>
-						<button
-							class="support-catalog-view-option"
-							type="button"
-							aria-pressed={categoryView === 'active'}
-							onclick={() => updateCategoryView('active')}
-						>
-							<span>{t('Active categories')}</span>
-							<strong>{activeCategoryCount}</strong>
-						</button>
-						<button
-							class="support-catalog-view-option"
-							type="button"
-							aria-pressed={categoryView === 'archived'}
-							onclick={() => updateCategoryView('archived')}
-						>
-							<span>{t('Archived categories')}</span>
-							<strong>{archivedCategoryCount}</strong>
-						</button>
-					</div>
-
-					<div class="support-catalog-toolbar">
-						<label class="support-catalog-search">
-							<span>{t('Search {item}', { item: lower(t('Category')) })}</span>
-							<div class="input-with-icon">
-								<Search size={16} />
-								<input
-									value={categorySearch}
-									placeholder={t('Search in {collection}', {
-										collection: lower(t('Categories'))
-									})}
-									aria-label={t('Search {item}', { item: lower(t('Category')) })}
-									oninput={(event) =>
-										updateCategorySearch((event.currentTarget as HTMLInputElement).value)}
-								/>
-							</div>
-						</label>
-						<div class="support-catalog-page-size" aria-label={t('Items per page')}>
-							<span>{t('Display')}</span>
-							<strong>{t('{pageSize} per page', { pageSize: supportCatalogPageSize })}</strong>
-						</div>
-					</div>
-
-					<div class="support-catalog-list-heading">
-						<strong
-							>{categoryView === 'archived' ? t('Archived categories') : t('Categories')}</strong
-						>
-						<span>
-							{t('{start}-{end} of {total}', {
-								start: categoryResultStart,
-								end: categoryResultEnd,
-								total: filteredCategories.length
-							})}
-						</span>
-					</div>
-
-					<div class="support-catalog-list">
-						{#each paginatedCategories as category (category.id)}
-							<div class={['support-catalog-row', category.isArchived && 'muted']}>
-								<form
-									method="post"
-									action="?/updateCategory"
-									class="support-catalog-edit-form support-catalog-category-edit"
-								>
-									<input type="hidden" name="returnTo" value={data.returnTo} />
-									<input type="hidden" name="id" value={category.id} />
-									<label>
-										<span>{t('Color')}</span>
-										<input
-											class="color-picker compact"
-											name="color"
-											type="color"
-											value={category.color}
-											aria-label={`${t('Color')} ${category.name}`}
-										/>
-									</label>
-									<label>
-										<span>{t('Category name')}</span>
-										<input
-											name="name"
-											value={category.name}
-											required
-											minlength="2"
-											maxlength="80"
-											aria-label={`${t('Edit')} ${lower(t('Category'))} ${category.name}`}
-										/>
-									</label>
-									<label>
-										<span>{t('Emoji')}</span>
-										<select name="icon" aria-label={`${t('Emoji')} ${category.name}`}>
-											{#each categoryEmojiValues as emoji (emoji)}
-												<option value={emoji} selected={(category.icon ?? '💼') === emoji}
-													>{emoji} {emojiLabel(emoji)}</option
-												>
-											{/each}
-										</select>
-									</label>
-									<button class="button secondary" type="submit">
-										<Save size={15} />
-										<span>{t('Save')}</span>
-									</button>
-								</form>
-								{#if category.isArchived}
-									<form
-										method="post"
-										action="?/unarchiveCategory"
-										class="support-catalog-remove-form"
-									>
-										<input type="hidden" name="returnTo" value={data.returnTo} />
-										<input type="hidden" name="id" value={category.id} />
-										<button
-											class="button secondary"
-											type="submit"
-											aria-label={`${t('Restore category')} ${category.name}`}
-										>
-											<ArchiveRestore size={15} />
-											<span>{t('Restore')}</span>
-										</button>
-									</form>
-								{:else}
-									<form method="post" action="?/removeCategory" class="support-catalog-remove-form">
-										<input type="hidden" name="returnTo" value={data.returnTo} />
-										<input type="hidden" name="id" value={category.id} />
-										<button
-											class="button secondary danger"
-											type="submit"
-											aria-label={categoryRemoveAriaLabel(category)}
-										>
-											{#if categoryHasAssociations(category)}
-												<Archive size={15} />
-											{:else}
-												<Trash2 size={15} />
-											{/if}
-											<span>{categoryRemoveLabel(category)}</span>
-										</button>
-									</form>
-								{/if}
-							</div>
-						{:else}
-							<p class="support-catalog-empty">
-								{categoryQuery
-									? t('No search results.')
-									: categoryView === 'archived'
-										? t('No archived category found.')
-										: t('No category found.')}
-							</p>
-						{/each}
-					</div>
-
-					{#if categoryPageCount > 1}
-						<div class="support-catalog-pagination">
-							<button
-								class="button secondary"
-								type="button"
-								disabled={activeCategoryPage === 1}
-								aria-label={t('Previous page of {items}', {
-									items: lower(t('Categories'))
-								})}
-								onclick={() => goToCategoryPage(activeCategoryPage - 1)}
-							>
-								<ChevronLeft size={16} />
-								<span>{t('Previous')}</span>
-							</button>
-							<span>
-								{t('Page {page} of {count}', {
-									page: activeCategoryPage,
-									count: categoryPageCount
-								})}
-							</span>
-							<button
-								class="button secondary"
-								type="button"
-								disabled={activeCategoryPage === categoryPageCount}
-								aria-label={t('Next page of {items}', {
-									items: lower(t('Categories'))
-								})}
-								onclick={() => goToCategoryPage(activeCategoryPage + 1)}
-							>
-								<span>{t('Next')}</span>
-								<ChevronRight size={16} />
-							</button>
-						</div>
-					{/if}
-				{:else}
-					<form
-						method="post"
-						action="?/createCatalog"
-						class="support-catalog-form support-catalog-create-form"
-						use:enhance={enhanceSupportCatalogCreate}
-					>
-						<input type="hidden" name="returnTo" value={data.returnTo} />
-						<input type="hidden" name="kind" value={activeExpenseCatalogTab} />
-						<label>
-							<span>{activeCatalogMeta.createLabel}</span>
-							<input
-								name="name"
-								required
-								minlength="2"
-								maxlength={activeCatalogMeta.maxLength}
-								placeholder={activeCatalogMeta.placeholder}
-							/>
-						</label>
-						<button class="button secondary" type="submit" disabled={supportCatalogCreating}>
-							<Plus size={16} />
-							<span>{t('Create')}</span>
-						</button>
-					</form>
-
-					{#if supportCatalogNotice}
-						<p
-							class={`notice ${supportCatalogNotice.tone}`}
-							role={supportCatalogNotice.tone === 'danger' ? 'alert' : 'status'}
-						>
-							{supportCatalogNotice.message}
-						</p>
-					{/if}
-
-					<div class="support-catalog-toolbar">
-						<label class="support-catalog-search">
-							<span>{t('Search {item}', { item: activeCatalogMeta.singular })}</span>
-							<div class="input-with-icon">
-								<Search size={16} />
-								<input
-									value={supportCatalogSearch[activeExpenseCatalogTab]}
-									placeholder={t('Search in {collection}', {
-										collection: lower(activeCatalogMeta.label)
-									})}
-									aria-label={t('Search {item}', { item: activeCatalogMeta.singular })}
-									oninput={(event) =>
-										updateSupportCatalogSearch(
-											activeExpenseCatalogTab,
-											(event.currentTarget as HTMLInputElement).value
-										)}
-								/>
-							</div>
-						</label>
-						<div class="support-catalog-page-size" aria-label={t('Items per page')}>
-							<span>{t('Display')}</span>
-							<strong>{t('{pageSize} per page', { pageSize: supportCatalogPageSize })}</strong>
-						</div>
-					</div>
-
-					<div class="support-catalog-list-heading">
-						<strong>{activeCatalogMeta.label}</strong>
-						<span>
-							{t('{start}-{end} of {total}', {
-								start: supportCatalogResultStart,
-								end: supportCatalogResultEnd,
-								total: filteredSupportCatalogItems.length
-							})}
-						</span>
-					</div>
-
-					<div class="support-catalog-list">
-						{#each paginatedSupportCatalogItems as item (item.id)}
-							<div class="support-catalog-row">
-								<form method="post" action="?/updateCatalog" class="support-catalog-edit-form">
-									<input type="hidden" name="returnTo" value={data.returnTo} />
-									<input type="hidden" name="kind" value={activeExpenseCatalogTab} />
-									<input type="hidden" name="id" value={item.id} />
-									<label>
-										<span>{catalogUsageLabel(item)}</span>
-										<input
-											name="name"
-											value={item.name}
-											required
-											minlength="2"
-											maxlength={activeCatalogMeta.maxLength}
-											aria-label={`${t('Edit')} ${activeCatalogMeta.singular} ${item.name}`}
-										/>
-									</label>
-									<button class="button secondary" type="submit">
-										<Save size={15} />
-										<span>{t('Save')}</span>
-									</button>
-								</form>
-								<form method="post" action="?/removeCatalog" class="support-catalog-remove-form">
-									<input type="hidden" name="returnTo" value={data.returnTo} />
-									<input type="hidden" name="kind" value={activeExpenseCatalogTab} />
-									<input type="hidden" name="id" value={item.id} />
-									<button
-										class="button secondary danger"
-										type="submit"
-										aria-label={`${catalogRemoveLabel(item)} ${activeCatalogMeta.singular} ${item.name}`}
-									>
-										<Trash2 size={15} />
-										<span>{catalogRemoveLabel(item)}</span>
-									</button>
-								</form>
-							</div>
-						{:else}
-							<p class="support-catalog-empty">
-								{activeCatalogQuery ? t('No search results.') : activeCatalogMeta.empty}
-							</p>
-						{/each}
-					</div>
-
-					{#if supportCatalogPageCount > 1}
-						<div class="support-catalog-pagination">
-							<button
-								class="button secondary"
-								type="button"
-								disabled={activeSupportCatalogPage === 1}
-								aria-label={t('Previous page of {items}', {
-									items: lower(activeCatalogMeta.label)
-								})}
-								onclick={() => goToSupportCatalogPage(activeSupportCatalogPage - 1)}
-							>
-								<ChevronLeft size={16} />
-								<span>{t('Previous')}</span>
-							</button>
-							<span>
-								{t('Page {page} of {count}', {
-									page: activeSupportCatalogPage,
-									count: supportCatalogPageCount
-								})}
-							</span>
-							<button
-								class="button secondary"
-								type="button"
-								disabled={activeSupportCatalogPage === supportCatalogPageCount}
-								aria-label={t('Next page of {items}', {
-									items: lower(activeCatalogMeta.label)
-								})}
-								onclick={() => goToSupportCatalogPage(activeSupportCatalogPage + 1)}
-							>
-								<span>{t('Next')}</span>
-								<ChevronRight size={16} />
-							</button>
-						</div>
-					{/if}
-				{/if}
-			</div>
-
-			<div class="dialog-actions single">
-				<button class="button secondary" type="button" onclick={closeSupportCatalogDialog}>
-					{t('Close')}
-				</button>
-			</div>
-		</div>
-	</dialog>
+	<SupportCatalogDialog
+		bind:this={supportCatalogDialog}
+		catalogs={data.catalogs}
+		categories={data.categories}
+		returnTo={data.returnTo}
+		locale={data.locale}
+		{t}
+	/>
 
 	<section class="panel expense-list-panel">
 		<div class="expense-list-heading">
@@ -1637,90 +708,12 @@
 										</button>
 									</form>
 
-									<div class="attachment-panel">
-										<div class="attachment-list">
-											{#each expense.attachments as attachment (attachment.id)}
-												<div class="attachment-chip-row">
-													<a
-														class="attachment-chip"
-														href={resolve(`/app/expenses/attachments/${attachment.id}`)}
-													>
-														<Paperclip size={15} />
-														<span>{attachment.originalName}</span>
-													</a>
-													<form
-														method="post"
-														action="?/deleteAttachment"
-														onsubmit={(e) => {
-															if (!window.confirm(t('Delete attachment?'))) e.preventDefault();
-														}}
-													>
-														<input type="hidden" name="id" value={attachment.id} />
-														<input type="hidden" name="returnTo" value={data.returnTo} />
-														<button
-															class="icon-button danger"
-															type="submit"
-															aria-label={`${t('Delete')} ${attachment.originalName}`}
-														>
-															<Trash2 size={14} />
-														</button>
-													</form>
-												</div>
-											{:else}
-												<span class="empty">{t('No attachments added.')}</span>
-											{/each}
-										</div>
-										<form
-											method="post"
-											action="?/attach"
-											enctype="multipart/form-data"
-											class="attachment-form"
-											use:enhance={enhanceAttachmentUpload(expense.id)}
-										>
-											<input type="hidden" name="id" value={expense.id} />
-											<input type="hidden" name="returnTo" value={data.returnTo} />
-											<input
-												name="attachment"
-												type="file"
-												accept="application/pdf,image/png,image/jpeg,image/webp,text/plain"
-												aria-label={t('Receipt')}
-												disabled={attachmentUploadState[expense.id]?.stage === 'compressing' ||
-													attachmentUploadState[expense.id]?.stage === 'uploading'}
-												onchange={() => clearAttachmentUploadState(expense.id)}
-											/>
-											<button
-												class="button secondary"
-												type="submit"
-												disabled={attachmentUploadState[expense.id]?.stage === 'compressing' ||
-													attachmentUploadState[expense.id]?.stage === 'uploading'}
-											>
-												{#if attachmentUploadState[expense.id]?.stage === 'compressing' || attachmentUploadState[expense.id]?.stage === 'uploading'}
-													<LoaderCircle class="attachment-progress-spinner" size={16} />
-												{:else}
-													<Paperclip size={16} />
-												{/if}
-												<span>
-													{attachmentUploadState[expense.id]?.stage === 'compressing'
-														? t('Compressing image...')
-														: t('Attach')}
-												</span>
-											</button>
-											{#if attachmentUploadState[expense.id]}
-												<p
-													class={['attachment-status', attachmentUploadState[expense.id]?.tone]}
-													role={attachmentUploadState[expense.id]?.tone === 'danger'
-														? 'alert'
-														: 'status'}
-													aria-live="polite"
-												>
-													{#if attachmentUploadState[expense.id]?.stage === 'compressing' || attachmentUploadState[expense.id]?.stage === 'uploading'}
-														<LoaderCircle class="attachment-progress-spinner" size={15} />
-													{/if}
-													<span>{attachmentUploadState[expense.id]?.message}</span>
-												</p>
-											{/if}
-										</form>
-									</div>
+									<AttachmentPanel
+										expenseId={expense.id}
+										attachments={expense.attachments}
+										returnTo={data.returnTo}
+										{t}
+									/>
 								</div>
 							{/if}
 						</details>
@@ -1744,75 +737,7 @@
 		{/if}
 	</section>
 
-	{#if selectedIds.size > 0}
-		<div class="bulk-action-bar" role="region" aria-label={t('Bulk actions')}>
-			<span class="bulk-action-count">{t('{count} selected', { count: selectedIds.size })}</span>
-			<form method="post" action="?/bulkReview" class="bulk-action-form">
-				<input type="hidden" name="returnTo" value={data.returnTo} />
-				<input type="hidden" name="decision" value="approved" />
-				{#each [...selectedIds] as id (id)}
-					<input type="hidden" name="id" value={id} />
-				{/each}
-				<button class="button review-approve" type="submit">
-					<CheckCircle2 size={16} />
-					<span>{t('Approve')}</span>
-				</button>
-			</form>
-			<form method="post" action="?/bulkReview" class="bulk-action-form">
-				<input type="hidden" name="returnTo" value={data.returnTo} />
-				<input type="hidden" name="decision" value="rejected" />
-				{#each [...selectedIds] as id (id)}
-					<input type="hidden" name="id" value={id} />
-				{/each}
-				<button class="button secondary danger" type="submit">
-					<XCircle size={16} />
-					<span>{t('Reject')}</span>
-				</button>
-			</form>
-			<button class="button secondary" type="button" onclick={clearSelection}>
-				{t('Clear')}
-			</button>
-		</div>
-	{/if}
+	<BulkReviewBar {selectedIds} returnTo={data.returnTo} {t} />
 
-	<dialog
-		{@attach captureDeleteDialog}
-		class="app-dialog"
-		aria-labelledby="delete-expense-title"
-		onclick={closeDeleteDialogFromBackdrop}
-		onclose={clearDeleteDialog}
-	>
-		{#if pendingDelete}
-			<div class="dialog-card">
-				<div class="dialog-heading">
-					<span class="dialog-icon danger">
-						<Trash2 size={20} />
-					</span>
-					<div>
-						<h3 id="delete-expense-title">{t('Delete expense?')}</h3>
-						<p>
-							{pendingDelete.description}
-							<span>{pendingDelete.amount}</span>
-						</p>
-					</div>
-				</div>
-
-				<p class="dialog-muted">
-					{t('This action removes the entry and updates dashboards and reports.')}
-				</p>
-
-				<form method="post" action="?/delete" class="dialog-actions">
-					<input type="hidden" name="id" value={pendingDelete.id} />
-					<input type="hidden" name="returnTo" value={data.returnTo} />
-					<button class="button secondary" type="button" onclick={closeDeleteDialog}
-						>{t('Cancel')}</button
-					>
-					<button class="button danger" type="submit">
-						<Trash2 size={17} />
-						<span>{t('Delete')}</span>
-					</button>
-				</form>
-			</div>
-		{/if}
-	</dialog>
+	<DeleteExpenseDialog bind:this={deleteDialog} returnTo={data.returnTo} {t} />
 </section>

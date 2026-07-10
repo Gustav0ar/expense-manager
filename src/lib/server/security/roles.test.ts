@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { isHttpError } from '@sveltejs/kit';
 import {
 	assertRole,
 	canManageBudgets,
@@ -35,8 +36,23 @@ describe('role permissions', () => {
 		expect(canManageWorkspace('owner')).toBe(true);
 	});
 
-	it('throws when a role is not allowed', () => {
-		expect(() => assertRole('member', canManageCategories)).toThrow('Permission denied.');
+	it('throws an HttpError 403 when a role is not allowed', () => {
+		expect(() => assertRole('member', canManageCategories)).toThrow();
+		try {
+			assertRole('member', canManageCategories);
+		} catch (err) {
+			expect(isHttpError(err, 403)).toBe(true);
+			expect((err as { body: { message: string } }).body.message).toBe('Permission denied.');
+		}
 		expect(() => assertRole('owner', canManageCategories)).not.toThrow();
+	});
+
+	it('translates role errors for the requested locale', () => {
+		try {
+			assertRole('member', canManageCategories, 'pt-BR');
+		} catch (err) {
+			expect(isHttpError(err, 403)).toBe(true);
+			expect((err as { body: { message: string } }).body.message).toBe('Permissão insuficiente.');
+		}
 	});
 });

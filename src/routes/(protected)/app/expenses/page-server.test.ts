@@ -191,8 +191,7 @@ describe('expenses page createCatalog action', () => {
 			data: {
 				message: 'Fornecedor já existe.',
 				catalogAction: 'createCatalog',
-				catalogKind: 'vendor',
-				catalogMessage: 'Fornecedor já existe.'
+				catalogKind: 'vendor'
 			}
 		});
 	});

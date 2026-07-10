@@ -63,6 +63,8 @@ The `postCreateCommand` in `devcontainer.json` runs `pnpm install`, `playwright 
 
 **Known pre-existing E2E failure:** `settings.e2e.ts` › `covers security MFA setup…` fails on HEAD due to a timing issue with `'MFA ativado.'` text — not caused by our changes.
 
+Functional Playwright specs are intentionally colocated with routes as `src/routes/*.e2e.ts`. Runtime-specific registration and email-verification specs also live under `src/routes/`, while visual, performance, infrastructure and smoke specs live under `tests/quality/`. See `docs/development.md` for the configuration-to-suite map.
+
 ### When a test fails after UI changes
 
 E2E helpers that scrape page text may need updating when the UI changes. The invite URL helpers in `users.e2e.ts`, `settings.e2e.ts`, and `reports.e2e.ts` extract the URL from `.invite-url-row .invite-url-code` — not the old `.notice.success` text. The remove-member flow in `users.e2e.ts` now requires a dialog confirmation (click "Remover" on the row, then click "Remover" in the dialog).

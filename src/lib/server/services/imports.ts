@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import {
 	auditEvent,
@@ -30,6 +30,8 @@ import {
 
 const maxImportBytes = 1 * 1024 * 1024;
 const maxImportRows = 500;
+
+const importLockNamespace = 'expense-manager:workspace-import:v1';
 
 export type ImportExpensesInput = {
 	sourceType: ExpenseImportSource;
@@ -160,6 +162,19 @@ export async function importExpenses(context: WorkspaceContext, input: ImportExp
 	let insertedCount = 0;
 
 	const result = await db.transaction(async (tx) => {
+		// Serialize concurrent imports of the SAME workspace. pg_advisory_xact_lock is
+		// bound to this transaction and auto-releases on commit/rollback, and it runs on
+		// the transaction's own connection. This closes the TOCTOU window in the
+		// SELECT-then-INSERT dedup below: two concurrent imports of the same file can no
+		// longer both pass the duplicate check and insert the same row. Imports of
+		// different workspaces use different lock keys and never block each other.
+		// Hash the namespaced bigint workspace ID to one signed 64-bit lock key. This
+		// supports the full bigserial range used by the schema instead of truncating
+		// workspace IDs to PostgreSQL's two-argument lock form (int4, int4).
+		await tx.execute(
+			sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${importLockNamespace}:${context.workspaceId}`}, 0))`
+		);
+
 		// Create the import batch record first so we can reference its id on each expense row.
 		const [batch] = await tx
 			.insert(importBatch)
@@ -213,11 +228,11 @@ export async function importExpenses(context: WorkspaceContext, input: ImportExp
 				// kept (the DB SELECT runs inside the transaction and would otherwise see rows
 				// we just inserted, silently dropping genuine duplicates).
 				if (!seenInBatch.has(fp)) {
-					// NOTE: This SELECT-then-INSERT dedup has a TOCTOU window under concurrent
-					// imports from the same workspace. A unique partial index on
-					// (workspace_id, amount_cents, expense_date, description) WHERE deleted_at IS NULL
-					// would make this race-safe. Without it, concurrent imports of the same file
-					// can produce duplicates.
+					// Only check the DB for the first occurrence of a fingerprint in this
+					// batch. Concurrent imports of the same workspace are serialized by the
+					// transaction-level advisory lock taken at the top of this transaction,
+					// so this SELECT-then-INSERT is race-safe: no other import can insert a
+					// matching row between this check and the insert below.
 					const [duplicate] = await tx
 						.select({ id: expense.id })
 						.from(expense)

@@ -11,6 +11,7 @@ import { firstDayOfMonth, lastDayOfMonth } from '$lib/server/utils/date';
 import { csvCell } from '$lib/server/utils/csv';
 import { reportFilterSchema } from '$lib/server/validation';
 import { translate } from '$lib/i18n';
+import { reviewLabel, paymentLabel } from '$lib/utils/status';
 
 export const GET: RequestHandler = async (event) => {
 	const context = await requireWorkspaceContext(event);
@@ -35,6 +36,7 @@ export const GET: RequestHandler = async (event) => {
 		const report = await getAnalyticalExpenseReport(context, filters.data, {
 			limit: analyticalReportExportLimit
 		});
+		const t = (key: string) => translate(context.locale, key);
 		const header = [
 			'id',
 			'date',
@@ -73,8 +75,8 @@ export const GET: RequestHandler = async (event) => {
 								csvCell(row.paymentMethod ?? ''),
 								row.amountCents,
 								csvCell(row.currency),
-								csvCell(reviewLabel(row.reviewStatus, context.locale)),
-								csvCell(paymentLabel(row.paymentStatus, context.locale)),
+								csvCell(reviewLabel(row.reviewStatus, t)),
+								csvCell(paymentLabel(row.paymentStatus, t)),
 								csvCell(row.paidAt ?? ''),
 								csvCell(installmentLabel(row)),
 								row.attachmentCount,
@@ -136,24 +138,4 @@ function installmentLabel(row: AnalyticalExpenseReportRow) {
 	return row.installmentNumber && row.installmentsTotal
 		? `${row.installmentNumber}/${row.installmentsTotal}`
 		: '';
-}
-
-function reviewLabel(status: AnalyticalExpenseReportRow['reviewStatus'], locale: string) {
-	return (
-		{
-			pending: translate(locale, 'Pending'),
-			approved: translate(locale, 'Approved'),
-			rejected: translate(locale, 'Rejected')
-		} satisfies Record<AnalyticalExpenseReportRow['reviewStatus'], string>
-	)[status];
-}
-
-function paymentLabel(status: AnalyticalExpenseReportRow['paymentStatus'], locale: string) {
-	return (
-		{
-			unpaid: translate(locale, 'Open'),
-			paid: translate(locale, 'Paid'),
-			reconciled: translate(locale, 'Reconciled')
-		} satisfies Record<AnalyticalExpenseReportRow['paymentStatus'], string>
-	)[status];
 }
