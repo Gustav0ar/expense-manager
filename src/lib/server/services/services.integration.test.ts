@@ -65,7 +65,8 @@ import { importExpenses, listImportBatches } from './imports';
 import {
 	createRecurringExpense,
 	materializeDueRecurringExpenses,
-	runRecurringExpenseScheduler
+	runRecurringExpenseScheduler,
+	setRecurringExpenseStatus
 } from './recurring';
 import {
 	pruneExpiredUnverifiedRegistrations,
@@ -977,6 +978,49 @@ describe('server service integration', () => {
 			await reserved`SELECT pg_advisory_unlock(${7_273_299_171})`;
 			reserved.release();
 		}
+	});
+
+	it('does not reactivate a recurrence paused during materialization', async () => {
+		const fixture = await createWorkspaceFixture();
+		const schedule = await createRecurringExpense(fixture.context, {
+			categoryId: fixture.categoryId,
+			description: 'Pause race',
+			amount: '25.00',
+			frequency: 'monthly',
+			intervalCount: 1,
+			startDate: '2026-06-01'
+		});
+		let releaseMaterialization!: () => void;
+		let markSchedulesLocked!: () => void;
+		const schedulesLocked = new Promise<void>((resolve) => (markSchedulesLocked = resolve));
+		const materializationGate = new Promise<void>((resolve) => (releaseMaterialization = resolve));
+
+		const materialization = materializeDueRecurringExpenses(fixture.context, '2026-06-30', {
+			afterSchedulesLocked: async () => {
+				markSchedulesLocked();
+				await materializationGate;
+			}
+		});
+		await schedulesLocked;
+
+		let pauseResolved = false;
+		const pause = setRecurringExpenseStatus(fixture.context, schedule.id, 'paused').then(() => {
+			pauseResolved = true;
+		});
+		try {
+			await new Promise((resolve) => setTimeout(resolve, 40));
+			expect(pauseResolved).toBe(false);
+		} finally {
+			releaseMaterialization();
+		}
+		await expect(materialization).resolves.toEqual({ createdCount: 1 });
+		await pause;
+
+		const [storedSchedule] = await db
+			.select({ status: recurringExpense.status, nextRunDate: recurringExpense.nextRunDate })
+			.from(recurringExpense)
+			.where(eq(recurringExpense.id, schedule.id));
+		expect(storedSchedule).toEqual({ status: 'paused', nextRunDate: '2026-07-01' });
 	});
 
 	it('paginates installments and covers expense validation branches', async () => {
