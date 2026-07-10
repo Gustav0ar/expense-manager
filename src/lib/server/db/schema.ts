@@ -296,6 +296,31 @@ export const budgetAlertDelivery = pgTable(
 	]
 );
 
+export const budgetAlertPreference = pgTable(
+	'budget_alert_preference',
+	{
+		workspaceId: bigint('workspace_id', { mode: 'number' })
+			.primaryKey()
+			.references(() => workspace.id, { onDelete: 'cascade' }),
+		isEnabled: boolean('is_enabled').notNull().default(false),
+		locale: text('locale').notNull().default('en'),
+		updatedByUserId: text('updated_by_user_id').references(() => user.id, {
+			onDelete: 'set null'
+		}),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp('updated_at', { withTimezone: true })
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date())
+	},
+	(table) => [
+		check('budget_alert_preference_locale_check', sql`${table.locale} in ('en', 'pt-BR')`),
+		index('budget_alert_preference_enabled_idx')
+			.on(table.workspaceId)
+			.where(sql`${table.isEnabled} = true`)
+	]
+);
+
 export const categoryRule = pgTable(
 	'category_rule',
 	{

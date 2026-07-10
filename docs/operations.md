@@ -751,10 +751,13 @@ before and after in a database copy or an operational maintenance window.
 
 ## Background Job Freshness
 
-`/api/health` reports the recurring-expense scheduler and expired-registration
-cleanup under `backgroundJobs`. Each job exposes its attempt count, advisory-lock
-skip count, last attempt/completion/success/error timestamps and last duration.
-The overall background-job state can be `starting`, `ok` or `degraded`.
+`/api/health` reports the recurring-expense scheduler, automatic budget-alert
+scheduler and expired-registration cleanup under `backgroundJobs`. Each job
+exposes its attempt count, advisory-lock skip count, last
+attempt/completion/success/error timestamps and last duration. The overall
+background-job state can be `starting`, `ok` or `degraded`. Automatic budget
+alerts run hourly and remain disabled for a workspace until an owner or
+administrator opts in from the Budget page.
 
 A transient job failure does not change the endpoint's HTTP status because
 restarting a healthy web process can amplify an external provider or database

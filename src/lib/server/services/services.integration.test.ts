@@ -8,6 +8,7 @@ import { emailVerificationThrottle, user } from '$lib/server/db/auth.schema';
 import {
 	auditEvent,
 	budgetAlertDelivery,
+	budgetAlertPreference,
 	category,
 	categoryBudget,
 	categoryRule,
@@ -36,9 +37,12 @@ import {
 import { createCategory, listCategories, removeCategory, unarchiveCategory } from './categories';
 import {
 	deleteBudget,
+	getBudgetAlertPreference,
 	getBudgetSummary,
 	listBudgetStatus,
+	runAutomaticBudgetAlertScheduler,
 	sendBudgetAlerts,
+	setBudgetAlertPreference,
 	upsertBudget
 } from './budgets';
 import { acceptInvitation, getPendingInvitation } from './invitations';
@@ -1654,6 +1658,91 @@ describe('server service integration', () => {
 			expect(completionEvents).toHaveLength(1);
 		} finally {
 			providerError.mockRestore();
+		}
+	});
+
+	it('runs automatic budget alerts only for opted-in workspaces', async () => {
+		const fixture = await createWorkspaceFixture();
+		const memberContext = await createMemberContext(fixture, 'member');
+		await seedWarningBudget(fixture);
+		await expect(getBudgetAlertPreference(fixture.context)).resolves.toEqual({
+			isEnabled: false,
+			locale: 'en'
+		});
+		await expect(setBudgetAlertPreference(memberContext, true)).rejects.toMatchObject({
+			status: 403
+		});
+
+		await setBudgetAlertPreference({ ...fixture.context, locale: 'pt-BR' }, true);
+		await expect(getBudgetAlertPreference(fixture.context)).resolves.toEqual({
+			isEnabled: true,
+			locale: 'pt-BR'
+		});
+		const [storedPreference] = await db
+			.select({
+				isEnabled: budgetAlertPreference.isEnabled,
+				locale: budgetAlertPreference.locale,
+				updatedByUserId: budgetAlertPreference.updatedByUserId
+			})
+			.from(budgetAlertPreference)
+			.where(eq(budgetAlertPreference.workspaceId, fixture.context.workspaceId));
+		expect(storedPreference).toEqual({
+			isEnabled: true,
+			locale: 'pt-BR',
+			updatedByUserId: fixture.context.userId
+		});
+
+		const send = vi.fn(async () => {});
+		const schedulerLog = vi.spyOn(console, 'info').mockImplementation(() => {});
+		try {
+			await expect(
+				runAutomaticBudgetAlertScheduler({
+					now: new Date('2026-06-20T12:00:00.000Z'),
+					send
+				})
+			).resolves.toEqual({ processed: 1, sent: 1, failed: 0, errors: 0 });
+			expect(send).toHaveBeenCalledWith(
+				expect.stringContaining('@example.com'),
+				fixture.context.workspaceName,
+				'2026-06-01',
+				expect.any(Array),
+				'pt-BR'
+			);
+
+			await expect(
+				runAutomaticBudgetAlertScheduler({
+					now: new Date('2026-06-20T13:00:00.000Z'),
+					send
+				})
+			).resolves.toEqual({ processed: 1, sent: 0, failed: 0, errors: 0 });
+			expect(send).toHaveBeenCalledTimes(1);
+
+			await setBudgetAlertPreference(fixture.context, false);
+			await expect(
+				runAutomaticBudgetAlertScheduler({
+					now: new Date('2026-07-20T12:00:00.000Z'),
+					send
+				})
+			).resolves.toEqual({ processed: 0, sent: 0, failed: 0, errors: 0 });
+		} finally {
+			schedulerLog.mockRestore();
+		}
+	});
+
+	it('skips automatic budget alerts when another instance owns the scheduler lock', async () => {
+		const reserved = await client.reserve();
+		try {
+			await reserved`SELECT pg_advisory_lock(${7_273_299_172})`;
+			await expect(runAutomaticBudgetAlertScheduler()).resolves.toEqual({
+				processed: 0,
+				sent: 0,
+				failed: 0,
+				errors: 0,
+				skipped: true
+			});
+		} finally {
+			await reserved`SELECT pg_advisory_unlock(${7_273_299_172})`;
+			reserved.release();
 		}
 	});
 
