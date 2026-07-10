@@ -6,6 +6,7 @@ import {
 	char,
 	check,
 	date,
+	foreignKey,
 	index,
 	integer,
 	type AnyPgColumn,
@@ -13,6 +14,7 @@ import {
 	pgTable,
 	text,
 	timestamp,
+	uuid,
 	uniqueIndex
 } from 'drizzle-orm/pg-core';
 import { session, user } from './auth.schema';
@@ -268,6 +270,12 @@ export const budgetAlertDelivery = pgTable(
 		claimExpiresAt: timestamp('claim_expires_at', { withTimezone: true }),
 		attemptCount: integer('attempt_count').notNull().default(0),
 		sentAt: timestamp('sent_at', { withTimezone: true }),
+		providerReference: uuid('provider_reference').notNull().defaultRandom(),
+		provider: text('provider'),
+		providerMessageId: text('provider_message_id'),
+		providerMessageUuid: text('provider_message_uuid'),
+		lastProviderEvent: text('last_provider_event'),
+		lastProviderEventAt: timestamp('last_provider_event_at', { withTimezone: true }),
 		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp('updated_at', { withTimezone: true })
 			.notNull()
@@ -290,9 +298,69 @@ export const budgetAlertDelivery = pgTable(
 			table.periodMonth,
 			table.status
 		),
+		uniqueIndex('budget_alert_delivery_provider_reference_unique_idx').on(table.providerReference),
 		index('budget_alert_delivery_claim_expires_at_idx')
 			.on(table.claimExpiresAt)
 			.where(sql`${table.status} = 'sending'`)
+	]
+);
+
+export const emailDeliveryEvent = pgTable(
+	'email_delivery_event',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		provider: text('provider').notNull(),
+		fingerprint: char('fingerprint', { length: 64 }).notNull(),
+		eventType: text('event_type').notNull(),
+		eventTime: timestamp('event_time', { withTimezone: true }).notNull(),
+		budgetAlertDeliveryId: bigint('budget_alert_delivery_id', { mode: 'number' }),
+		providerMessageId: text('provider_message_id'),
+		providerMessageUuid: text('provider_message_uuid'),
+		receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(table) => [
+		foreignKey({
+			columns: [table.budgetAlertDeliveryId],
+			foreignColumns: [budgetAlertDelivery.id],
+			name: 'email_delivery_event_budget_alert_delivery_fk'
+		}).onDelete('cascade'),
+		check('email_delivery_event_provider_check', sql`${table.provider} in ('mailjet')`),
+		check(
+			'email_delivery_event_type_check',
+			sql`${table.eventType} in ('sent', 'open', 'click', 'bounce', 'spam', 'blocked', 'unsub')`
+		),
+		uniqueIndex('email_delivery_event_provider_fingerprint_unique_idx').on(
+			table.provider,
+			table.fingerprint
+		),
+		index('email_delivery_event_type_time_idx').on(table.eventType, table.eventTime),
+		index('email_delivery_event_received_at_idx').on(table.receivedAt),
+		index('email_delivery_event_budget_alert_delivery_idx').on(table.budgetAlertDeliveryId)
+	]
+);
+
+export const budgetAlertPreference = pgTable(
+	'budget_alert_preference',
+	{
+		workspaceId: bigint('workspace_id', { mode: 'number' })
+			.primaryKey()
+			.references(() => workspace.id, { onDelete: 'cascade' }),
+		isEnabled: boolean('is_enabled').notNull().default(false),
+		locale: text('locale').notNull().default('en'),
+		updatedByUserId: text('updated_by_user_id').references(() => user.id, {
+			onDelete: 'set null'
+		}),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp('updated_at', { withTimezone: true })
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date())
+	},
+	(table) => [
+		check('budget_alert_preference_locale_check', sql`${table.locale} in ('en', 'pt-BR')`),
+		index('budget_alert_preference_enabled_idx')
+			.on(table.workspaceId)
+			.where(sql`${table.isEnabled} = true`)
 	]
 );
 

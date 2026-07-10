@@ -1,21 +1,23 @@
 import { error } from '@sveltejs/kit';
-import { and, eq, inArray, lt, or, sql } from 'drizzle-orm';
-import { db } from '$lib/server/db';
+import { and, asc, eq, inArray, lt, or, sql } from 'drizzle-orm';
+import { advisoryLockClient, db } from '$lib/server/db';
 import { user } from '$lib/server/db/auth.schema';
 import {
 	auditEvent,
 	budgetAlertDelivery,
+	budgetAlertPreference,
 	categoryBudget,
+	workspace,
 	workspaceMember
 } from '$lib/server/db/schema';
-import { sendBudgetAlertEmail } from '$lib/server/email';
+import { sendBudgetAlertEmail, type MailDeliveryReceipt } from '$lib/server/email';
 import { canManageBudgets } from '$lib/server/security/roles';
 import { randomToken } from '$lib/server/utils/crypto';
-import { startOfMonth } from '$lib/server/utils/date';
+import { firstDayOfMonth, startOfMonth } from '$lib/server/utils/date';
 import { parseCurrencyToCents } from '$lib/server/utils/money';
 import { formatCents } from '$lib/utils/format';
 import { assertCategoryInWorkspace } from '$lib/server/utils/category';
-import { translate } from '$lib/i18n';
+import { isSupportedLocale, translate, type SupportedLocale } from '$lib/i18n';
 import type { WorkspaceContext } from './workspaces';
 
 export type BudgetInput = {
@@ -25,7 +27,9 @@ export type BudgetInput = {
 	warningThresholdPct: number;
 };
 
-type BudgetAlertSender = typeof sendBudgetAlertEmail;
+type BudgetAlertSender = (
+	...args: Parameters<typeof sendBudgetAlertEmail>
+) => Promise<MailDeliveryReceipt | void>;
 
 type BudgetAlertDeliveryOptions = {
 	send?: BudgetAlertSender;
@@ -33,6 +37,59 @@ type BudgetAlertDeliveryOptions = {
 };
 
 const budgetAlertClaimTtlMs = 10 * 60 * 1000;
+const budgetAlertSchedulerLockKey = 7_273_299_172;
+
+export async function getBudgetAlertPreference(context: WorkspaceContext) {
+	const [preference] = await db
+		.select({
+			isEnabled: budgetAlertPreference.isEnabled,
+			locale: budgetAlertPreference.locale
+		})
+		.from(budgetAlertPreference)
+		.where(eq(budgetAlertPreference.workspaceId, context.workspaceId))
+		.limit(1);
+
+	return {
+		isEnabled: preference?.isEnabled ?? false,
+		locale: isSupportedLocale(preference?.locale) ? preference.locale : context.locale
+	};
+}
+
+export async function setBudgetAlertPreference(context: WorkspaceContext, isEnabled: boolean) {
+	if (!canManageBudgets(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
+
+	await db.transaction(async (tx) => {
+		await tx
+			.insert(budgetAlertPreference)
+			.values({
+				workspaceId: context.workspaceId,
+				isEnabled,
+				locale: context.locale,
+				updatedByUserId: context.userId
+			})
+			.onConflictDoUpdate({
+				target: budgetAlertPreference.workspaceId,
+				set: {
+					isEnabled,
+					locale: context.locale,
+					updatedByUserId: context.userId,
+					updatedAt: new Date()
+				}
+			});
+
+		await tx.insert(auditEvent).values({
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: isEnabled ? 'budget.alerts_enabled' : 'budget.alerts_disabled',
+			entityType: 'budget_alert_preference',
+			entityId: String(context.workspaceId),
+			metadata: { locale: context.locale }
+		});
+	});
+
+	return { isEnabled, locale: context.locale };
+}
 
 export async function listBudgetStatus(context: WorkspaceContext, periodMonth: string) {
 	const month = startOfMonth(periodMonth);
@@ -185,6 +242,102 @@ export async function deleteBudget(context: WorkspaceContext, id: number) {
 	});
 }
 
+export async function runAutomaticBudgetAlertScheduler(
+	options: BudgetAlertDeliveryOptions = {}
+): Promise<{
+	processed: number;
+	sent: number;
+	failed: number;
+	errors: number;
+	skipped?: boolean;
+}> {
+	const reserved = await advisoryLockClient.reserve();
+	try {
+		const lockResult = await reserved<{ acquired: boolean }[]>`
+			SELECT pg_try_advisory_lock(${budgetAlertSchedulerLockKey}) AS acquired
+		`;
+		if (!lockResult[0]?.acquired) {
+			return { processed: 0, sent: 0, failed: 0, errors: 0, skipped: true };
+		}
+
+		try {
+			return await runAutomaticBudgetAlertsWithLock(options);
+		} finally {
+			await reserved`SELECT pg_advisory_unlock(${budgetAlertSchedulerLockKey})`;
+		}
+	} finally {
+		reserved.release();
+	}
+}
+
+async function runAutomaticBudgetAlertsWithLock(options: BudgetAlertDeliveryOptions) {
+	const now = options.now ?? new Date();
+	const periodMonth = firstDayOfMonth(now);
+	const preferences = await db
+		.select({
+			workspaceId: budgetAlertPreference.workspaceId,
+			locale: budgetAlertPreference.locale,
+			workspaceName: workspace.name,
+			currency: workspace.currency,
+			weekStartsOn: workspace.weekStartsOn,
+			userId: workspace.createdByUserId
+		})
+		.from(budgetAlertPreference)
+		.innerJoin(workspace, eq(workspace.id, budgetAlertPreference.workspaceId))
+		.where(eq(budgetAlertPreference.isEnabled, true))
+		.orderBy(asc(budgetAlertPreference.workspaceId));
+
+	let sent = 0;
+	let failed = 0;
+	let errors = 0;
+
+	for (const preference of preferences) {
+		const locale: SupportedLocale = isSupportedLocale(preference.locale) ? preference.locale : 'en';
+		const context: WorkspaceContext = {
+			userId: preference.userId,
+			workspaceId: preference.workspaceId,
+			workspaceName: preference.workspaceName,
+			currency: preference.currency,
+			locale,
+			weekStartsOn: preference.weekStartsOn,
+			role: 'owner'
+		};
+
+		try {
+			const result = await sendBudgetAlerts(context, periodMonth, {
+				now,
+				send: options.send
+			});
+			sent += result.sentCount;
+			failed += result.failedCount;
+		} catch (schedulerError) {
+			errors++;
+			console.error(
+				JSON.stringify({
+					level: 'error',
+					message: 'budget_alert_scheduler: failed to process workspace',
+					workspaceId: preference.workspaceId,
+					error: schedulerError instanceof Error ? schedulerError.message : String(schedulerError)
+				})
+			);
+		}
+	}
+
+	console.info(
+		JSON.stringify({
+			level: 'info',
+			message: 'budget_alert_scheduler: run complete',
+			processed: preferences.length,
+			sent,
+			failed,
+			errors,
+			periodMonth
+		})
+	);
+
+	return { processed: preferences.length, sent, failed, errors };
+}
+
 export async function sendBudgetAlerts(
 	context: WorkspaceContext,
 	periodMonth: string,
@@ -303,7 +456,8 @@ export async function sendBudgetAlerts(
 			)
 			.returning({
 				id: budgetAlertDelivery.id,
-				recipientEmail: budgetAlertDelivery.recipientEmail
+				recipientEmail: budgetAlertDelivery.recipientEmail,
+				providerReference: budgetAlertDelivery.providerReference
 			});
 	});
 
@@ -326,7 +480,14 @@ export async function sendBudgetAlerts(
 
 	const attempts = await Promise.allSettled(
 		claimed.map((delivery) =>
-			send(delivery.recipientEmail, context.workspaceName, month, emailItems, context.locale)
+			send(
+				delivery.recipientEmail,
+				context.workspaceName,
+				month,
+				emailItems,
+				context.locale,
+				`budget-alert:${delivery.providerReference}`
+			)
 		)
 	);
 
@@ -337,6 +498,7 @@ export async function sendBudgetAlerts(
 			const delivery = claimed[index];
 			if (attempt.status === 'fulfilled') {
 				sentCount++;
+				const receipt = attempt.value;
 				await db
 					.update(budgetAlertDelivery)
 					.set({
@@ -344,6 +506,13 @@ export async function sendBudgetAlerts(
 						sentAt: now,
 						claimToken: null,
 						claimExpiresAt: null,
+						...(receipt
+							? {
+									provider: receipt.provider,
+									providerMessageId: receipt.messageId ?? null,
+									providerMessageUuid: receipt.messageUuid ?? null
+								}
+							: {}),
 						updatedAt: now
 					})
 					.where(

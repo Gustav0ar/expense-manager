@@ -65,6 +65,7 @@ export default defineConfig({
 				'src/lib/server/theme.ts',
 				'src/lib/server/services/budgets.ts',
 				'src/lib/server/services/category-rules.ts',
+				'src/lib/server/services/email-delivery-events.ts',
 				'src/lib/server/services/expenses.ts',
 				'src/lib/server/services/imports.ts',
 				'src/lib/server/services/invitations.ts',

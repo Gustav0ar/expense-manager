@@ -3,6 +3,7 @@ import {
 	authEmailSchema,
 	auditFilterSchema,
 	budgetAlertSchema,
+	budgetAlertPreferenceSchema,
 	budgetSchema,
 	categoryRuleSchema,
 	categorySchema,
@@ -330,6 +331,9 @@ describe('validation schemas', () => {
 		expect(budgetAlertSchema.parse({ periodMonth: '2026-06' })).toEqual({
 			periodMonth: '2026-06-01'
 		});
+		expect(budgetAlertPreferenceSchema.parse({ enabled: 'true' })).toEqual({ enabled: true });
+		expect(budgetAlertPreferenceSchema.parse({ enabled: 'false' })).toEqual({ enabled: false });
+		expect(budgetAlertPreferenceSchema.safeParse({ enabled: 'yes' }).success).toBe(false);
 		expect(auditFilterSchema.parse({ action: 'expense.created', cursor: 'abc' })).toEqual({
 			action: 'expense.created',
 			cursor: 'abc'

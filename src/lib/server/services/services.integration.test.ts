@@ -3,14 +3,16 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { emailVerificationThrottle, user } from '$lib/server/db/auth.schema';
 import {
 	auditEvent,
 	budgetAlertDelivery,
+	budgetAlertPreference,
 	category,
 	categoryBudget,
 	categoryRule,
+	emailDeliveryEvent,
 	expense,
 	expenseAttachment,
 	importBatch,
@@ -22,6 +24,7 @@ import {
 	workspaceMember
 } from '$lib/server/db/schema';
 import { client, db } from '$lib/server/db';
+import { sendBudgetAlertEmail } from '$lib/server/email';
 import { sha256 } from '$lib/server/utils/crypto';
 import { formatCents } from '$lib/utils/format';
 import { getAttachmentForDownload, maxAttachmentBytes, saveExpenseAttachment } from './attachments';
@@ -36,9 +39,12 @@ import {
 import { createCategory, listCategories, removeCategory, unarchiveCategory } from './categories';
 import {
 	deleteBudget,
+	getBudgetAlertPreference,
 	getBudgetSummary,
 	listBudgetStatus,
+	runAutomaticBudgetAlertScheduler,
 	sendBudgetAlerts,
+	setBudgetAlertPreference,
 	upsertBudget
 } from './budgets';
 import { acceptInvitation, getPendingInvitation } from './invitations';
@@ -62,6 +68,11 @@ import {
 	updateExpenseCatalogItem
 } from './expense-catalogs';
 import { importExpenses, listImportBatches } from './imports';
+import {
+	parseMailjetWebhookPayload,
+	pruneEmailDeliveryEvents,
+	recordMailjetDeliveryEvents
+} from './email-delivery-events';
 import {
 	createRecurringExpense,
 	materializeDueRecurringExpenses,
@@ -1617,10 +1628,14 @@ describe('server service integration', () => {
 				expect.any(String),
 				'2026-06-01',
 				expect.any(Array),
-				'en'
+				'en',
+				expect.stringMatching(
+					/^budget-alert:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+				)
 			);
 			expect(retrySend).not.toHaveBeenCalledWith(
 				ownerEmail,
+				expect.anything(),
 				expect.anything(),
 				expect.anything(),
 				expect.anything(),
@@ -1654,6 +1669,257 @@ describe('server service integration', () => {
 			expect(completionEvents).toHaveLength(1);
 		} finally {
 			providerError.mockRestore();
+		}
+	});
+
+	it('reconciles replay-safe Mailjet feedback to the exact budget-alert delivery', async () => {
+		const fixture = await createWorkspaceFixture();
+		await seedWarningBudget(fixture);
+		const [owner] = await db
+			.select({ email: user.email })
+			.from(user)
+			.where(eq(user.id, fixture.context.userId));
+		let customId = '';
+		const send = vi.fn(async (...args: Parameters<typeof sendBudgetAlertEmail>) => {
+			customId = String(args[5]);
+			return {
+				provider: 'mailjet' as const,
+				messageId: '19421777835146490',
+				messageUuid: '1ab23cd4-e567-8901-2345-6789f0gh1i2j'
+			};
+		});
+
+		await expect(sendBudgetAlerts(fixture.context, '2026-06', { send })).resolves.toMatchObject({
+			sentCount: 1,
+			failedCount: 0
+		});
+		expect(customId).toMatch(/^budget-alert:[0-9a-f-]{36}$/);
+		await db
+			.update(budgetAlertDelivery)
+			.set({ status: 'failed', sentAt: null })
+			.where(eq(budgetAlertDelivery.workspaceId, fixture.context.workspaceId));
+
+		const eventPayload = {
+			event: 'sent',
+			time: 1_771_588_800,
+			email: owner.email,
+			CustomID: customId,
+			mj_message_id: '19421777835146490',
+			Message_GUID: '1ab23cd4-e567-8901-2345-6789f0gh1i2j'
+		};
+		const parsed = parseMailjetWebhookPayload(eventPayload, new Date('2026-02-20T12:05:00.000Z'));
+		await expect(recordMailjetDeliveryEvents(parsed)).resolves.toEqual({
+			accepted: 1,
+			duplicates: 0,
+			matched: 1
+		});
+		await expect(recordMailjetDeliveryEvents(parsed)).resolves.toEqual({
+			accepted: 0,
+			duplicates: 1,
+			matched: 0
+		});
+		const olderMatched = parseMailjetWebhookPayload(
+			[
+				{
+					event: 'bounce',
+					time: 1_771_585_200,
+					email: owner.email,
+					CustomID: customId
+				},
+				{
+					event: 'open',
+					time: 1_771_585_260,
+					email: owner.email,
+					CustomID: customId
+				},
+				{
+					event: 'click',
+					time: 1_771_585_320,
+					email: owner.email,
+					CustomID: customId
+				}
+			],
+			new Date('2026-02-20T12:05:00.000Z')
+		);
+		await expect(recordMailjetDeliveryEvents(olderMatched)).resolves.toEqual({
+			accepted: 3,
+			duplicates: 0,
+			matched: 3
+		});
+		const wrongRecipient = parseMailjetWebhookPayload(
+			{
+				event: 'blocked',
+				time: 1_771_585_380,
+				email: `other-${owner.email}`,
+				CustomID: customId
+			},
+			new Date('2026-02-20T12:05:00.000Z')
+		);
+		await expect(recordMailjetDeliveryEvents(wrongRecipient)).resolves.toEqual({
+			accepted: 1,
+			duplicates: 0,
+			matched: 0
+		});
+		const providerOnly = parseMailjetWebhookPayload(
+			{
+				event: 'unsub',
+				time: 1_771_585_440,
+				email: owner.email
+			},
+			new Date('2026-02-20T12:05:00.000Z')
+		);
+		await expect(recordMailjetDeliveryEvents(providerOnly)).resolves.toEqual({
+			accepted: 1,
+			duplicates: 0,
+			matched: 0
+		});
+
+		const [delivery] = await db
+			.select({
+				id: budgetAlertDelivery.id,
+				status: budgetAlertDelivery.status,
+				sentAt: budgetAlertDelivery.sentAt,
+				provider: budgetAlertDelivery.provider,
+				providerMessageId: budgetAlertDelivery.providerMessageId,
+				providerMessageUuid: budgetAlertDelivery.providerMessageUuid,
+				lastProviderEvent: budgetAlertDelivery.lastProviderEvent,
+				lastProviderEventAt: budgetAlertDelivery.lastProviderEventAt
+			})
+			.from(budgetAlertDelivery)
+			.where(eq(budgetAlertDelivery.workspaceId, fixture.context.workspaceId));
+		expect(delivery).toEqual({
+			id: expect.any(Number),
+			status: 'sent',
+			sentAt: new Date('2026-02-20T12:00:00.000Z'),
+			provider: 'mailjet',
+			providerMessageId: '19421777835146490',
+			providerMessageUuid: '1ab23cd4-e567-8901-2345-6789f0gh1i2j',
+			lastProviderEvent: 'sent',
+			lastProviderEventAt: new Date('2026-02-20T12:00:00.000Z')
+		});
+		await expect(
+			db
+				.select({ eventType: emailDeliveryEvent.eventType })
+				.from(emailDeliveryEvent)
+				.where(eq(emailDeliveryEvent.budgetAlertDeliveryId, delivery.id))
+		).resolves.toHaveLength(4);
+		const fingerprints = [...parsed, ...olderMatched, ...wrongRecipient, ...providerOnly].map(
+			(event) => event.fingerprint
+		);
+		await db
+			.update(emailDeliveryEvent)
+			.set({ receivedAt: new Date('2026-01-01T00:00:00.000Z') })
+			.where(inArray(emailDeliveryEvent.fingerprint, fingerprints));
+		await expect(pruneEmailDeliveryEvents(new Date('2026-04-02T00:00:00.000Z'))).resolves.toEqual({
+			deletedEvents: 6
+		});
+	});
+
+	it('skips email event retention while another instance owns its advisory lock', async () => {
+		const reserved = await client.reserve();
+		try {
+			await reserved`
+				SELECT pg_advisory_lock(
+					hashtextextended('expense-manager:email-delivery-event-cleanup:v1', 0)
+				)
+			`;
+			await expect(pruneEmailDeliveryEvents()).resolves.toEqual({
+				deletedEvents: 0,
+				skipped: true
+			});
+		} finally {
+			await reserved`
+				SELECT pg_advisory_unlock(
+					hashtextextended('expense-manager:email-delivery-event-cleanup:v1', 0)
+				)
+			`;
+			reserved.release();
+		}
+	});
+
+	it('runs automatic budget alerts only for opted-in workspaces', async () => {
+		const fixture = await createWorkspaceFixture();
+		const memberContext = await createMemberContext(fixture, 'member');
+		await seedWarningBudget(fixture);
+		await expect(getBudgetAlertPreference(fixture.context)).resolves.toEqual({
+			isEnabled: false,
+			locale: 'en'
+		});
+		await expect(setBudgetAlertPreference(memberContext, true)).rejects.toMatchObject({
+			status: 403
+		});
+
+		await setBudgetAlertPreference({ ...fixture.context, locale: 'pt-BR' }, true);
+		await expect(getBudgetAlertPreference(fixture.context)).resolves.toEqual({
+			isEnabled: true,
+			locale: 'pt-BR'
+		});
+		const [storedPreference] = await db
+			.select({
+				isEnabled: budgetAlertPreference.isEnabled,
+				locale: budgetAlertPreference.locale,
+				updatedByUserId: budgetAlertPreference.updatedByUserId
+			})
+			.from(budgetAlertPreference)
+			.where(eq(budgetAlertPreference.workspaceId, fixture.context.workspaceId));
+		expect(storedPreference).toEqual({
+			isEnabled: true,
+			locale: 'pt-BR',
+			updatedByUserId: fixture.context.userId
+		});
+
+		const send = vi.fn(async () => {});
+		const schedulerLog = vi.spyOn(console, 'info').mockImplementation(() => {});
+		try {
+			const firstCycle = await runAutomaticBudgetAlertScheduler({
+				now: new Date('2026-06-20T12:00:00.000Z'),
+				send
+			});
+			expect(firstCycle).toMatchObject({ sent: 1, failed: 0, errors: 0 });
+			expect(firstCycle.processed).toBeGreaterThanOrEqual(1);
+			expect(send).toHaveBeenCalledWith(
+				expect.stringContaining('@example.com'),
+				fixture.context.workspaceName,
+				'2026-06-01',
+				expect.any(Array),
+				'pt-BR',
+				expect.stringMatching(/^budget-alert:[0-9a-f-]{36}$/)
+			);
+
+			const secondCycle = await runAutomaticBudgetAlertScheduler({
+				now: new Date('2026-06-20T13:00:00.000Z'),
+				send
+			});
+			expect(secondCycle).toMatchObject({ sent: 0, failed: 0, errors: 0 });
+			expect(secondCycle.processed).toBeGreaterThanOrEqual(1);
+			expect(send).toHaveBeenCalledTimes(1);
+
+			await setBudgetAlertPreference(fixture.context, false);
+			await expect(
+				runAutomaticBudgetAlertScheduler({
+					now: new Date('2026-07-20T12:00:00.000Z'),
+					send
+				})
+			).resolves.toMatchObject({ sent: 0, failed: 0, errors: 0 });
+		} finally {
+			schedulerLog.mockRestore();
+		}
+	});
+
+	it('skips automatic budget alerts when another instance owns the scheduler lock', async () => {
+		const reserved = await client.reserve();
+		try {
+			await reserved`SELECT pg_advisory_lock(${7_273_299_172})`;
+			await expect(runAutomaticBudgetAlertScheduler()).resolves.toEqual({
+				processed: 0,
+				sent: 0,
+				failed: 0,
+				errors: 0,
+				skipped: true
+			});
+		} finally {
+			await reserved`SELECT pg_advisory_unlock(${7_273_299_172})`;
+			reserved.release();
 		}
 	});
 

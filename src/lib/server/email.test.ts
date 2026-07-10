@@ -232,9 +232,23 @@ describe('email helpers', () => {
 
 	it('sends transactional emails through the Mailjet API when configured', async () => {
 		const previous = captureEmailEnv();
-		const fetchMock = vi
-			.spyOn(globalThis, 'fetch')
-			.mockResolvedValue(new Response(JSON.stringify({ Messages: [] }), { status: 200 }));
+		const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					Messages: [
+						{
+							To: [
+								{
+									MessageID: '19421777835146490',
+									MessageUUID: '1ab23cd4-e567-8901-2345-6789f0gh1i2j'
+								}
+							]
+						}
+					]
+				}),
+				{ status: 200 }
+			)
+		);
 		createTransportMock.mockClear();
 
 		try {
@@ -244,11 +258,17 @@ describe('email helpers', () => {
 			privateEnv.MAILJET_SECRET_KEY = 'mailjet-secret';
 			privateEnv.MAILJET_FROM = 'Expense Manager <no-reply@example.com>';
 
-			await sendMail({
+			const receipt = await sendMail({
 				to: 'admin@example.com',
 				subject: 'Budget alert',
 				text: 'Budget usage is above the alert threshold.',
-				html: '<p>Budget usage is above the alert threshold.</p>'
+				html: '<p>Budget usage is above the alert threshold.</p>',
+				customId: 'budget-alert:55d8e3af-9f0d-4e39-8a7a-d907e458db79'
+			});
+			expect(receipt).toEqual({
+				provider: 'mailjet',
+				messageId: '19421777835146490',
+				messageUuid: '1ab23cd4-e567-8901-2345-6789f0gh1i2j'
 			});
 
 			expect(createTransportMock).not.toHaveBeenCalled();
@@ -275,6 +295,7 @@ describe('email helpers', () => {
 								],
 								Subject: 'Budget alert',
 								TextPart: 'Budget usage is above the alert threshold.',
+								CustomID: 'budget-alert:55d8e3af-9f0d-4e39-8a7a-d907e458db79',
 								HTMLPart: '<p>Budget usage is above the alert threshold.</p>'
 							}
 						]

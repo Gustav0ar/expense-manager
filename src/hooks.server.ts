@@ -18,6 +18,7 @@ import { startBackgroundJobs, triggerBackgroundJobs } from '$lib/server/backgrou
 import { registerGracefulShutdown } from '$lib/server/shutdown';
 
 const unsafeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const mailjetWebhookPath = '/api/webhooks/mailjet';
 
 // Run once at module load (server startup) to catch proxy misconfiguration early.
 if (!building) {
@@ -58,7 +59,7 @@ const handleBetterAuth: Handle = async ({ event, resolve }) => {
 				html.replace('<html lang="en"', `<html lang="${locale}" data-theme="${themePreference}"`)
 		});
 
-	if (unsafeMethods.has(event.request.method)) {
+	if (unsafeMethods.has(event.request.method) && !isMailjetWebhook(event.url.pathname)) {
 		const origin = event.request.headers.get('origin');
 		if (
 			!isTrustedOrigin({
@@ -120,6 +121,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 };
 
 function shouldEnforceMfa(pathname: string) {
+	if (isMailjetWebhook(pathname)) return false;
 	if (pathname === '/mfa' || pathname.startsWith('/mfa/')) return false;
 	if (pathname === '/logout' || pathname.startsWith('/logout/')) return false;
 	if (pathname === '/api/health') return false;
@@ -145,6 +147,10 @@ function shouldEnforceMfa(pathname: string) {
 	)
 		return false;
 	return true;
+}
+
+function isMailjetWebhook(pathname: string) {
+	return pathname.replace(/\/$/, '') === mailjetWebhookPath;
 }
 
 export const handleError: HandleServerError = ({ error, event, status, message }) => {
