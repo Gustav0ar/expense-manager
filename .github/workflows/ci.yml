@@ -34,6 +34,7 @@ jobs:
       POSTGRES_PASSWORD: expense_manager
       DATABASE_URL: postgres://expense_manager:expense_manager@localhost:5432/expense_manager
       DB_POOL_MAX: 5
+      TRUSTED_PROXY_CIDR: 172.16.0.0/12
       DOMAIN_NAME: example.invalid
       IMAGE_OWNER_LOWERCASE: example
       IMAGE_TAG: ci

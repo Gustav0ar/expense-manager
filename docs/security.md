@@ -32,7 +32,7 @@
 - `REQUIRE_EMAIL_VERIFICATION=true` in production unless an operational exception is documented
 - `ALLOW_REGISTRATION=false` when production access should be invite-only or manually managed
 - HTTPS active
-- `TRUST_PROXY_HEADERS=true` only if the app is isolated behind a trusted reverse proxy, with `TRUSTED_PROXY_CIDR` set to that proxy's subnet
+- `TRUST_PROXY_HEADERS=true` only if the app is isolated behind a trusted reverse proxy, with `TRUSTED_PROXY_CIDR` set to the narrowest deployment-specific proxy subnet; no broad private-network CIDR is trusted by default
 - Backups copied outside the VPS
 - Restore tested
 - `uploads` volume backup checked and copied outside the VPS when receipts are used
