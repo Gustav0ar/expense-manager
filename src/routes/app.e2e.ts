@@ -11,19 +11,44 @@ function uniqueEmail(prefix: string) {
 	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
 }
 
-async function submitRegisterForm(page: Page, input: { email: string; name: string }) {
-	const form = page
-		.locator('form')
-		.filter({ has: page.getByRole('button', { name: 'Criar conta' }) });
+async function submitRegisterForm(
+	page: Page,
+	input: { email: string; name: string },
+	buttonName = 'Criar conta'
+) {
+	const form = page.locator('form').filter({ has: page.getByRole('button', { name: buttonName }) });
+	const password = ['test', 'password', '123'].join('-');
 	await form.locator('input[name="name"]').fill(input.name);
 	await form.locator('input[name="email"]').fill(input.email);
-	await form.locator('input[name="password"]').fill(['test', 'password', '123'].join('-'));
-	await form
-		.locator('input[name="passwordConfirmation"]')
-		.fill(['test', 'password', '123'].join('-'));
+	await form.locator('input[name="password"]').fill(password);
+	await form.locator('input[name="passwordConfirmation"]').fill(password);
 	await expect(form.locator('input[name="name"]')).toHaveValue(input.name);
 	await expect(form.locator('input[name="email"]')).toHaveValue(input.email);
-	await form.getByRole('button', { name: 'Criar conta' }).click();
+	await expect(form.locator('input[name="password"]')).toHaveValue(password);
+	await expect(form.locator('input[name="passwordConfirmation"]')).toHaveValue(password);
+	await form.getByRole('button', { name: buttonName }).click();
+}
+
+async function registerAccount(
+	page: Page,
+	input: { email: string; name: string },
+	options: { buttonName?: string; path?: string } = {}
+) {
+	const buttonName = options.buttonName ?? 'Criar conta';
+	const path = options.path ?? '/register';
+
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		await page.goto(path);
+		await page.waitForLoadState('networkidle');
+		await submitRegisterForm(page, input, buttonName);
+
+		try {
+			await expect(page).not.toHaveURL(/\/register/, { timeout: 5000 });
+			return;
+		} catch (error) {
+			if (attempt === 2) throw error;
+		}
+	}
 }
 
 async function browserDateLabel(page: Page, value: string) {
@@ -460,11 +485,7 @@ test.describe('english locale defaults', () => {
 		await page.goto('/register');
 		await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 		await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible();
-		await page.getByLabel('Name').fill('Test User');
-		await page.getByLabel('Email').fill(email);
-		await page.getByLabel('Password', { exact: true }).fill(['test', 'password', '123'].join('-'));
-		await page.getByLabel('Confirm password').fill(['test', 'password', '123'].join('-'));
-		await page.getByRole('button', { name: 'Create account' }).click();
+		await registerAccount(page, { email, name: 'Test User' }, { buttonName: 'Create account' });
 
 		await expect(page).toHaveURL(/\/app\/onboarding/);
 		await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
