@@ -2,13 +2,14 @@
 
 ## Development environment
 
-The project uses a **dev container** (`.devcontainer/`) backed by podman. All build, test, and runtime commands must run inside the container, not on the host — the host lacks the right Node version, pnpm, and the Playwright browser deps.
+The project uses a **dev container** (`.devcontainer/`) backed by Podman. All build, test, and runtime commands must run inside the container, not on the host — the host lacks the right Node version, pnpm, and the Playwright browser deps.
+
+The host uses `podman compose` directly. **Never invoke `docker`, `docker compose`, or `docker-compose`, and do not set `DOCKER_HOST`.**
 
 ### Start the container
 
 ```bash
-export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
-docker-compose --file .devcontainer/compose.yml up -d
+podman compose --file .devcontainer/compose.yml up -d
 ```
 
 The `postgres` service starts automatically. The `app` service mounts the repo at `/workspaces/expense-manager`.
@@ -16,8 +17,7 @@ The `postgres` service starts automatically. The `app` service mounts the repo a
 ### Run commands inside the container
 
 ```bash
-export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
-docker-compose --file .devcontainer/compose.yml exec app sh -c "cd /workspaces/expense-manager && <command>"
+podman compose --file .devcontainer/compose.yml exec app sh -c "cd /workspaces/expense-manager && <command>"
 ```
 
 ### Common commands (all run inside the container)
@@ -38,7 +38,7 @@ docker-compose --file .devcontainer/compose.yml exec app sh -c "cd /workspaces/e
 Worktrees live inside the repo (`.claude/worktrees/<name>/`) and are mounted into the container at the same path under `/workspaces/expense-manager/.claude/worktrees/<name>/`. To run commands in a worktree:
 
 ```bash
-docker-compose --file .devcontainer/compose.yml exec app sh -c \
+podman compose --file .devcontainer/compose.yml exec app sh -c \
   "cd /workspaces/expense-manager/.claude/worktrees/<name> && CI=true pnpm install --frozen-lockfile && pnpm build"
 ```
 
