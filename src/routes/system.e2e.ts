@@ -146,6 +146,12 @@ test('covers planning bad paths and budget deletion', async ({ page }) => {
 		'Mês inválido para alertas.'
 	);
 	await expectActionMessage(
+		await page.request.post('/app/planning?/setBudgetAlertPreference', {
+			form: { enabled: 'yes' }
+		}),
+		'Preferência de alertas de orçamento inválida.'
+	);
+	await expectActionMessage(
 		await page.request.post('/app/planning?/deleteBudget', {
 			form: { id: 'invalid', periodMonth: '2026-06' }
 		}),

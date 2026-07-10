@@ -37,6 +37,14 @@ recipients are not sent the same monthly alert again, while failed recipients
 remain retryable. In-flight claims expire after ten minutes so an interrupted
 application process cannot leave delivery permanently stuck.
 
+Automatic budget alerts are opt-in per workspace. Owners and administrators can
+enable them from the Budget page; the preference stores the selected UI locale.
+The background coordinator checks enabled workspaces hourly and uses a Postgres
+advisory lock so only one application instance performs a cycle. The existing
+monthly recipient ledger makes repeated cycles idempotent and retries failed
+recipients without resending successful deliveries. Manual **Send alerts now**
+remains available independently of the automatic preference.
+
 SMTP fallback values, if API delivery cannot be used:
 
 ```env

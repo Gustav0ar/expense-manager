@@ -86,12 +86,33 @@
 			<div class="panel-heading panel-heading-wrap">
 				<h3>{t('Budget by category')}</h3>
 				<div class="inline-actions">
-					<Target size={19} />
+					<span
+						class={['status-pill', data.budgetAlertPreference.isEnabled ? 'success' : 'neutral']}
+					>
+						{data.budgetAlertPreference.isEnabled
+							? t('Automatic alerts on')
+							: t('Automatic alerts off')}
+					</span>
+					<form method="post" action="?/setBudgetAlertPreference">
+						<input
+							type="hidden"
+							name="enabled"
+							value={data.budgetAlertPreference.isEnabled ? 'false' : 'true'}
+						/>
+						<button class="button secondary" type="submit">
+							<Bell size={16} />
+							<span>
+								{data.budgetAlertPreference.isEnabled
+									? t('Disable automatic alerts')
+									: t('Enable automatic alerts')}
+							</span>
+						</button>
+					</form>
 					<form method="post" action="?/sendBudgetAlerts">
 						<input type="hidden" name="periodMonth" value={data.periodMonth} />
 						<button class="button secondary" type="submit" title={t('Send budget alert email')}>
-							<Bell size={16} />
-							<span>{t('Enable alerts')}</span>
+							<Target size={16} />
+							<span>{t('Send alerts now')}</span>
 						</button>
 					</form>
 				</div>

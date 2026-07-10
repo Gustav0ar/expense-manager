@@ -1059,7 +1059,13 @@ test('covers planning, imports, attachments and audit flows', async ({ page }) =
 	await expect(page.locator('.budget-item').filter({ hasText: 'Limpeza' })).toContainText(
 		'R$ 500,00'
 	);
-	await page.getByRole('button', { name: 'Enviar alertas' }).click();
+	await expect(page.getByText('Alertas automáticos desativados')).toBeVisible();
+	await page.getByRole('button', { name: 'Ativar alertas automáticos' }).click();
+	await expect(page.getByText('Alertas automáticos de orçamento ativados.')).toBeVisible();
+	await expect(page.getByText('Alertas automáticos ativados')).toBeVisible();
+	await page.getByRole('button', { name: 'Desativar alertas automáticos' }).click();
+	await expect(page.getByText('Alertas automáticos de orçamento desativados.')).toBeVisible();
+	await page.getByRole('button', { name: 'Enviar alertas agora' }).click();
 	await expect(page.getByText('Nenhum alerta de orçamento para enviar.')).toBeVisible();
 
 	const planningPaymentForm = page.locator('form.compact-support');

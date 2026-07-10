@@ -3,8 +3,10 @@ import type { Actions, PageServerLoad } from './$types';
 import { listCategories } from '$lib/server/services/categories';
 import {
 	deleteBudget,
+	getBudgetAlertPreference,
 	listBudgetStatus,
 	sendBudgetAlerts,
+	setBudgetAlertPreference,
 	upsertBudget
 } from '$lib/server/services/budgets';
 import { importExpenses, listImportBatches } from '$lib/server/services/imports';
@@ -23,6 +25,7 @@ import { firstDayOfMonth } from '$lib/server/utils/date';
 import {
 	budgetSchema,
 	budgetAlertSchema,
+	budgetAlertPreferenceSchema,
 	idSchema,
 	expenseCatalogSchema,
 	importExpenseSchema,
@@ -40,19 +43,22 @@ export const load: PageServerLoad = async (event) => {
 	if (!filters.success) throw error(400, translate(event.locals.locale, 'Filters are invalid.'));
 	const periodMonth = filters.data.periodMonth || firstDayOfMonth(new Date());
 
-	const [categories, catalogs, budgets, recurringExpenses, importBatches] = await Promise.all([
-		listCategories(context),
-		listExpenseCatalogs(context),
-		listBudgetStatus(context, periodMonth),
-		listRecurringExpenses(context),
-		listImportBatches(context)
-	]);
+	const [categories, catalogs, budgets, budgetAlertPreference, recurringExpenses, importBatches] =
+		await Promise.all([
+			listCategories(context),
+			listExpenseCatalogs(context),
+			listBudgetStatus(context, periodMonth),
+			getBudgetAlertPreference(context),
+			listRecurringExpenses(context),
+			listImportBatches(context)
+		]);
 
 	return {
 		categories,
 		catalogs,
 		periodMonth,
 		budgets,
+		budgetAlertPreference,
 		recurringExpenses,
 		importBatches
 	};
@@ -77,6 +83,26 @@ export const actions: Actions = {
 
 		await deleteBudget(context, id.data);
 		throw redirect(303, planningPath(formData));
+	},
+	setBudgetAlertPreference: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const parsed = parseForm(await event.request.formData(), budgetAlertPreferenceSchema);
+		if (!parsed.success)
+			return fail(400, {
+				message: translate(event.locals.locale, 'Invalid budget alert preference.'),
+				tone: 'danger'
+			});
+
+		await setBudgetAlertPreference(context, parsed.data.enabled);
+		return {
+			tone: 'success',
+			message: translate(
+				event.locals.locale,
+				parsed.data.enabled
+					? 'Automatic budget alerts enabled.'
+					: 'Automatic budget alerts disabled.'
+			)
+		};
 	},
 	sendBudgetAlerts: async (event) => {
 		const context = await requireWorkspaceContext(event);

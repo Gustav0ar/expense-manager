@@ -327,6 +327,10 @@ export const budgetAlertSchema = z.object({
 	periodMonth: monthSchema
 });
 
+export const budgetAlertPreferenceSchema = z.object({
+	enabled: z.enum(['true', 'false']).transform((value) => value === 'true')
+});
+
 export const auditFilterSchema = z.object({
 	action: z.string().trim().max(120).optional(),
 	entityType: z.string().trim().max(80).optional(),
