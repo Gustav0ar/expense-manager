@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { afterNavigate } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import './expenses.css';
 	import LocalizedDate from '$lib/components/LocalizedDate.svelte';
 	import SearchableSelect from '$lib/components/SearchableSelect.svelte';
 	import { translate } from '$lib/i18n';
