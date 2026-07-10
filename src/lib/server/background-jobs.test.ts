@@ -43,6 +43,9 @@ describe('BackgroundJobCoordinator', () => {
 		expect(budgetAlertScheduler).toHaveBeenCalledTimes(1);
 		expect(emailDeliveryCleanup).toHaveBeenCalledTimes(1);
 		expect(coordinator.health().status).toBe('ok');
+		expect(coordinator.health(new Date('2026-07-09T12:00:03.000Z').getTime()).status).toBe(
+			'degraded'
+		);
 		await coordinator.stop();
 	});
 

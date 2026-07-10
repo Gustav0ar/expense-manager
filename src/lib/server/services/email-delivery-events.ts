@@ -68,12 +68,7 @@ export function isMailjetWebhookAuthorized(
 	const match = authorization.match(/^Basic\s+([^\s]+)$/i);
 	if (!match) return false;
 
-	let decoded: string;
-	try {
-		decoded = Buffer.from(match[1], 'base64').toString('utf8');
-	} catch {
-		return false;
-	}
+	const decoded = Buffer.from(match[1], 'base64').toString('utf8');
 
 	const separator = decoded.indexOf(':');
 	if (separator < 0) return false;
