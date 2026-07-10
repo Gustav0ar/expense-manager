@@ -3,7 +3,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { emailVerificationThrottle, user } from '$lib/server/db/auth.schema';
 import {
 	auditEvent,
@@ -1718,6 +1718,61 @@ describe('server service integration', () => {
 			duplicates: 1,
 			matched: 0
 		});
+		const olderMatched = parseMailjetWebhookPayload(
+			[
+				{
+					event: 'bounce',
+					time: 1_771_585_200,
+					email: owner.email,
+					CustomID: customId
+				},
+				{
+					event: 'open',
+					time: 1_771_585_260,
+					email: owner.email,
+					CustomID: customId
+				},
+				{
+					event: 'click',
+					time: 1_771_585_320,
+					email: owner.email,
+					CustomID: customId
+				}
+			],
+			new Date('2026-02-20T12:05:00.000Z')
+		);
+		await expect(recordMailjetDeliveryEvents(olderMatched)).resolves.toEqual({
+			accepted: 3,
+			duplicates: 0,
+			matched: 3
+		});
+		const wrongRecipient = parseMailjetWebhookPayload(
+			{
+				event: 'blocked',
+				time: 1_771_585_380,
+				email: `other-${owner.email}`,
+				CustomID: customId
+			},
+			new Date('2026-02-20T12:05:00.000Z')
+		);
+		await expect(recordMailjetDeliveryEvents(wrongRecipient)).resolves.toEqual({
+			accepted: 1,
+			duplicates: 0,
+			matched: 0
+		});
+		const providerOnly = parseMailjetWebhookPayload(
+			{
+				event: 'unsub',
+				time: 1_771_585_440,
+				email: owner.email
+			},
+			new Date('2026-02-20T12:05:00.000Z')
+		);
+		await expect(recordMailjetDeliveryEvents(providerOnly)).resolves.toEqual({
+			accepted: 1,
+			duplicates: 0,
+			matched: 0
+		});
 
 		const [delivery] = await db
 			.select({
@@ -1747,14 +1802,39 @@ describe('server service integration', () => {
 				.select({ eventType: emailDeliveryEvent.eventType })
 				.from(emailDeliveryEvent)
 				.where(eq(emailDeliveryEvent.budgetAlertDeliveryId, delivery.id))
-		).resolves.toHaveLength(1);
+		).resolves.toHaveLength(4);
+		const fingerprints = [...parsed, ...olderMatched, ...wrongRecipient, ...providerOnly].map(
+			(event) => event.fingerprint
+		);
 		await db
 			.update(emailDeliveryEvent)
 			.set({ receivedAt: new Date('2026-01-01T00:00:00.000Z') })
-			.where(eq(emailDeliveryEvent.budgetAlertDeliveryId, delivery.id));
+			.where(inArray(emailDeliveryEvent.fingerprint, fingerprints));
 		await expect(pruneEmailDeliveryEvents(new Date('2026-04-02T00:00:00.000Z'))).resolves.toEqual({
-			deletedEvents: 1
+			deletedEvents: 6
 		});
+	});
+
+	it('skips email event retention while another instance owns its advisory lock', async () => {
+		const reserved = await client.reserve();
+		try {
+			await reserved`
+				SELECT pg_advisory_lock(
+					hashtextextended('expense-manager:email-delivery-event-cleanup:v1', 0)
+				)
+			`;
+			await expect(pruneEmailDeliveryEvents()).resolves.toEqual({
+				deletedEvents: 0,
+				skipped: true
+			});
+		} finally {
+			await reserved`
+				SELECT pg_advisory_unlock(
+					hashtextextended('expense-manager:email-delivery-event-cleanup:v1', 0)
+				)
+			`;
+			reserved.release();
+		}
 	});
 
 	it('runs automatic budget alerts only for opted-in workspaces', async () => {
