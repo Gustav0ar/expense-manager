@@ -1195,6 +1195,15 @@ th {
 	padding: 0.75rem;
 }
 
+.support-catalog-category-panel {
+	display: grid;
+	gap: 0.7rem;
+}
+
+.support-catalog-category-panel[hidden] {
+	display: none;
+}
+
 .support-catalog-create-form {
 	border-bottom: 1px solid var(--color-line-soft);
 	padding-bottom: 0.7rem;

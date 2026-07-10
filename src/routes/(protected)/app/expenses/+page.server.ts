@@ -1,5 +1,6 @@
-import { error, fail, isHttpError, redirect } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
+import { handleServiceError, expenseFormValues } from '$lib/server/action-utils';
 import {
 	createCategory as createCategoryService,
 	listCategories,
@@ -82,28 +83,14 @@ export const actions: Actions = {
 			return fail(400, {
 				message: translate(event.locals.locale, 'Check expense data.'),
 				fieldErrors,
-				values: {
-					description: (formData.get('description') as string) ?? '',
-					amount: (formData.get('amount') as string) ?? '',
-					expenseDate: (formData.get('expenseDate') as string) ?? '',
-					categoryId: (formData.get('categoryId') as string) ?? '',
-					paymentMethodId: (formData.get('paymentMethodId') as string) ?? '',
-					vendorId: formData.get('vendorId') ? Number(formData.get('vendorId')) : null,
-					costCenterId: formData.get('costCenterId') ? Number(formData.get('costCenterId')) : null,
-					competencyMonth: (formData.get('competencyMonth') as string) ?? '',
-					installments: (formData.get('installments') as string) ?? '1',
-					notes: (formData.get('notes') as string) ?? ''
-				}
+				values: expenseFormValues(formData)
 			});
 		}
 
 		try {
 			await createExpense(context, parsed.data);
 		} catch (err) {
-			if (isHttpError(err) && err.status === 409) {
-				return fail(409, { message: err.body.message });
-			}
-			throw err;
+			return handleServiceError(err, {}, { only409: true });
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -133,15 +120,11 @@ export const actions: Actions = {
 				catalogMessage: translate(event.locals.locale, 'Catalog item added successfully.')
 			};
 		} catch (catalogError) {
-			if (isHttpError(catalogError) && catalogError.status < 500 && catalogError.status !== 403) {
-				return fail(catalogError.status, {
-					message: catalogError.body.message,
-					catalogAction: 'createCatalog',
-					catalogKind: parsed.data.kind,
-					catalogMessage: catalogError.body.message
-				});
-			}
-			throw catalogError;
+			return handleServiceError(
+				catalogError,
+				{ catalogAction: 'createCatalog', catalogKind: parsed.data.kind },
+				{ exclude403: true }
+			);
 		}
 	},
 	createCategory: async (event) => {
@@ -168,18 +151,11 @@ export const actions: Actions = {
 				categoryMessage: translate(event.locals.locale, 'Category created successfully.')
 			};
 		} catch (categoryError) {
-			if (
-				isHttpError(categoryError) &&
-				categoryError.status < 500 &&
-				categoryError.status !== 403
-			) {
-				return fail(categoryError.status, {
-					message: categoryError.body.message,
-					categoryAction: 'createCategory',
-					categoryMessage: categoryError.body.message
-				});
-			}
-			throw categoryError;
+			return handleServiceError(
+				categoryError,
+				{ categoryAction: 'createCategory' },
+				{ exclude403: true }
+			);
 		}
 	},
 	updateCategory: async (event) => {
@@ -193,10 +169,7 @@ export const actions: Actions = {
 		try {
 			await updateCategoryService(context, id.data, parsed.data);
 		} catch (categoryError) {
-			if (isHttpError(categoryError) && categoryError.status < 500) {
-				return fail(categoryError.status, { message: categoryError.body.message });
-			}
-			throw categoryError;
+			return handleServiceError(categoryError);
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -210,10 +183,7 @@ export const actions: Actions = {
 		try {
 			await removeCategoryService(context, id.data);
 		} catch (categoryError) {
-			if (isHttpError(categoryError) && categoryError.status < 500) {
-				return fail(categoryError.status, { message: categoryError.body.message });
-			}
-			throw categoryError;
+			return handleServiceError(categoryError);
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -227,10 +197,7 @@ export const actions: Actions = {
 		try {
 			await unarchiveCategoryService(context, id.data);
 		} catch (categoryError) {
-			if (isHttpError(categoryError) && categoryError.status < 500) {
-				return fail(categoryError.status, { message: categoryError.body.message });
-			}
-			throw categoryError;
+			return handleServiceError(categoryError);
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -244,10 +211,7 @@ export const actions: Actions = {
 		try {
 			await updateExpenseCatalogItem(context, parsed.data);
 		} catch (catalogError) {
-			if (isHttpError(catalogError) && catalogError.status < 500) {
-				return fail(catalogError.status, { message: catalogError.body.message });
-			}
-			throw catalogError;
+			return handleServiceError(catalogError);
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -261,10 +225,7 @@ export const actions: Actions = {
 		try {
 			await removeExpenseCatalogItem(context, parsed.data);
 		} catch (catalogError) {
-			if (isHttpError(catalogError) && catalogError.status < 500) {
-				return fail(catalogError.status, { message: catalogError.body.message });
-			}
-			throw catalogError;
+			return handleServiceError(catalogError);
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -282,10 +243,7 @@ export const actions: Actions = {
 			// 409 means a concurrent modification was detected between the SELECT
 			// and the UPDATE; surface it as an inline form message so the user can
 			// reload and retry without losing context.
-			if (isHttpError(err) && err.status === 409) {
-				return fail(409, { message: err.body.message });
-			}
-			throw err;
+			return handleServiceError(err, {}, { only409: true });
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -299,10 +257,7 @@ export const actions: Actions = {
 		try {
 			await deleteExpense(context, id.data);
 		} catch (err) {
-			if (isHttpError(err) && err.status === 409) {
-				return fail(409, { message: err.body.message });
-			}
-			throw err;
+			return handleServiceError(err, {}, { only409: true });
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -316,10 +271,7 @@ export const actions: Actions = {
 		try {
 			await reviewExpense(context, parsed.data.id, parsed.data);
 		} catch (err) {
-			if (isHttpError(err) && err.status === 409) {
-				return fail(409, { message: err.body.message });
-			}
-			throw err;
+			return handleServiceError(err, {}, { only409: true });
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -333,10 +285,7 @@ export const actions: Actions = {
 		try {
 			await updateExpensePaymentStatus(context, parsed.data.id, parsed.data);
 		} catch (err) {
-			if (isHttpError(err) && err.status === 409) {
-				return fail(409, { message: err.body.message });
-			}
-			throw err;
+			return handleServiceError(err, {}, { only409: true });
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -352,10 +301,7 @@ export const actions: Actions = {
 		try {
 			await saveExpenseAttachment(context, id.data, file);
 		} catch (err) {
-			if (isHttpError(err) && err.status !== 403 && err.status < 500) {
-				return fail(err.status, { message: err.body.message });
-			}
-			throw err;
+			return handleServiceError(err, {}, { exclude403: true });
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -369,10 +315,7 @@ export const actions: Actions = {
 		try {
 			await deleteExpenseAttachment(context, id.data);
 		} catch (err) {
-			if (isHttpError(err) && err.status < 500) {
-				return fail(err.status, { message: err.body.message });
-			}
-			throw err;
+			return handleServiceError(err);
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -391,12 +334,7 @@ export const actions: Actions = {
 		try {
 			await bulkReviewExpenses(context, ids, decision);
 		} catch (err) {
-			if (isHttpError(err) && err.status < 500) {
-				return fail((err as { status: number }).status, {
-					message: (err as { body: { message: string } }).body.message
-				});
-			}
-			throw err;
+			return handleServiceError(err);
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	}

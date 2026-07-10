@@ -1,3 +1,6 @@
+import { error } from '@sveltejs/kit';
+import { translate, type SupportedLocale } from '$lib/i18n';
+
 export type Role = 'owner' | 'admin' | 'member' | 'viewer';
 
 const rank: Record<Role, number> = {
@@ -39,8 +42,12 @@ export function canManageBudgets(role: Role) {
 	return rank[role] >= rank.admin;
 }
 
-export function assertRole(role: Role, allowed: (role: Role) => boolean) {
+export function assertRole(
+	role: Role,
+	allowed: (role: Role) => boolean,
+	locale: SupportedLocale = 'en'
+) {
 	if (!allowed(role)) {
-		throw new Error('Permission denied.');
+		throw error(403, translate(locale, 'Permission denied.'));
 	}
 }
