@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getClientIp } from './client-ip';
 
 function requestWithHeaders(headers: Record<string, string>) {
@@ -9,8 +9,13 @@ function requestWithHeaders(headers: Record<string, string>) {
 }
 
 describe('rate limit client IP resolution', () => {
+	beforeEach(() => {
+		process.env.TRUSTED_PROXY_CIDR = '198.51.100.0/24';
+	});
+
 	afterEach(() => {
 		delete process.env.TRUST_PROXY_HEADERS;
+		delete process.env.TRUSTED_PROXY_CIDR;
 	});
 
 	it('ignores forwarded headers unless proxy headers are trusted', () => {

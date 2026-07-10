@@ -27,6 +27,20 @@ podman compose -f .devcontainer/compose.yml exec app pnpm exec playwright instal
 podman compose -f .devcontainer/compose.yml exec app pnpm test:e2e
 ```
 
+Playwright configurations are split by runtime mode:
+
+| Configuration                                | Purpose                                                                       | Usual command                                                           |
+| -------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `playwright.config.ts`                       | Functional route tests against the normal application configuration           | `pnpm test:e2e` or `pnpm exec playwright test src/routes/<file>.e2e.ts` |
+| `playwright.registration-lockdown.config.ts` | Registration-disabled behavior with `ALLOW_REGISTRATION=false`                | Included in `pnpm test:e2e`                                             |
+| `playwright.email-verification.config.ts`    | Required email-verification behavior                                          | Included in `pnpm test:e2e`                                             |
+| `playwright.visual.config.ts`                | Reviewed screenshot baselines                                                 | `pnpm test:visual`                                                      |
+| `playwright.performance.config.ts`           | Browser performance budgets                                                   | `pnpm test:performance`                                                 |
+| `playwright.infrastructure.config.ts`        | Deployment and infrastructure assertions that do not require a browser server | `pnpm test:infrastructure`                                              |
+| `playwright.smoke.config.ts`                 | Local or external post-deploy smoke coverage                                  | `pnpm test:smoke`                                                       |
+
+Functional `*.e2e.ts` specs are colocated under `src/routes/` so route behavior and its coverage move together. Cross-cutting quality specs live under `tests/quality/`.
+
 ## Run Quality Gates
 
 The quality gates add screenshot regression, performance budget, infrastructure failure and smoke coverage on top of the functional E2E suite:

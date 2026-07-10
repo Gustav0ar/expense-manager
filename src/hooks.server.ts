@@ -13,6 +13,7 @@ import { isMfaEnabled, isMfaSessionVerified } from '$lib/server/services/mfa';
 import { pruneExpiredUnverifiedRegistrations } from '$lib/server/services/email-verification';
 import { runRecurringExpenseScheduler } from '$lib/server/services/recurring';
 import { isTrustedOrigin } from '$lib/server/security/origin';
+import { assertProxyTrustConfig } from '$lib/server/security/client-ip';
 import { isRegistrationEnabled } from '$lib/server/registration';
 import { traceRequest } from '$lib/server/observability/tracing';
 
@@ -24,6 +25,13 @@ let verificationCleanupPromise: Promise<unknown> | null = null;
 const recurringSchedulerIntervalMs = 5 * 60 * 1000; // 5 minutes
 let nextRecurringSchedulerAt = 0;
 let recurringSchedulerPromise: Promise<unknown> | null = null;
+let backgroundJobsTimer: ReturnType<typeof setInterval> | null = null;
+
+// Run once at module load (server startup) to catch proxy misconfiguration early.
+if (!building) {
+	assertProxyTrustConfig();
+	startBackgroundJobs();
+}
 
 function setSecurityHeaders(response: Response) {
 	response.headers.set('X-Content-Type-Options', 'nosniff');
@@ -149,6 +157,21 @@ function triggerRecurringExpenseScheduler() {
 		.finally(() => {
 			recurringSchedulerPromise = null;
 		});
+}
+
+function startBackgroundJobs() {
+	if (building || process.env.NODE_ENV !== 'production' || backgroundJobsTimer) return;
+
+	// Run once at startup, then keep jobs progressing even when the deployment
+	// receives no requests. Per-process timestamps avoid redundant local work;
+	// database advisory locks coordinate separate application instances.
+	cleanupExpiredUnverifiedRegistrations();
+	triggerRecurringExpenseScheduler();
+	backgroundJobsTimer = setInterval(() => {
+		cleanupExpiredUnverifiedRegistrations();
+		triggerRecurringExpenseScheduler();
+	}, verificationCleanupIntervalMs);
+	backgroundJobsTimer.unref();
 }
 
 function shouldEnforceMfa(pathname: string) {

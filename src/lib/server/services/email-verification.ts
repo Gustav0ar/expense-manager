@@ -1,10 +1,11 @@
-import { and, eq, inArray, lte, notExists } from 'drizzle-orm';
+import { and, eq, inArray, lte, notExists, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { emailVerificationThrottle, user, workspace } from '$lib/server/db/schema';
 
 const resendCooldownMs = 2 * 60 * 1000;
 const maxVerificationEmailSends = 5;
 const pendingRegistrationTtlMs = 60 * 60 * 1000;
+const cleanupLockName = 'expense-manager:email-verification-cleanup:v1';
 
 type VerificationUser = {
 	id: string;
@@ -85,6 +86,11 @@ export async function requestVerificationEmail({
 
 export async function pruneExpiredUnverifiedRegistrations(now = new Date()) {
 	return db.transaction(async (tx) => {
+		const [lock] = await tx.execute<{ acquired: boolean }>(sql`
+			SELECT pg_try_advisory_xact_lock(hashtextextended(${cleanupLockName}, 0)) AS acquired
+		`);
+		if (!lock?.acquired) return { deletedUsers: 0 };
+
 		// Run SELECT and DELETEs inside one transaction to prevent the TOCTOU
 		// window where a user verifies their email between the SELECT and the DELETE.
 		const expiredRows = await tx

@@ -20,7 +20,7 @@ import {
 	workspaceInvitation,
 	workspaceMember
 } from '$lib/server/db/schema';
-import { db } from '$lib/server/db';
+import { client, db } from '$lib/server/db';
 import { sha256 } from '$lib/server/utils/crypto';
 import { formatCents } from '$lib/utils/format';
 import { getAttachmentForDownload, maxAttachmentBytes, saveExpenseAttachment } from './attachments';
@@ -61,7 +61,11 @@ import {
 	updateExpenseCatalogItem
 } from './expense-catalogs';
 import { importExpenses, listImportBatches } from './imports';
-import { createRecurringExpense, materializeDueRecurringExpenses } from './recurring';
+import {
+	createRecurringExpense,
+	materializeDueRecurringExpenses,
+	runRecurringExpenseScheduler
+} from './recurring';
 import {
 	pruneExpiredUnverifiedRegistrations,
 	requestVerificationEmail
@@ -174,6 +178,25 @@ describe('server service integration', () => {
 		).resolves.toEqual({ deletedUsers: 1 });
 		await expect(findWorkspaceById(workspaceRow.id)).resolves.toBeNull();
 		await expect(findUserById(unverifiedUser.id)).resolves.toBeNull();
+	});
+
+	it('skips verification cleanup while another instance owns the advisory lock', async () => {
+		const reserved = await client.reserve();
+		try {
+			await reserved`
+				SELECT pg_advisory_lock(
+					hashtextextended('expense-manager:email-verification-cleanup:v1', 0)
+				)
+			`;
+			await expect(pruneExpiredUnverifiedRegistrations()).resolves.toEqual({ deletedUsers: 0 });
+		} finally {
+			await reserved`
+				SELECT pg_advisory_unlock(
+					hashtextextended('expense-manager:email-verification-cleanup:v1', 0)
+				)
+			`;
+			reserved.release();
+		}
 	});
 
 	it('persists failed-only imports with batch counters and failed row details', async () => {
@@ -312,6 +335,24 @@ describe('server service integration', () => {
 		});
 		expect(batchImport.importedCount).toBe(2);
 		expect(batchImport.duplicateCount).toBe(0);
+	});
+
+	it('serializes concurrent imports in the same workspace', async () => {
+		const fixture = await createWorkspaceFixture();
+		const csv = 'Data;Descrição;Valor\n28/06/2026;Importação concorrente;12,50\n';
+
+		const results = await Promise.all(
+			['first.csv', 'second.csv'].map((name) =>
+				importExpenses(fixture.context, {
+					sourceType: 'csv',
+					defaultCategoryId: fixture.categoryId,
+					file: new File([csv], name, { type: 'text/csv' })
+				})
+			)
+		);
+
+		expect(results.reduce((total, result) => total + result.importedCount, 0)).toBe(1);
+		expect(results.reduce((total, result) => total + result.duplicateCount, 0)).toBe(1);
 	});
 
 	it('does not import positive OFX credits as expenses', async () => {
@@ -920,6 +961,21 @@ describe('server service integration', () => {
 		await reviewExpense(fixture.context, generated.id, { reviewStatus: 'approved' });
 		dashboard = await getDashboard(fixture.context, '2026-06-01', '2026-06-30');
 		expect(dashboard.totalCents).toBe(6_000);
+	});
+
+	it('skips the recurring scheduler when another instance owns its lock', async () => {
+		const reserved = await client.reserve();
+		try {
+			await reserved`SELECT pg_advisory_lock(${7_273_299_171})`;
+			await expect(runRecurringExpenseScheduler()).resolves.toEqual({
+				processed: 0,
+				created: 0,
+				errors: 0
+			});
+		} finally {
+			await reserved`SELECT pg_advisory_unlock(${7_273_299_171})`;
+			reserved.release();
+		}
 	});
 
 	it('paginates installments and covers expense validation branches', async () => {
@@ -1775,6 +1831,70 @@ describe('server service integration', () => {
 		await expect(bulkReviewExpenses(fixture.context, [], 'approved')).rejects.toMatchObject({
 			status: 400
 		});
+	});
+
+	it('bulk-reject only affects pending, unpaid expenses', async () => {
+		const fixture = await createWorkspaceFixture();
+		const memberContext = await createMemberContext(fixture, 'member');
+
+		// Pending + unpaid — the only state bulk review can act on.
+		const ePending = await createExpense(memberContext, {
+			description: 'Pending unpaid',
+			amount: '20,00',
+			expenseDate: '2026-06-10',
+			categoryId: fixture.categoryId
+		});
+
+		// Approved + paid — outside bulk review's reviewStatus='pending' filter.
+		const eApprovedPaid = await createExpense(memberContext, {
+			description: 'Approved and paid',
+			amount: '50,00',
+			expenseDate: '2026-06-10',
+			categoryId: fixture.categoryId
+		});
+		await reviewExpense(fixture.context, eApprovedPaid.ids[0], { reviewStatus: 'approved' });
+		await updateExpensePaymentStatus(fixture.context, eApprovedPaid.ids[0], {
+			paymentStatus: 'paid'
+		});
+
+		// Defensive legacy state: the service layer does not create pending+paid
+		// rows, but the schema permits one and bulk review must not erase its payment.
+		const [ePendingPaid] = await db
+			.insert(expense)
+			.values({
+				workspaceId: fixture.context.workspaceId,
+				categoryId: fixture.categoryId,
+				createdByUserId: fixture.context.userId,
+				description: 'Pending but paid',
+				amountCents: 7500,
+				expenseDate: '2026-06-10',
+				reviewStatus: 'pending',
+				paymentStatus: 'paid',
+				paidAt: '2026-06-10'
+			})
+			.returning({ id: expense.id });
+
+		// Only the pending+unpaid expense is eligible.
+		const result = await bulkReviewExpenses(
+			fixture.context,
+			[ePending.ids[0], eApprovedPaid.ids[0], ePendingPaid.id],
+			'rejected'
+		);
+		expect(result.count).toBe(1);
+
+		const listed = await listExpenses(fixture.context, {});
+		const rejected = listed.items.find((e) => e.id === ePending.ids[0]);
+		expect(rejected?.reviewStatus).toBe('rejected');
+		expect(rejected?.paymentStatus).toBe('unpaid');
+
+		// The approved+paid expense is untouched: still approved, still paid.
+		const untouched = listed.items.find((e) => e.id === eApprovedPaid.ids[0]);
+		expect(untouched?.reviewStatus).toBe('approved');
+		expect(untouched?.paymentStatus).toBe('paid');
+
+		const protectedPayment = listed.items.find((e) => e.id === ePendingPaid.id);
+		expect(protectedPayment?.reviewStatus).toBe('pending');
+		expect(protectedPayment?.paymentStatus).toBe('paid');
 	});
 
 	it('rejects unsafe attachment inputs before writing files', async () => {
