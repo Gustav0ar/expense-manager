@@ -7,6 +7,7 @@ import { and, eq } from 'drizzle-orm';
 import { emailVerificationThrottle, user } from '$lib/server/db/auth.schema';
 import {
 	auditEvent,
+	budgetAlertDelivery,
 	category,
 	categoryBudget,
 	categoryRule,
@@ -64,7 +65,8 @@ import { importExpenses, listImportBatches } from './imports';
 import {
 	createRecurringExpense,
 	materializeDueRecurringExpenses,
-	runRecurringExpenseScheduler
+	runRecurringExpenseScheduler,
+	setRecurringExpenseStatus
 } from './recurring';
 import {
 	pruneExpiredUnverifiedRegistrations,
@@ -188,7 +190,10 @@ describe('server service integration', () => {
 					hashtextextended('expense-manager:email-verification-cleanup:v1', 0)
 				)
 			`;
-			await expect(pruneExpiredUnverifiedRegistrations()).resolves.toEqual({ deletedUsers: 0 });
+			await expect(pruneExpiredUnverifiedRegistrations()).resolves.toEqual({
+				deletedUsers: 0,
+				skipped: true
+			});
 		} finally {
 			await reserved`
 				SELECT pg_advisory_unlock(
@@ -970,12 +975,56 @@ describe('server service integration', () => {
 			await expect(runRecurringExpenseScheduler()).resolves.toEqual({
 				processed: 0,
 				created: 0,
-				errors: 0
+				errors: 0,
+				skipped: true
 			});
 		} finally {
 			await reserved`SELECT pg_advisory_unlock(${7_273_299_171})`;
 			reserved.release();
 		}
+	});
+
+	it('does not reactivate a recurrence paused during materialization', async () => {
+		const fixture = await createWorkspaceFixture();
+		const schedule = await createRecurringExpense(fixture.context, {
+			categoryId: fixture.categoryId,
+			description: 'Pause race',
+			amount: '25.00',
+			frequency: 'monthly',
+			intervalCount: 1,
+			startDate: '2026-06-01'
+		});
+		let releaseMaterialization!: () => void;
+		let markSchedulesLocked!: () => void;
+		const schedulesLocked = new Promise<void>((resolve) => (markSchedulesLocked = resolve));
+		const materializationGate = new Promise<void>((resolve) => (releaseMaterialization = resolve));
+
+		const materialization = materializeDueRecurringExpenses(fixture.context, '2026-06-30', {
+			afterSchedulesLocked: async () => {
+				markSchedulesLocked();
+				await materializationGate;
+			}
+		});
+		await schedulesLocked;
+
+		let pauseResolved = false;
+		const pause = setRecurringExpenseStatus(fixture.context, schedule.id, 'paused').then(() => {
+			pauseResolved = true;
+		});
+		try {
+			await new Promise((resolve) => setTimeout(resolve, 40));
+			expect(pauseResolved).toBe(false);
+		} finally {
+			releaseMaterialization();
+		}
+		await expect(materialization).resolves.toEqual({ createdCount: 1 });
+		await pause;
+
+		const [storedSchedule] = await db
+			.select({ status: recurringExpense.status, nextRunDate: recurringExpense.nextRunDate })
+			.from(recurringExpense)
+			.where(eq(recurringExpense.id, schedule.id));
+		expect(storedSchedule).toEqual({ status: 'paused', nextRunDate: '2026-07-01' });
 	});
 
 	it('paginates installments and covers expense validation branches', async () => {
@@ -1421,13 +1470,19 @@ describe('server service integration', () => {
 				status: 403
 			});
 			await expect(
-				upsertBudget(fixture.context, {
-					categoryId: fixture.categoryId + 999_999,
-					periodMonth: '2026-06',
-					amount: '100,00',
-					warningThresholdPct: 80
-				})
-			).rejects.toMatchObject({ status: 400 });
+				upsertBudget(
+					{ ...fixture.context, locale: 'pt-BR' },
+					{
+						categoryId: fixture.categoryId + 999_999,
+						periodMonth: '2026-06',
+						amount: '100,00',
+						warningThresholdPct: 80
+					}
+				)
+			).rejects.toMatchObject({
+				status: 400,
+				body: { message: 'Categoria inválida.' }
+			});
 
 			await upsertBudget(fixture.context, {
 				categoryId: fixture.categoryId,
@@ -1529,6 +1584,101 @@ describe('server service integration', () => {
 			}
 			emailLog.mockRestore();
 		}
+	});
+
+	it('retries only failed budget-alert recipients after partial provider failure', async () => {
+		const fixture = await createWorkspaceFixture();
+		const adminContext = await createMemberContext(fixture, 'admin');
+		await seedWarningBudget(fixture);
+		const [owner, admin] = await Promise.all([
+			db.select({ email: user.email }).from(user).where(eq(user.id, fixture.context.userId)),
+			db.select({ email: user.email }).from(user).where(eq(user.id, adminContext.userId))
+		]);
+		const ownerEmail = owner[0].email;
+		const adminEmail = admin[0].email;
+		const providerError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const firstSend = vi.fn(async (to: string) => {
+			if (to === adminEmail) throw new Error('temporary provider failure');
+		});
+
+		try {
+			await expect(
+				sendBudgetAlerts(fixture.context, '2026-06', { send: firstSend })
+			).resolves.toMatchObject({ sentCount: 1, failedCount: 1, alreadySent: false });
+			expect(firstSend).toHaveBeenCalledTimes(2);
+
+			const retrySend = vi.fn(async () => {});
+			await expect(
+				sendBudgetAlerts(fixture.context, '2026-06', { send: retrySend })
+			).resolves.toMatchObject({ sentCount: 1, failedCount: 0, alreadySent: false });
+			expect(retrySend).toHaveBeenCalledTimes(1);
+			expect(retrySend).toHaveBeenCalledWith(
+				adminEmail,
+				expect.any(String),
+				'2026-06-01',
+				expect.any(Array),
+				'en'
+			);
+			expect(retrySend).not.toHaveBeenCalledWith(
+				ownerEmail,
+				expect.anything(),
+				expect.anything(),
+				expect.anything(),
+				expect.anything()
+			);
+
+			const deliveries = await db
+				.select({
+					recipientEmail: budgetAlertDelivery.recipientEmail,
+					status: budgetAlertDelivery.status,
+					attemptCount: budgetAlertDelivery.attemptCount
+				})
+				.from(budgetAlertDelivery)
+				.where(eq(budgetAlertDelivery.workspaceId, fixture.context.workspaceId));
+			expect(deliveries).toEqual(
+				expect.arrayContaining([
+					{ recipientEmail: ownerEmail, status: 'sent', attemptCount: 1 },
+					{ recipientEmail: adminEmail, status: 'sent', attemptCount: 2 }
+				])
+			);
+
+			const completionEvents = await db
+				.select({ id: auditEvent.id })
+				.from(auditEvent)
+				.where(
+					and(
+						eq(auditEvent.workspaceId, fixture.context.workspaceId),
+						eq(auditEvent.action, 'budget.alerts_sent')
+					)
+				);
+			expect(completionEvents).toHaveLength(1);
+		} finally {
+			providerError.mockRestore();
+		}
+	});
+
+	it('atomically claims budget-alert recipients across concurrent requests', async () => {
+		const fixture = await createWorkspaceFixture();
+		await seedWarningBudget(fixture);
+		let releaseSend!: () => void;
+		let markSendStarted!: () => void;
+		const sendStarted = new Promise<void>((resolve) => (markSendStarted = resolve));
+		const sendGate = new Promise<void>((resolve) => (releaseSend = resolve));
+		const send = vi.fn(async () => {
+			markSendStarted();
+			await sendGate;
+		});
+
+		const first = sendBudgetAlerts(fixture.context, '2026-06', { send });
+		await sendStarted;
+		await expect(sendBudgetAlerts(fixture.context, '2026-06', { send })).resolves.toMatchObject({
+			sentCount: 0,
+			failedCount: 0,
+			inProgress: true
+		});
+		expect(send).toHaveBeenCalledTimes(1);
+		releaseSend();
+		await expect(first).resolves.toMatchObject({ sentCount: 1, failedCount: 0 });
 	});
 
 	it('accepts an invitation only once under repeated submission', async () => {
@@ -2035,6 +2185,21 @@ async function createExpenseCatalogs(
 		vendorId: vendorItem?.id,
 		costCenterId: costCenterItem?.id
 	};
+}
+
+async function seedWarningBudget(fixture: Awaited<ReturnType<typeof createWorkspaceFixture>>) {
+	await upsertBudget(fixture.context, {
+		categoryId: fixture.categoryId,
+		periodMonth: '2026-06',
+		amount: '100.00',
+		warningThresholdPct: 80
+	});
+	await createExpense(fixture.context, {
+		categoryId: fixture.categoryId,
+		description: `Budget alert ${randomUUID()}`,
+		amount: '90.00',
+		expenseDate: '2026-06-15'
+	});
 }
 
 async function createUser(prefix: string, options: { emailVerified?: boolean } = {}) {

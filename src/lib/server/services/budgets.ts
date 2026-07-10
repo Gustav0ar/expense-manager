@@ -1,10 +1,16 @@
 import { error } from '@sveltejs/kit';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { user } from '$lib/server/db/auth.schema';
-import { auditEvent, categoryBudget, workspaceMember } from '$lib/server/db/schema';
+import {
+	auditEvent,
+	budgetAlertDelivery,
+	categoryBudget,
+	workspaceMember
+} from '$lib/server/db/schema';
 import { sendBudgetAlertEmail } from '$lib/server/email';
 import { canManageBudgets } from '$lib/server/security/roles';
+import { randomToken } from '$lib/server/utils/crypto';
 import { startOfMonth } from '$lib/server/utils/date';
 import { parseCurrencyToCents } from '$lib/server/utils/money';
 import { formatCents } from '$lib/utils/format';
@@ -18,6 +24,15 @@ export type BudgetInput = {
 	amount: string;
 	warningThresholdPct: number;
 };
+
+type BudgetAlertSender = typeof sendBudgetAlertEmail;
+
+type BudgetAlertDeliveryOptions = {
+	send?: BudgetAlertSender;
+	now?: Date;
+};
+
+const budgetAlertClaimTtlMs = 10 * 60 * 1000;
 
 export async function listBudgetStatus(context: WorkspaceContext, periodMonth: string) {
 	const month = startOfMonth(periodMonth);
@@ -110,7 +125,7 @@ export async function getBudgetSummary(context: WorkspaceContext, periodMonth: s
 export async function upsertBudget(context: WorkspaceContext, input: BudgetInput) {
 	if (!canManageBudgets(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
-	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
+	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
 
 	const periodMonth = startOfMonth(input.periodMonth);
 	const amountCents = parseCurrencyToCents(input.amount);
@@ -170,36 +185,53 @@ export async function deleteBudget(context: WorkspaceContext, id: number) {
 	});
 }
 
-export async function sendBudgetAlerts(context: WorkspaceContext, periodMonth: string) {
+export async function sendBudgetAlerts(
+	context: WorkspaceContext,
+	periodMonth: string,
+	options: BudgetAlertDeliveryOptions = {}
+) {
 	if (!canManageBudgets(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const month = startOfMonth(periodMonth);
+	const now = options.now ?? new Date();
+	const send = options.send ?? sendBudgetAlertEmail;
 
-	// Guard: check whether alerts were already sent for this periodMonth in this workspace.
-	// We match on the periodMonth stored in the audit event metadata, not on createdAt,
-	// so the guard works correctly when alerts are sent for months other than the current one.
-	const [alreadySent] = await db
-		.select({ id: auditEvent.id })
-		.from(auditEvent)
+	// Preserve the pre-ledger behavior for months that were already marked sent
+	// before this table existed. Once a delivery row exists, it is the source of
+	// truth and a failed recipient remains independently retryable.
+	const [existingDelivery] = await db
+		.select({ id: budgetAlertDelivery.id })
+		.from(budgetAlertDelivery)
 		.where(
 			and(
-				eq(auditEvent.workspaceId, context.workspaceId),
-				eq(auditEvent.action, 'budget.alerts_sent'),
-				sql`${auditEvent.metadata}->>'periodMonth' = ${month}`
+				eq(budgetAlertDelivery.workspaceId, context.workspaceId),
+				eq(budgetAlertDelivery.periodMonth, month)
 			)
 		)
 		.limit(1);
-
-	if (alreadySent) {
-		return { sentCount: 0, alertCount: 0, alreadySent: true };
+	if (!existingDelivery && (await hasLegacyBudgetAlertMarker(context.workspaceId, month))) {
+		return {
+			sentCount: 0,
+			failedCount: 0,
+			alertCount: 0,
+			alreadySent: true,
+			inProgress: false
+		};
 	}
 
 	const summary = await getBudgetSummary(context, month);
 	const alertItems = summary.items.filter(
 		(item) => item.status === 'warning' || item.status === 'over'
 	);
-	if (alertItems.length === 0) return { sentCount: 0, alertCount: 0, alreadySent: false };
+	if (alertItems.length === 0)
+		return {
+			sentCount: 0,
+			failedCount: 0,
+			alertCount: 0,
+			alreadySent: false,
+			inProgress: false
+		};
 
 	const recipients = await db
 		.select({ email: user.email })
@@ -221,32 +253,195 @@ export async function sendBudgetAlerts(context: WorkspaceContext, periodMonth: s
 		status: item.status
 	}));
 
-	// Write audit record BEFORE sending emails.
-	// If email delivery fails, the guard still prevents re-sending to already-notified admins.
-	await db.insert(auditEvent).values({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: 'budget.alerts_sent',
-		entityType: 'budget',
-		entityId: String(context.workspaceId),
-		metadata: {
-			periodMonth: month,
+	if (recipients.length === 0) {
+		return {
+			sentCount: 0,
+			failedCount: 0,
 			alertCount: alertItems.length,
-			recipientCount: recipients.length
-		}
+			alreadySent: false,
+			inProgress: false
+		};
+	}
+
+	const claimToken = randomToken(18);
+	const claimExpiresAt = new Date(now.getTime() + budgetAlertClaimTtlMs);
+	const recipientEmails = recipients.map((recipient) => recipient.email);
+	const claimed = await db.transaction(async (tx) => {
+		await tx
+			.insert(budgetAlertDelivery)
+			.values(
+				recipientEmails.map((recipientEmail) => ({
+					workspaceId: context.workspaceId,
+					periodMonth: month,
+					recipientEmail
+				}))
+			)
+			.onConflictDoNothing();
+
+		return tx
+			.update(budgetAlertDelivery)
+			.set({
+				status: 'sending',
+				claimToken,
+				claimExpiresAt,
+				attemptCount: sql`${budgetAlertDelivery.attemptCount} + 1`,
+				updatedAt: now
+			})
+			.where(
+				and(
+					eq(budgetAlertDelivery.workspaceId, context.workspaceId),
+					eq(budgetAlertDelivery.periodMonth, month),
+					inArray(budgetAlertDelivery.recipientEmail, recipientEmails),
+					or(
+						inArray(budgetAlertDelivery.status, ['pending', 'failed']),
+						and(
+							eq(budgetAlertDelivery.status, 'sending'),
+							lt(budgetAlertDelivery.claimExpiresAt, now)
+						)
+					)
+				)
+			)
+			.returning({
+				id: budgetAlertDelivery.id,
+				recipientEmail: budgetAlertDelivery.recipientEmail
+			});
 	});
 
-	await Promise.all(
-		recipients.map((recipient) =>
-			sendBudgetAlertEmail(
-				recipient.email,
-				context.workspaceName,
-				month,
-				emailItems,
-				context.locale
-			)
+	if (claimed.length === 0) {
+		const statuses = await currentBudgetAlertDeliveryStatuses(
+			context.workspaceId,
+			month,
+			recipientEmails
+		);
+		return {
+			sentCount: 0,
+			failedCount: 0,
+			alertCount: alertItems.length,
+			alreadySent:
+				statuses.length === recipientEmails.length &&
+				statuses.every((row) => row.status === 'sent'),
+			inProgress: statuses.some((row) => row.status === 'sending')
+		};
+	}
+
+	const attempts = await Promise.allSettled(
+		claimed.map((delivery) =>
+			send(delivery.recipientEmail, context.workspaceName, month, emailItems, context.locale)
 		)
 	);
 
-	return { sentCount: recipients.length, alertCount: alertItems.length, alreadySent: false };
+	let sentCount = 0;
+	let failedCount = 0;
+	await Promise.all(
+		attempts.map(async (attempt, index) => {
+			const delivery = claimed[index];
+			if (attempt.status === 'fulfilled') {
+				sentCount++;
+				await db
+					.update(budgetAlertDelivery)
+					.set({
+						status: 'sent',
+						sentAt: now,
+						claimToken: null,
+						claimExpiresAt: null,
+						updatedAt: now
+					})
+					.where(
+						and(
+							eq(budgetAlertDelivery.id, delivery.id),
+							eq(budgetAlertDelivery.claimToken, claimToken)
+						)
+					);
+				return;
+			}
+
+			failedCount++;
+			console.error(
+				JSON.stringify({
+					level: 'error',
+					message: 'budget_alert_delivery: provider send failed',
+					deliveryId: delivery.id,
+					error: attempt.reason instanceof Error ? attempt.reason.message : String(attempt.reason)
+				})
+			);
+			await db
+				.update(budgetAlertDelivery)
+				.set({
+					status: 'failed',
+					claimToken: null,
+					claimExpiresAt: null,
+					updatedAt: now
+				})
+				.where(
+					and(
+						eq(budgetAlertDelivery.id, delivery.id),
+						eq(budgetAlertDelivery.claimToken, claimToken)
+					)
+				);
+		})
+	);
+
+	const statuses = await currentBudgetAlertDeliveryStatuses(
+		context.workspaceId,
+		month,
+		recipientEmails
+	);
+	if (
+		sentCount > 0 &&
+		statuses.length === recipientEmails.length &&
+		statuses.every((row) => row.status === 'sent')
+	) {
+		await db.insert(auditEvent).values({
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: 'budget.alerts_sent',
+			entityType: 'budget',
+			entityId: String(context.workspaceId),
+			metadata: {
+				periodMonth: month,
+				alertCount: alertItems.length,
+				recipientCount: recipients.length
+			}
+		});
+	}
+
+	return {
+		sentCount,
+		failedCount,
+		alertCount: alertItems.length,
+		alreadySent: false,
+		inProgress: false
+	};
+}
+
+async function hasLegacyBudgetAlertMarker(workspaceId: number, month: string) {
+	const [alreadySent] = await db
+		.select({ id: auditEvent.id })
+		.from(auditEvent)
+		.where(
+			and(
+				eq(auditEvent.workspaceId, workspaceId),
+				eq(auditEvent.action, 'budget.alerts_sent'),
+				sql`${auditEvent.metadata}->>'periodMonth' = ${month}`
+			)
+		)
+		.limit(1);
+	return Boolean(alreadySent);
+}
+
+function currentBudgetAlertDeliveryStatuses(
+	workspaceId: number,
+	month: string,
+	recipientEmails: string[]
+) {
+	return db
+		.select({ status: budgetAlertDelivery.status })
+		.from(budgetAlertDelivery)
+		.where(
+			and(
+				eq(budgetAlertDelivery.workspaceId, workspaceId),
+				eq(budgetAlertDelivery.periodMonth, month),
+				inArray(budgetAlertDelivery.recipientEmail, recipientEmails)
+			)
+		);
 }

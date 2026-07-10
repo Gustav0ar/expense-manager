@@ -65,7 +65,7 @@ export async function createRecurringExpense(
 ) {
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
-	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
+	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
 
 	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
 		locale: context.locale
@@ -132,43 +132,11 @@ export async function setRecurringExpenseStatus(
 
 export async function materializeDueRecurringExpenses(
 	context: WorkspaceContext,
-	asOf = todayIso()
+	asOf = todayIso(),
+	options: { afterSchedulesLocked?: () => Promise<void> } = {}
 ) {
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
-
-	// Pause schedules whose endDate has already passed nextRunDate but were
-	// never selected by the main query (because they aren't due). Without this,
-	// they remain status='active' indefinitely.
-	await db
-		.update(recurringExpense)
-		.set({ status: 'paused' })
-		.where(
-			and(
-				eq(recurringExpense.workspaceId, context.workspaceId),
-				eq(recurringExpense.status, 'active'),
-				lt(recurringExpense.endDate, recurringExpense.nextRunDate)
-			)
-		);
-
-	const schedules = await db
-		.select()
-		.from(recurringExpense)
-		.where(
-			and(
-				eq(recurringExpense.workspaceId, context.workspaceId),
-				eq(recurringExpense.status, 'active'),
-				lte(recurringExpense.nextRunDate, asOf),
-				or(
-					sql`${recurringExpense.endDate} is null`,
-					gte(recurringExpense.endDate, recurringExpense.nextRunDate)
-				)
-			)
-		)
-		.orderBy(asc(recurringExpense.nextRunDate), asc(recurringExpense.id))
-		.limit(50);
-
-	if (schedules.length === 0) return { createdCount: 0 };
 
 	let createdCount = 0;
 	const reviewStatus = canReviewExpenses(context.role) ? 'approved' : 'pending';
@@ -176,6 +144,40 @@ export async function materializeDueRecurringExpenses(
 	const reviewedAt = reviewStatus === 'approved' ? new Date() : null;
 
 	await db.transaction(async (tx) => {
+		// Keep status cleanup, due selection and materialization in one transaction.
+		// FOR UPDATE makes a concurrent pause/resume wait until this transaction
+		// commits, so a stale 'active' snapshot can never reactivate a schedule.
+		await tx
+			.update(recurringExpense)
+			.set({ status: 'paused' })
+			.where(
+				and(
+					eq(recurringExpense.workspaceId, context.workspaceId),
+					eq(recurringExpense.status, 'active'),
+					lt(recurringExpense.endDate, recurringExpense.nextRunDate)
+				)
+			);
+
+		const schedules = await tx
+			.select()
+			.from(recurringExpense)
+			.where(
+				and(
+					eq(recurringExpense.workspaceId, context.workspaceId),
+					eq(recurringExpense.status, 'active'),
+					lte(recurringExpense.nextRunDate, asOf),
+					or(
+						sql`${recurringExpense.endDate} is null`,
+						gte(recurringExpense.endDate, recurringExpense.nextRunDate)
+					)
+				)
+			)
+			.orderBy(asc(recurringExpense.nextRunDate), asc(recurringExpense.id))
+			.limit(50)
+			.for('update');
+
+		await options.afterSchedulesLocked?.();
+
 		for (const schedule of schedules) {
 			const dates: string[] = [];
 			let nextRunDate = schedule.nextRunDate;
@@ -243,9 +245,15 @@ export async function materializeDueRecurringExpenses(
 				.update(recurringExpense)
 				.set({
 					nextRunDate,
-					status: shouldPause ? 'paused' : schedule.status
+					status: shouldPause ? 'paused' : 'active'
 				})
-				.where(eq(recurringExpense.id, schedule.id));
+				.where(
+					and(
+						eq(recurringExpense.id, schedule.id),
+						eq(recurringExpense.workspaceId, context.workspaceId),
+						eq(recurringExpense.status, 'active')
+					)
+				);
 		}
 
 		if (createdCount > 0) {
@@ -286,6 +294,7 @@ export async function runRecurringExpenseScheduler(): Promise<{
 	processed: number;
 	created: number;
 	errors: number;
+	skipped?: boolean;
 }> {
 	// pg_try_advisory_lock is session-bound, so acquire and release it on one
 	// reserved connection. This uses a dedicated one-connection client rather
@@ -299,7 +308,7 @@ export async function runRecurringExpenseScheduler(): Promise<{
 
 		if (!lockResult[0]?.acquired) {
 			// Another instance is already running the scheduler — skip this cycle.
-			return { processed: 0, created: 0, errors: 0 };
+			return { processed: 0, created: 0, errors: 0, skipped: true };
 		}
 
 		try {

@@ -254,6 +254,48 @@ export const categoryBudget = pgTable(
 	]
 );
 
+export const budgetAlertDelivery = pgTable(
+	'budget_alert_delivery',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		workspaceId: bigint('workspace_id', { mode: 'number' })
+			.notNull()
+			.references(() => workspace.id, { onDelete: 'cascade' }),
+		periodMonth: date('period_month', { mode: 'string' }).notNull(),
+		recipientEmail: text('recipient_email').notNull(),
+		status: text('status').notNull().default('pending'),
+		claimToken: text('claim_token'),
+		claimExpiresAt: timestamp('claim_expires_at', { withTimezone: true }),
+		attemptCount: integer('attempt_count').notNull().default(0),
+		sentAt: timestamp('sent_at', { withTimezone: true }),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp('updated_at', { withTimezone: true })
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date())
+	},
+	(table) => [
+		check(
+			'budget_alert_delivery_status_check',
+			sql`${table.status} in ('pending', 'sending', 'sent', 'failed')`
+		),
+		check('budget_alert_delivery_attempt_count_check', sql`${table.attemptCount} >= 0`),
+		uniqueIndex('budget_alert_delivery_workspace_month_recipient_unique_idx').on(
+			table.workspaceId,
+			table.periodMonth,
+			sql`lower(${table.recipientEmail})`
+		),
+		index('budget_alert_delivery_workspace_month_status_idx').on(
+			table.workspaceId,
+			table.periodMonth,
+			table.status
+		),
+		index('budget_alert_delivery_claim_expires_at_idx')
+			.on(table.claimExpiresAt)
+			.where(sql`${table.status} = 'sending'`)
+	]
+);
+
 export const categoryRule = pgTable(
 	'category_rule',
 	{

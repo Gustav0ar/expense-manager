@@ -93,6 +93,22 @@ export const actions: Actions = {
 				message: translate(event.locals.locale, 'Budget alert email already sent for this month.')
 			};
 		}
+		if (result.inProgress) {
+			return {
+				tone: 'success',
+				message: translate(event.locals.locale, 'Budget alert delivery is already in progress.')
+			};
+		}
+		if (result.failedCount > 0) {
+			return {
+				tone: 'danger',
+				message: translate(
+					event.locals.locale,
+					'{sentCount} budget alert recipients notified; {failedCount} deliveries will be retried.',
+					{ sentCount: result.sentCount, failedCount: result.failedCount }
+				)
+			};
+		}
 
 		return {
 			tone: 'success',

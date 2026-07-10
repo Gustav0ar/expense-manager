@@ -6,31 +6,24 @@ import { auth } from '$lib/server/auth';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { error, redirect, type HandleServerError } from '@sveltejs/kit';
 import { getThemePreference } from '$lib/server/theme';
-import { resolveRequestLocale } from '$lib/server/i18n';
+import { internalErrorMessage, resolveRequestLocale } from '$lib/server/i18n';
 import { translate } from '$lib/i18n';
 import { randomUUID } from 'node:crypto';
 import { isMfaEnabled, isMfaSessionVerified } from '$lib/server/services/mfa';
-import { pruneExpiredUnverifiedRegistrations } from '$lib/server/services/email-verification';
-import { runRecurringExpenseScheduler } from '$lib/server/services/recurring';
 import { isTrustedOrigin } from '$lib/server/security/origin';
 import { assertProxyTrustConfig } from '$lib/server/security/client-ip';
 import { isRegistrationEnabled } from '$lib/server/registration';
 import { traceRequest } from '$lib/server/observability/tracing';
+import { startBackgroundJobs, triggerBackgroundJobs } from '$lib/server/background-jobs';
+import { registerGracefulShutdown } from '$lib/server/shutdown';
 
 const unsafeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-const verificationCleanupIntervalMs = 60_000;
-let nextVerificationCleanupAt = 0;
-let verificationCleanupPromise: Promise<unknown> | null = null;
-
-const recurringSchedulerIntervalMs = 5 * 60 * 1000; // 5 minutes
-let nextRecurringSchedulerAt = 0;
-let recurringSchedulerPromise: Promise<unknown> | null = null;
-let backgroundJobsTimer: ReturnType<typeof setInterval> | null = null;
 
 // Run once at module load (server startup) to catch proxy misconfiguration early.
 if (!building) {
 	assertProxyTrustConfig();
 	startBackgroundJobs();
+	registerGracefulShutdown();
 }
 
 function setSecurityHeaders(response: Response) {
@@ -57,8 +50,7 @@ const handleBetterAuth: Handle = async ({ event, resolve }) => {
 	const { locale, preference: localePreference } = resolveRequestLocale(event);
 	event.locals.locale = locale;
 	event.locals.localePreference = localePreference;
-	cleanupExpiredUnverifiedRegistrations();
-	triggerRecurringExpenseScheduler();
+	triggerBackgroundJobs();
 	const themedResolve: typeof resolve = (resolveEvent, options) =>
 		resolve(resolveEvent, {
 			...options,
@@ -127,53 +119,6 @@ export const handle: Handle = async ({ event, resolve }) => {
 	return traceRequest(event, () => handleBetterAuth({ event, resolve }));
 };
 
-function cleanupExpiredUnverifiedRegistrations() {
-	if (building) return;
-
-	const now = Date.now();
-	if (verificationCleanupPromise || now < nextVerificationCleanupAt) return;
-
-	nextVerificationCleanupAt = now + verificationCleanupIntervalMs;
-	verificationCleanupPromise = pruneExpiredUnverifiedRegistrations()
-		.catch((err) => {
-			console.error('Expired email verification cleanup failed.', err);
-		})
-		.finally(() => {
-			verificationCleanupPromise = null;
-		});
-}
-
-function triggerRecurringExpenseScheduler() {
-	if (building) return;
-
-	const now = Date.now();
-	if (recurringSchedulerPromise || now < nextRecurringSchedulerAt) return;
-
-	nextRecurringSchedulerAt = now + recurringSchedulerIntervalMs;
-	recurringSchedulerPromise = runRecurringExpenseScheduler()
-		.catch((err) => {
-			console.error('Recurring expense scheduler failed.', err);
-		})
-		.finally(() => {
-			recurringSchedulerPromise = null;
-		});
-}
-
-function startBackgroundJobs() {
-	if (building || process.env.NODE_ENV !== 'production' || backgroundJobsTimer) return;
-
-	// Run once at startup, then keep jobs progressing even when the deployment
-	// receives no requests. Per-process timestamps avoid redundant local work;
-	// database advisory locks coordinate separate application instances.
-	cleanupExpiredUnverifiedRegistrations();
-	triggerRecurringExpenseScheduler();
-	backgroundJobsTimer = setInterval(() => {
-		cleanupExpiredUnverifiedRegistrations();
-		triggerRecurringExpenseScheduler();
-	}, verificationCleanupIntervalMs);
-	backgroundJobsTimer.unref();
-}
-
 function shouldEnforceMfa(pathname: string) {
 	if (pathname === '/mfa' || pathname.startsWith('/mfa/')) return false;
 	if (pathname === '/logout' || pathname.startsWith('/logout/')) return false;
@@ -216,7 +161,7 @@ export const handleError: HandleServerError = ({ error, event, status, message }
 	);
 
 	return {
-		message: status >= 500 ? 'Internal error.' : message,
+		message: status >= 500 ? internalErrorMessage(event.locals.locale) : message,
 		requestId
 	};
 };

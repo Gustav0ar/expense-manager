@@ -32,6 +32,11 @@ REQUIRE_EMAIL_VERIFICATION="true"
 The `MAILJET_FROM` domain must match a verified Mailjet domain. Do not use a
 personal mailbox as the production sender.
 
+Budget-alert delivery is tracked per workspace, month and recipient. Successful
+recipients are not sent the same monthly alert again, while failed recipients
+remain retryable. In-flight claims expire after ten minutes so an interrupted
+application process cannot leave delivery permanently stuck.
+
 SMTP fallback values, if API delivery cannot be used:
 
 ```env

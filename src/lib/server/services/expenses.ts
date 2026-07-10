@@ -293,7 +293,7 @@ function buildExpenseConditions(
 export async function createExpense(context: WorkspaceContext, input: ExpenseInput) {
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
-	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
+	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
 	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
 		locale: context.locale
 	});
@@ -353,7 +353,7 @@ export async function createExpense(context: WorkspaceContext, input: ExpenseInp
 export async function updateExpense(context: WorkspaceContext, id: number, input: ExpenseInput) {
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
-	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
+	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
 	const [current] = await db
 		.select({
 			paymentMethodId: expense.paymentMethodId,

@@ -18,6 +18,11 @@ describe('getClientIp', () => {
 		Object.keys(privateEnv).forEach((k) => delete privateEnv[k]);
 		delete process.env.TRUST_PROXY_HEADERS;
 		delete process.env.TRUSTED_PROXY_CIDR;
+		vi.spyOn(console, 'warn').mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
 	});
 
 	it('returns getClientAddress() when proxy trust is disabled', () => {
@@ -42,6 +47,13 @@ describe('getClientIp', () => {
 		expect(getClientIp(makeEvent({ 'x-forwarded-for': '' }))).toBe('10.0.0.1');
 	});
 
+	it('rejects malformed forwarded client addresses from a trusted proxy', () => {
+		privateEnv.TRUST_PROXY_HEADERS = 'true';
+		privateEnv.TRUSTED_PROXY_CIDR = '10.0.0.0/8';
+		expect(getClientIp(makeEvent({ 'x-forwarded-for': 'not-an-ip' }))).toBe('10.0.0.1');
+		expect(console.warn).toHaveBeenCalledOnce();
+	});
+
 	it('respects TRUST_PROXY_HEADERS from process.env as a fallback', () => {
 		process.env.TRUST_PROXY_HEADERS = 'true';
 		process.env.TRUSTED_PROXY_CIDR = '10.0.0.0/8';
@@ -52,6 +64,8 @@ describe('getClientIp', () => {
 		privateEnv.TRUST_PROXY_HEADERS = 'true';
 		privateEnv.TRUSTED_PROXY_CIDR = '172.16.0.0/12';
 		expect(getClientIp(makeEvent({ 'x-forwarded-for': '1.2.3.4' }))).toBe('10.0.0.1');
+		expect(getClientIp(makeEvent({ 'x-forwarded-for': '5.6.7.8' }))).toBe('10.0.0.1');
+		expect(console.warn).toHaveBeenCalledOnce();
 	});
 
 	it('accepts IPv4-mapped proxy addresses and comma-separated CIDRs', () => {
@@ -115,5 +129,12 @@ describe('assertProxyTrustConfig', () => {
 		privateEnv.TRUSTED_PROXY_CIDR = '172.16.0.0/99';
 		privateEnv.NODE_ENV = 'production';
 		expect(() => assertProxyTrustConfig()).toThrow('Invalid trusted proxy CIDR');
+	});
+
+	it('throws in production when the CIDR list contains no entries', () => {
+		privateEnv.TRUST_PROXY_HEADERS = 'true';
+		privateEnv.TRUSTED_PROXY_CIDR = ' , , ';
+		privateEnv.NODE_ENV = 'production';
+		expect(() => assertProxyTrustConfig()).toThrow('at least one CIDR');
 	});
 });
