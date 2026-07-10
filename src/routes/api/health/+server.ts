@@ -1,6 +1,7 @@
 import type { RequestHandler } from './$types';
 import { sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
+import { getBackgroundJobsHealth } from '$lib/server/background-jobs';
 
 export const GET: RequestHandler = async () => {
 	const startedAt = performance.now();
@@ -9,6 +10,7 @@ export const GET: RequestHandler = async () => {
 		return Response.json({
 			ok: true,
 			database: 'ok',
+			backgroundJobs: getBackgroundJobsHealth(),
 			timestamp: new Date().toISOString(),
 			durationMs: Math.round(performance.now() - startedAt)
 		});
@@ -17,6 +19,7 @@ export const GET: RequestHandler = async () => {
 			{
 				ok: false,
 				database: 'error',
+				backgroundJobs: getBackgroundJobsHealth(),
 				timestamp: new Date().toISOString(),
 				durationMs: Math.round(performance.now() - startedAt)
 			},

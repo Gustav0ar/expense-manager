@@ -749,6 +749,22 @@ select ...
 
 before and after in a database copy or an operational maintenance window.
 
+## Background Job Freshness
+
+`/api/health` reports the recurring-expense scheduler and expired-registration
+cleanup under `backgroundJobs`. Each job exposes its attempt count, advisory-lock
+skip count, last attempt/completion/success/error timestamps and last duration.
+The overall background-job state can be `starting`, `ok` or `degraded`.
+
+A transient job failure does not change the endpoint's HTTP status because
+restarting a healthy web process can amplify an external provider or database
+incident. Monitor the JSON state or the structured `background_job:` error logs
+and alert when a job remains degraded beyond three expected intervals.
+
+Production shutdown stops the interval coordinator first, then flushes tracing
+and closes both database clients with a bounded timeout. A clean `SIGTERM` should
+therefore exit with status `0`; repeated forced exits warrant investigation.
+
 ## Compose Hardening
 
 The production `docker-compose.yml` runs the app as a non-root user, with a read-only filesystem, `/tmp` in `tmpfs`, dropped capabilities, `no-new-privileges`, basic CPU/memory limits and a real `/api/health` application healthcheck.
