@@ -49,6 +49,12 @@ Attachment upload failures are rendered by the attachment panel when JavaScript 
 
 Expense selection and lazily prepared detail state are cleared when the list URL changes (filters, pagination or route navigation), but retained when a same-URL action refreshes the current row.
 
+### Expense accessibility contracts
+
+The support-catalog picker follows the ARIA tab pattern: one tab is in the keyboard tab order, arrow keys wrap between tabs, and Home/End move to the first/last tab. Every tab controls the stable `support-catalog-panel` element.
+
+The expense list is exposed as an ARIA table with explicit column indexes, expandable rows and a full-width details row. Responsive CSS may visually hide the header, but must keep it in the accessibility tree so column relationships remain available to assistive technology.
+
 ## Run Quality Gates
 
 The quality gates add screenshot regression, performance budget, infrastructure failure and smoke coverage on top of the functional E2E suite:
