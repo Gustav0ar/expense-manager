@@ -827,7 +827,13 @@ test('keeps core app screens responsive without horizontal overflow', async ({ p
 
 	await page.setViewportSize({ width: 1280, height: 800 });
 	await page.goto('/app/expenses');
-	await expect(page.locator('.expense-table-header')).toBeHidden();
+	const responsiveHeader = page.locator('.expense-table-header');
+	await expect(responsiveHeader).toBeAttached();
+	const responsiveHeaderBox = await responsiveHeader.boundingBox();
+	expect(responsiveHeaderBox).not.toBeNull();
+	expect(responsiveHeaderBox!.width).toBeLessThanOrEqual(1);
+	expect(responsiveHeaderBox!.height).toBeLessThanOrEqual(1);
+	await expect(page.getByRole('columnheader', { name: 'Valor' })).toBeAttached();
 });
 
 test('shows validation errors and supports editing and deleting expenses', async ({ page }) => {
