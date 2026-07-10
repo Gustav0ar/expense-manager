@@ -104,7 +104,7 @@ Review this model when any of these changes:
 
 - `pnpm verify` passes before production releases.
 - Role E2E tests cover allowed and denied access.
-- `pnpm test:prometheus-rules` passes after alert rule changes.
+- `pnpm test:quality` (including Prometheus rule scenarios) passes after alert rule changes.
 - Production smoke test passes after deployment.
 - Operational audit script passes after infrastructure changes.
 - Application and monitoring backup restore tests are recent.
