@@ -45,6 +45,7 @@
 	let { catalogs, categories, returnTo, locale, t }: Props = $props();
 
 	const pageSize = 8;
+	const tabOrder: SupportCatalogKind[] = ['paymentMethod', 'vendor', 'costCenter', 'category'];
 
 	// ── dialog element ───────────────────────────────────────────────────────────
 	let dialogEl: HTMLDialogElement | undefined = $state();
@@ -132,6 +133,33 @@
 		activeTab = kind;
 		catalogNotice = null;
 		categoryManager?.clearNotice();
+	}
+
+	function handleTabKeydown(event: KeyboardEvent, kind: SupportCatalogKind) {
+		const currentIndex = tabOrder.indexOf(kind);
+		let targetIndex: number;
+
+		switch (event.key) {
+			case 'ArrowRight':
+				targetIndex = (currentIndex + 1) % tabOrder.length;
+				break;
+			case 'ArrowLeft':
+				targetIndex = (currentIndex - 1 + tabOrder.length) % tabOrder.length;
+				break;
+			case 'Home':
+				targetIndex = 0;
+				break;
+			case 'End':
+				targetIndex = tabOrder.length - 1;
+				break;
+			default:
+				return;
+		}
+
+		event.preventDefault();
+		const targetKind = tabOrder[targetIndex];
+		setActiveTab(targetKind);
+		dialogEl?.querySelector<HTMLButtonElement>(`#support-catalog-tab-${targetKind}`)?.focus();
 	}
 
 	// ── catalog tab derived ───────────────────────────────────────────────────────
@@ -289,8 +317,10 @@
 					role="tab"
 					id={`support-catalog-tab-${tab.kind}`}
 					aria-selected={activeTab === tab.kind}
-					aria-controls={`support-catalog-panel-${tab.kind}`}
+					aria-controls="support-catalog-panel"
+					tabindex={activeTab === tab.kind ? 0 : -1}
 					onclick={() => setActiveTab(tab.kind)}
+					onkeydown={(event) => handleTabKeydown(event, tab.kind)}
 				>
 					<span>{tab.label}</span>
 					<strong>{tabCount(tab.kind)}</strong>
@@ -302,8 +332,10 @@
 				role="tab"
 				id="support-catalog-tab-category"
 				aria-selected={activeTab === 'category'}
-				aria-controls="support-catalog-panel-category"
+				aria-controls="support-catalog-panel"
+				tabindex={activeTab === 'category' ? 0 : -1}
 				onclick={() => setActiveTab('category')}
+				onkeydown={(event) => handleTabKeydown(event, 'category')}
 			>
 				<span>{t('Categories')}</span>
 				<strong>{tabCount('category')}</strong>
@@ -312,7 +344,7 @@
 
 		<div
 			class="support-catalog-active-panel"
-			id={`support-catalog-panel-${activeTab}`}
+			id="support-catalog-panel"
 			role="tabpanel"
 			aria-labelledby={`support-catalog-tab-${activeTab}`}
 		>

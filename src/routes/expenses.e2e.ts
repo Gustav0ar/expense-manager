@@ -353,7 +353,7 @@ test('keeps desktop expense table columns and delete action aligned', async ({ p
 	await expect(table).toHaveClass(/with-select/);
 	const headerCells = table.locator('.expense-table-header > span');
 	await expect(headerCells).toHaveText([
-		'',
+		'Revisão',
 		'Data',
 		'Descrição',
 		'Categoria',
@@ -833,6 +833,61 @@ test('manages categories from the expenses support dialog', async ({ page }) => 
 	await expect(page.locator('form.expense-create-form select[name="categoryId"]')).toContainText(
 		'Categoria Revisada'
 	);
+});
+
+test('exposes keyboard tabs and expense table relationships', async ({ page }) => {
+	await registerAndCreateWorkspace(page);
+
+	const dialog = await openSupportCatalogDialog(page);
+	const paymentsTab = dialog.getByRole('tab', { name: /Pagamentos/ });
+	const vendorsTab = dialog.getByRole('tab', { name: /Fornecedores/ });
+	const categoriesTab = dialog.getByRole('tab', { name: /Categorias/ });
+	const panel = dialog.getByRole('tabpanel');
+
+	await paymentsTab.focus();
+	await paymentsTab.press('ArrowRight');
+	await expect(vendorsTab).toBeFocused();
+	await expect(vendorsTab).toHaveAttribute('aria-selected', 'true');
+	await vendorsTab.press('End');
+	await expect(categoriesTab).toBeFocused();
+	await expect(categoriesTab).toHaveAttribute('aria-selected', 'true');
+	await categoriesTab.press('Home');
+	await expect(paymentsTab).toBeFocused();
+	await expect(paymentsTab).toHaveAttribute('aria-selected', 'true');
+	await expect(paymentsTab).toHaveAttribute('aria-controls', 'support-catalog-panel');
+	await expect(panel).toHaveAttribute('id', 'support-catalog-panel');
+	await dialog.getByRole('button', { name: 'Fechar' }).click();
+
+	await createCategory(page);
+	await createExpenseFromForm(page, {
+		description: 'Linha acessível',
+		amount: '42,00',
+		date: '2026-06-15',
+		category: '🧰 Operacional'
+	});
+
+	const table = page.getByRole('table', { name: 'Despesas lançadas' });
+	await expect(table).toBeVisible();
+	for (const heading of [
+		'Revisão',
+		'Data',
+		'Descrição',
+		'Categoria',
+		'Pagamento',
+		'Detalhes',
+		'Valor',
+		'Ações'
+	]) {
+		await expect(table.getByRole('columnheader', { name: heading })).toBeAttached();
+	}
+
+	const expenseTableRow = table.getByRole('row').filter({ hasText: 'Linha acessível' });
+	await expect(expenseTableRow).toHaveAttribute('aria-expanded', 'false');
+	await expect(expenseTableRow.getByRole('cell')).toHaveCount(8);
+	await expenseTableRow.focus();
+	await expenseTableRow.press('Enter');
+	await expect(expenseTableRow).toHaveAttribute('aria-expanded', 'true');
+	await expect(table.locator('.expense-details-cell[role="cell"]')).toBeVisible();
 });
 
 test('validates support catalog errors, search and pagination', async ({ page }) => {
