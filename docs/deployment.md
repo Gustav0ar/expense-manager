@@ -24,7 +24,8 @@ local production-like testing or for a standalone Caddy deployment.
 - `APP_DOMAIN`
 - `ORIGIN`
 - `BETTER_AUTH_SECRET`
-- `ALLOW_REGISTRATION`: set to `false` to disable public self-service account registration.
+- `ALLOW_REGISTRATION`: set to `false` to disable public self-service account registration. Both
+  the Caddy and Traefik Compose deployments pass this value into the application container.
 - `POSTGRES_DB`
 - `POSTGRES_USER`
 - `POSTGRES_PASSWORD`
