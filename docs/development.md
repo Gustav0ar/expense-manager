@@ -68,8 +68,11 @@ podman compose -f .devcontainer/compose.yml exec app pnpm test:visual
 podman compose -f .devcontainer/compose.yml exec app pnpm test:performance
 podman compose -f .devcontainer/compose.yml exec app pnpm test:infrastructure
 podman compose -f .devcontainer/compose.yml exec app pnpm test:smoke
+podman compose -f .devcontainer/compose.yml exec app pnpm test:prometheus-rules
 podman compose -f .devcontainer/compose.yml exec app pnpm test:quality
 ```
+
+`pnpm test:quality` includes all four Playwright quality suites plus Prometheus rule scenarios. Rebuild the development container after changing `.devcontainer/Containerfile` so `promtool` is available. CI runs the Playwright suites as a parallel matrix and Prometheus rules as a separate required job, while functional E2E remains in the main verification job.
 
 Update visual baselines only after intentionally reviewing UI changes:
 

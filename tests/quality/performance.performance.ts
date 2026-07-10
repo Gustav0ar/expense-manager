@@ -158,7 +158,7 @@ test('keeps core pages and mobile navigation within runtime budgets', async ({ p
 	await page.goto('/app/dashboard?from=2026-06-01&to=2026-06-30');
 	for (const target of [
 		{ heading: 'Expenses', nav: 'Expenses' },
-		{ heading: 'Planning', nav: 'Planning' },
+		{ heading: 'Budget', nav: 'Budget' },
 		{ heading: 'Reports', nav: 'Reports' },
 		{ heading: 'Workspace', nav: 'Settings' },
 		{ heading: 'Dashboard', nav: 'Dashboard' }
