@@ -1,4 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const privateEnv = vi.hoisted(() => ({}) as Record<string, string | undefined>);
+
+vi.mock('$env/dynamic/private', () => ({ env: privateEnv }));
+
 import { getClientIp } from './client-ip';
 
 function requestWithHeaders(headers: Record<string, string>) {
@@ -10,16 +15,16 @@ function requestWithHeaders(headers: Record<string, string>) {
 
 describe('rate limit client IP resolution', () => {
 	beforeEach(() => {
-		process.env.TRUSTED_PROXY_CIDR = '198.51.100.0/24';
+		Object.keys(privateEnv).forEach((key) => delete privateEnv[key]);
+		privateEnv.TRUSTED_PROXY_CIDR = '198.51.100.0/24';
 	});
 
 	afterEach(() => {
-		delete process.env.TRUST_PROXY_HEADERS;
-		delete process.env.TRUSTED_PROXY_CIDR;
+		Object.keys(privateEnv).forEach((key) => delete privateEnv[key]);
 	});
 
 	it('ignores forwarded headers unless proxy headers are trusted', () => {
-		process.env.TRUST_PROXY_HEADERS = 'false';
+		privateEnv.TRUST_PROXY_HEADERS = 'false';
 
 		expect(getClientIp(requestWithHeaders({ 'x-forwarded-for': '203.0.113.10' }))).toBe(
 			'198.51.100.10'
@@ -27,7 +32,7 @@ describe('rate limit client IP resolution', () => {
 	});
 
 	it('uses the rightmost (proxy-appended) forwarded IP when proxy headers are trusted', () => {
-		process.env.TRUST_PROXY_HEADERS = 'true';
+		privateEnv.TRUST_PROXY_HEADERS = 'true';
 
 		// The rightmost value is appended by the trusted proxy and cannot be
 		// forged by the client, unlike the leftmost value.
@@ -37,14 +42,14 @@ describe('rate limit client IP resolution', () => {
 	});
 
 	it('falls back to x-real-ip when there is no forwarded chain', () => {
-		process.env.TRUST_PROXY_HEADERS = 'true';
+		privateEnv.TRUST_PROXY_HEADERS = 'true';
 
 		expect(getClientIp(requestWithHeaders({ 'x-real-ip': '203.0.113.20' }))).toBe('203.0.113.20');
 	});
 
 	describe('X-Forwarded-For security: rightmost-IP prevents rate-limit bypass', () => {
 		it('returns the last IP in a multi-hop chain (proxy-appended, unforgeable)', () => {
-			process.env.TRUST_PROXY_HEADERS = 'true';
+			privateEnv.TRUST_PROXY_HEADERS = 'true';
 
 			// Client sends fake IP as first hop; real proxy appends real IP at the end.
 			// We must use the rightmost value so the attacker cannot bypass rate limits
@@ -56,7 +61,7 @@ describe('rate limit client IP resolution', () => {
 		});
 
 		it('trims whitespace from the extracted IP', () => {
-			process.env.TRUST_PROXY_HEADERS = 'true';
+			privateEnv.TRUST_PROXY_HEADERS = 'true';
 
 			expect(
 				getClientIp(requestWithHeaders({ 'x-forwarded-for': '192.0.2.30,  198.51.100.20  ' }))
@@ -64,25 +69,25 @@ describe('rate limit client IP resolution', () => {
 		});
 
 		it('falls back to getClientAddress when forwarded header is empty', () => {
-			process.env.TRUST_PROXY_HEADERS = 'true';
+			privateEnv.TRUST_PROXY_HEADERS = 'true';
 
 			expect(getClientIp(requestWithHeaders({ 'x-forwarded-for': '' }))).toBe('198.51.100.10');
 		});
 
 		it('falls back to getClientAddress when forwarded header is whitespace-only', () => {
-			process.env.TRUST_PROXY_HEADERS = 'true';
+			privateEnv.TRUST_PROXY_HEADERS = 'true';
 
 			expect(getClientIp(requestWithHeaders({ 'x-forwarded-for': '   ' }))).toBe('198.51.100.10');
 		});
 
 		it('falls back to getClientAddress when x-real-ip is empty', () => {
-			process.env.TRUST_PROXY_HEADERS = 'true';
+			privateEnv.TRUST_PROXY_HEADERS = 'true';
 
 			expect(getClientIp(requestWithHeaders({ 'x-real-ip': '' }))).toBe('198.51.100.10');
 		});
 
 		it('falls back to getClientAddress when x-real-ip is whitespace-only', () => {
-			process.env.TRUST_PROXY_HEADERS = 'true';
+			privateEnv.TRUST_PROXY_HEADERS = 'true';
 
 			expect(getClientIp(requestWithHeaders({ 'x-real-ip': '  ' }))).toBe('198.51.100.10');
 		});
