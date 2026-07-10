@@ -27,6 +27,8 @@ export const ptBrMessages = {
 	Back: 'Voltar',
 	'Back to login': 'Voltar para login',
 	Budget: 'Orçamento',
+	'Budget alert delivery is already in progress.':
+		'O envio dos alertas de orçamento já está em andamento.',
 	'Budget alerts': 'Alertas de orçamento',
 	'Budget amount': 'Valor do orçamento',
 	'Budget by category': 'Orçamento por categoria',
@@ -478,6 +480,8 @@ export const ptBrMessages = {
 	'{kind} contains invalid characters.': '{kind} contém caracteres inválidos.',
 	'{count} budget alerts sent to {sentCount} recipients.':
 		'{count} alertas enviados para {sentCount} destinatários.',
+	'{sentCount} budget alert recipients notified; {failedCount} deliveries will be retried.':
+		'{sentCount} destinatários de alertas de orçamento notificados; {failedCount} envios serão tentados novamente.',
 	'{count} due recurring expenses generated.': '{count} despesas recorrentes geradas.',
 	'{count} expenses imported.': '{count} despesas importadas.',
 	'Invite created: {url}': 'Convite criado: {url}',
