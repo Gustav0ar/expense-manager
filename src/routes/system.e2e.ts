@@ -77,7 +77,10 @@ function expenseRow(page: Page, description: string) {
 	return page.locator('.expense-table-item').filter({ hasText: description });
 }
 
-test('authenticates and deduplicates grouped Mailjet delivery events', async ({ page }) => {
+test('authenticates and deduplicates grouped Mailjet delivery events', async ({
+	page,
+	playwright
+}) => {
 	const endpoint = '/api/webhooks/mailjet';
 	const unauthorized = await page.request.post(endpoint, {
 		data: { event: 'sent', time: Math.floor(Date.now() / 1000), email: 'admin@example.com' }
@@ -121,16 +124,23 @@ test('authenticates and deduplicates grouped Mailjet delivery events', async ({ 
 	});
 	expect(stale.status()).toBe(400);
 
-	const oversized = await page.request.post(endpoint, {
-		headers: { Authorization: authorization },
-		data: {
-			event: 'sent',
-			time: Math.floor(Date.now() / 1000),
-			email: 'admin@example.com',
-			Payload: 'x'.repeat(257 * 1024)
-		}
+	const oversizedClient = await playwright.request.newContext({
+		baseURL: 'http://localhost:4173'
 	});
-	expect(oversized.status()).toBe(413);
+	try {
+		const oversized = await oversizedClient.post(endpoint, {
+			headers: { Authorization: authorization },
+			data: {
+				event: 'sent',
+				time: Math.floor(Date.now() / 1000),
+				email: 'admin@example.com',
+				Payload: 'x'.repeat(257 * 1024)
+			}
+		});
+		expect(oversized.status()).toBe(413);
+	} finally {
+		await oversizedClient.dispose();
+	}
 });
 
 function randomWebhookId() {

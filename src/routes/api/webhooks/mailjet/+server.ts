@@ -46,6 +46,7 @@ class PayloadTooLargeError extends Error {}
 async function readBody(request: Request, limit: number) {
 	const contentLength = Number(request.headers.get('content-length'));
 	if (Number.isFinite(contentLength) && contentLength > limit) {
+		await drainBody(request.body, limit * 2);
 		throw new PayloadTooLargeError();
 	}
 
@@ -74,6 +75,21 @@ async function readBody(request: Request, limit: number) {
 		return new TextDecoder('utf-8', { fatal: true }).decode(body);
 	} catch {
 		throw new InvalidMailjetWebhookPayloadError('Payload must be valid UTF-8.');
+	}
+}
+
+async function drainBody(body: ReadableStream<Uint8Array> | null, limit: number) {
+	if (!body) return;
+	const reader = body.getReader();
+	let length = 0;
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) return;
+		length += value.byteLength;
+		if (length > limit) {
+			await reader.cancel();
+			return;
+		}
 	}
 }
 
