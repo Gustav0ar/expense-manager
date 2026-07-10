@@ -173,7 +173,7 @@
 	gap: 0.7rem;
 }
 
-.support-catalog-category-panel[hidden] {
+.support-catalog-active-panel[hidden] {
 	display: none;
 }
 
