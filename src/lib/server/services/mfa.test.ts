@@ -94,7 +94,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createCipheriv } from 'node:crypto';
 import { generateTotpCode, generateTotpSecret } from '$lib/server/utils/totp';
 import { sha256 } from '$lib/server/utils/crypto';
-import { verifyMfaChallenge } from './mfa';
+import { enableMfa, verifyMfaChallenge } from './mfa';
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -116,6 +116,20 @@ function hashRecoveryCode(code: string): string {
 }
 
 // ── tests ──────────────────────────────────────────────────────────────────────
+
+describe('MFA service localization', () => {
+	it('translates invalid enrollment codes at the service boundary', async () => {
+		await expect(
+			enableMfa({
+				userId: 'user-localized',
+				email: 'localized@example.com',
+				secret: generateTotpSecret(),
+				code: 'invalid',
+				locale: 'pt-BR'
+			})
+		).rejects.toMatchObject({ status: 400, body: { message: 'Código MFA inválido.' } });
+	});
+});
 
 describe('MFA verifyMfaChallenge — TOTP replay prevention', () => {
 	const secret = generateTotpSecret();

@@ -1466,13 +1466,19 @@ describe('server service integration', () => {
 				status: 403
 			});
 			await expect(
-				upsertBudget(fixture.context, {
-					categoryId: fixture.categoryId + 999_999,
-					periodMonth: '2026-06',
-					amount: '100,00',
-					warningThresholdPct: 80
-				})
-			).rejects.toMatchObject({ status: 400 });
+				upsertBudget(
+					{ ...fixture.context, locale: 'pt-BR' },
+					{
+						categoryId: fixture.categoryId + 999_999,
+						periodMonth: '2026-06',
+						amount: '100,00',
+						warningThresholdPct: 80
+					}
+				)
+			).rejects.toMatchObject({
+				status: 400,
+				body: { message: 'Categoria inválida.' }
+			});
 
 			await upsertBudget(fixture.context, {
 				categoryId: fixture.categoryId,

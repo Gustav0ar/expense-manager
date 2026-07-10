@@ -65,7 +65,7 @@ export async function createRecurringExpense(
 ) {
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
-	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
+	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
 
 	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
 		locale: context.locale

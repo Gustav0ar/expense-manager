@@ -41,7 +41,8 @@ export const actions: Actions = {
 		const verified = await verifyMfaChallenge({
 			userId: event.locals.user.id,
 			sessionId: event.locals.session.id,
-			code: parsed.data.code
+			code: parsed.data.code,
+			locale: event.locals.locale
 		});
 
 		if (!verified)
