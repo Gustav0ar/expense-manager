@@ -6,7 +6,7 @@ import { auth } from '$lib/server/auth';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { error, redirect, type HandleServerError } from '@sveltejs/kit';
 import { getThemePreference } from '$lib/server/theme';
-import { resolveRequestLocale } from '$lib/server/i18n';
+import { internalErrorMessage, resolveRequestLocale } from '$lib/server/i18n';
 import { translate } from '$lib/i18n';
 import { randomUUID } from 'node:crypto';
 import { isMfaEnabled, isMfaSessionVerified } from '$lib/server/services/mfa';
@@ -216,7 +216,7 @@ export const handleError: HandleServerError = ({ error, event, status, message }
 	);
 
 	return {
-		message: status >= 500 ? 'Internal error.' : message,
+		message: status >= 500 ? internalErrorMessage(event.locals.locale) : message,
 		requestId
 	};
 };

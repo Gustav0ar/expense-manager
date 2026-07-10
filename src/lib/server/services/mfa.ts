@@ -6,6 +6,7 @@ import { db } from '$lib/server/db';
 import { auditEvent, mfaSession, userMfaConfig } from '$lib/server/db/schema';
 import { safeEqual, sha256 } from '$lib/server/utils/crypto';
 import { buildOtpAuthUri, generateTotpCode, generateTotpSecret } from '$lib/server/utils/totp';
+import { translate, type SupportedLocale } from '$lib/i18n';
 
 const mfaSessionTtlMs = 12 * 60 * 60 * 1000;
 const cleanupIntervalMs = 60 * 60 * 1000;
@@ -47,11 +48,12 @@ export async function enableMfa(input: {
 	secret: string;
 	code: string;
 	sessionId?: string;
+	locale?: SupportedLocale;
 }) {
 	// Use findAcceptedTotpCounter so we capture the matched counter and can
 	// record it immediately, preventing replay of the enrollment code.
 	const enrollCounter = findAcceptedTotpCounter(input.secret, input.code);
-	if (enrollCounter === null) throw error(400, 'Invalid MFA code.');
+	if (enrollCounter === null) throw error(400, translate(input.locale, 'Invalid MFA code.'));
 
 	const recoveryCodes = generateRecoveryCodes();
 	const recoveryCodeHashes = recoveryCodes.map(hashRecoveryCode);
@@ -61,14 +63,14 @@ export async function enableMfa(input: {
 			.insert(userMfaConfig)
 			.values({
 				userId: input.userId,
-				encryptedSecret: encryptSecret(input.secret),
+				encryptedSecret: encryptSecret(input.secret, input.locale),
 				recoveryCodeHashes,
 				lastUsedTotpCounter: enrollCounter
 			})
 			.onConflictDoUpdate({
 				target: userMfaConfig.userId,
 				set: {
-					encryptedSecret: encryptSecret(input.secret),
+					encryptedSecret: encryptSecret(input.secret, input.locale),
 					recoveryCodeHashes,
 					lastUsedTotpCounter: enrollCounter,
 					enabledAt: new Date(),
@@ -90,9 +92,13 @@ export async function enableMfa(input: {
 	return { recoveryCodes };
 }
 
-export async function disableMfa(input: { userId: string; code: string }) {
-	const verified = await verifyMfaCodeForUser(input.userId, input.code);
-	if (!verified) throw error(400, 'Invalid MFA code.');
+export async function disableMfa(input: {
+	userId: string;
+	code: string;
+	locale?: SupportedLocale;
+}) {
+	const verified = await verifyMfaCodeForUser(input.userId, input.code, input.locale);
+	if (!verified) throw error(400, translate(input.locale, 'Invalid MFA code.'));
 
 	await db.transaction(async (tx) => {
 		await tx.delete(userMfaConfig).where(eq(userMfaConfig.userId, input.userId));
@@ -110,8 +116,9 @@ export async function verifyMfaChallenge(input: {
 	userId: string;
 	sessionId: string;
 	code: string;
+	locale?: SupportedLocale;
 }) {
-	const verified = await verifyMfaCodeForUser(input.userId, input.code);
+	const verified = await verifyMfaCodeForUser(input.userId, input.code, input.locale);
 	if (!verified) return false;
 
 	await markMfaSessionVerified(input.userId, input.sessionId);
@@ -159,7 +166,7 @@ async function markMfaSessionVerified(userId: string, sessionId: string) {
 		});
 }
 
-async function verifyMfaCodeForUser(userId: string, code: string) {
+async function verifyMfaCodeForUser(userId: string, code: string, locale: SupportedLocale = 'en') {
 	const [config] = await db
 		.select({
 			encryptedSecret: userMfaConfig.encryptedSecret,
@@ -171,7 +178,7 @@ async function verifyMfaCodeForUser(userId: string, code: string) {
 
 	if (!config) return false;
 
-	const secret = decryptSecret(config.encryptedSecret);
+	const secret = decryptSecret(config.encryptedSecret, locale);
 	const totpResult = findAcceptedTotpCounter(secret, code);
 	if (totpResult !== null) {
 		// Atomically claim this counter: only succeeds when the row still has
@@ -248,8 +255,8 @@ async function cleanupExpiredMfaSessions() {
 		.catch(() => {});
 }
 
-function encryptSecret(secret: string) {
-	const key = encryptionKey();
+function encryptSecret(secret: string, locale: SupportedLocale = 'en') {
+	const key = encryptionKey(locale);
 	const iv = randomBytes(12);
 	const cipher = createCipheriv('aes-256-gcm', key, iv);
 	const encrypted = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
@@ -257,15 +264,15 @@ function encryptSecret(secret: string) {
 	return `v1:${iv.toString('base64url')}:${tag.toString('base64url')}:${encrypted.toString('base64url')}`;
 }
 
-function decryptSecret(payload: string) {
+function decryptSecret(payload: string, locale: SupportedLocale = 'en') {
 	const [version, ivValue, tagValue, encryptedValue] = payload.split(':');
 	if (version !== 'v1' || !ivValue || !tagValue || !encryptedValue) {
-		throw error(500, 'MFA configuration is invalid.');
+		throw error(500, translate(locale, 'MFA configuration is invalid.'));
 	}
 
 	const decipher = createDecipheriv(
 		'aes-256-gcm',
-		encryptionKey(),
+		encryptionKey(locale),
 		Buffer.from(ivValue, 'base64url')
 	);
 	decipher.setAuthTag(Buffer.from(tagValue, 'base64url'));
@@ -275,9 +282,9 @@ function decryptSecret(payload: string) {
 	]).toString('utf8');
 }
 
-function encryptionKey() {
+function encryptionKey(locale: SupportedLocale = 'en') {
 	const secret = getPrivateSecret('BETTER_AUTH_SECRET');
-	if (!secret) throw error(500, 'BETTER_AUTH_SECRET is not configured.');
+	if (!secret) throw error(500, translate(locale, 'BETTER_AUTH_SECRET is not configured.'));
 	return createHash('sha256').update(secret).digest();
 }
 
