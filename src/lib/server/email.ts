@@ -8,9 +8,16 @@ type MailInput = {
 	subject: string;
 	text: string;
 	html?: string;
+	customId?: string;
 };
 
 type MailProvider = 'auto' | 'mailjet' | 'sender' | 'smtp' | 'log';
+
+export type MailDeliveryReceipt = {
+	provider: Exclude<MailProvider, 'auto'>;
+	messageId?: string;
+	messageUuid?: string;
+};
 
 function configuredProvider(): MailProvider {
 	const provider = (getPrivateEnv('EMAIL_PROVIDER') || 'auto').trim().toLowerCase();
@@ -37,12 +44,12 @@ function senderApiConfigured() {
 	return Boolean(getPrivateSecret('SENDER_API_TOKEN') && getPrivateEnv('SENDER_FROM'));
 }
 
-export async function sendMail(input: MailInput) {
+export async function sendMail(input: MailInput): Promise<MailDeliveryReceipt> {
 	const provider = configuredProvider();
 
 	if (provider === 'log') {
 		logEmail(input);
-		return;
+		return { provider: 'log' } satisfies MailDeliveryReceipt;
 	}
 
 	if (provider === 'mailjet') {
@@ -51,8 +58,7 @@ export async function sendMail(input: MailInput) {
 				'Mailjet email delivery is not configured. Set MAILJET_API_KEY, MAILJET_SECRET_KEY and MAILJET_FROM.'
 			);
 		}
-		await sendMailjetApiMail(input);
-		return;
+		return sendMailjetApiMail(input);
 	}
 
 	if (provider === 'sender') {
@@ -61,21 +67,18 @@ export async function sendMail(input: MailInput) {
 				'Sender email delivery is not configured. Set SENDER_API_TOKEN and SENDER_FROM.'
 			);
 		}
-		await sendSenderApiMail(input);
-		return;
+		return sendSenderApiMail(input);
 	}
 
 	if (provider === 'auto' && mailjetApiConfigured()) {
-		await sendMailjetApiMail(input);
-		return;
+		return sendMailjetApiMail(input);
 	}
 
 	if (provider === 'auto' && senderApiConfigured()) {
-		await sendSenderApiMail(input);
-		return;
+		return sendSenderApiMail(input);
 	}
 
-	await sendSmtpMail(input, provider);
+	return sendSmtpMail(input, provider);
 }
 
 async function sendSmtpMail(input: MailInput, provider: MailProvider) {
@@ -92,7 +95,7 @@ async function sendSmtpMail(input: MailInput, provider: MailProvider) {
 
 		if (dev || getPrivateEnv('EMAIL_DELIVERY') === 'log') {
 			logEmail(input);
-			return;
+			return { provider: 'log' } satisfies MailDeliveryReceipt;
 		}
 
 		throw new Error(
@@ -113,13 +116,17 @@ async function sendSmtpMail(input: MailInput, provider: MailProvider) {
 				: undefined
 	});
 
-	await transporter.sendMail({
+	const result = await transporter.sendMail({
 		from: smtpFrom,
 		to: input.to,
 		subject: input.subject,
 		text: input.text,
 		html: input.html
 	});
+	return {
+		provider: 'smtp',
+		...(result?.messageId ? { messageId: result.messageId } : {})
+	} satisfies MailDeliveryReceipt;
 }
 
 function logEmail(input: MailInput) {
@@ -149,6 +156,7 @@ async function sendMailjetApiMail(input: MailInput) {
 					To: [{ Email: input.to }],
 					Subject: input.subject,
 					TextPart: input.text,
+					...(input.customId ? { CustomID: input.customId } : {}),
 					...(input.html ? { HTMLPart: input.html } : {})
 				}
 			]
@@ -159,6 +167,22 @@ async function sendMailjetApiMail(input: MailInput) {
 		const body = (await response.text()).slice(0, 500);
 		throw new Error(`Mailjet API failed with HTTP ${response.status}: ${body}`);
 	}
+
+	const responseBody = (await response.json().catch(() => null)) as {
+		Messages?: Array<{
+			To?: Array<{
+				MessageID?: string | number;
+				MessageUUID?: string;
+			}>;
+		}>;
+	} | null;
+	const recipient = responseBody?.Messages?.[0]?.To?.[0];
+	const messageId = normalizeProviderMessageId(recipient?.MessageID);
+	return {
+		provider: 'mailjet',
+		...(messageId ? { messageId } : {}),
+		...(recipient?.MessageUUID ? { messageUuid: recipient.MessageUUID } : {})
+	} satisfies MailDeliveryReceipt;
 }
 
 async function sendSenderApiMail(input: MailInput) {
@@ -185,6 +209,7 @@ async function sendSenderApiMail(input: MailInput) {
 		const body = (await response.text()).slice(0, 500);
 		throw new Error(`Sender API failed with HTTP ${response.status}: ${body}`);
 	}
+	return { provider: 'sender' } satisfies MailDeliveryReceipt;
 }
 
 export function parseMailbox(value: string) {
@@ -276,7 +301,8 @@ export async function sendBudgetAlertEmail(
 		budgetLabel: string;
 		status: string;
 	}>,
-	locale: SupportedLocale = defaultLocale
+	locale: SupportedLocale = defaultLocale,
+	customId?: string
 ) {
 	const safeTextWorkspaceName = sanitizeEmailText(workspaceName);
 	const safePeriod = sanitizeEmailText(periodMonth);
@@ -298,8 +324,9 @@ export async function sendBudgetAlertEmail(
 		)
 		.join('');
 
-	await sendMail({
+	return sendMail({
 		to,
+		customId,
 		subject: translate(locale, 'Budget alerts - {workspace}', { workspace: safeTextWorkspaceName }),
 		text: `${translate(locale, 'Budget alerts for {workspace} in {period}:', {
 			workspace: safeTextWorkspaceName,
@@ -312,6 +339,12 @@ export async function sendBudgetAlertEmail(
 			})
 		)}</p><ul>${htmlItems}</ul>`
 	});
+}
+
+function normalizeProviderMessageId(value: string | number | undefined) {
+	if (typeof value === 'string' && value) return value;
+	if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
+	return undefined;
 }
 
 export function escapeHtml(value: string) {

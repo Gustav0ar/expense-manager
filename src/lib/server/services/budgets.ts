@@ -10,7 +10,7 @@ import {
 	workspace,
 	workspaceMember
 } from '$lib/server/db/schema';
-import { sendBudgetAlertEmail } from '$lib/server/email';
+import { sendBudgetAlertEmail, type MailDeliveryReceipt } from '$lib/server/email';
 import { canManageBudgets } from '$lib/server/security/roles';
 import { randomToken } from '$lib/server/utils/crypto';
 import { firstDayOfMonth, startOfMonth } from '$lib/server/utils/date';
@@ -27,7 +27,9 @@ export type BudgetInput = {
 	warningThresholdPct: number;
 };
 
-type BudgetAlertSender = typeof sendBudgetAlertEmail;
+type BudgetAlertSender = (
+	...args: Parameters<typeof sendBudgetAlertEmail>
+) => Promise<MailDeliveryReceipt | void>;
 
 type BudgetAlertDeliveryOptions = {
 	send?: BudgetAlertSender;
@@ -454,7 +456,8 @@ export async function sendBudgetAlerts(
 			)
 			.returning({
 				id: budgetAlertDelivery.id,
-				recipientEmail: budgetAlertDelivery.recipientEmail
+				recipientEmail: budgetAlertDelivery.recipientEmail,
+				providerReference: budgetAlertDelivery.providerReference
 			});
 	});
 
@@ -477,7 +480,14 @@ export async function sendBudgetAlerts(
 
 	const attempts = await Promise.allSettled(
 		claimed.map((delivery) =>
-			send(delivery.recipientEmail, context.workspaceName, month, emailItems, context.locale)
+			send(
+				delivery.recipientEmail,
+				context.workspaceName,
+				month,
+				emailItems,
+				context.locale,
+				`budget-alert:${delivery.providerReference}`
+			)
 		)
 	);
 
@@ -488,6 +498,7 @@ export async function sendBudgetAlerts(
 			const delivery = claimed[index];
 			if (attempt.status === 'fulfilled') {
 				sentCount++;
+				const receipt = attempt.value;
 				await db
 					.update(budgetAlertDelivery)
 					.set({
@@ -495,6 +506,13 @@ export async function sendBudgetAlerts(
 						sentAt: now,
 						claimToken: null,
 						claimExpiresAt: null,
+						...(receipt
+							? {
+									provider: receipt.provider,
+									providerMessageId: receipt.messageId ?? null,
+									providerMessageUuid: receipt.messageUuid ?? null
+								}
+							: {}),
 						updatedAt: now
 					})
 					.where(

@@ -1,12 +1,15 @@
 import { pruneExpiredUnverifiedRegistrations } from '$lib/server/services/email-verification';
 import { runRecurringExpenseScheduler } from '$lib/server/services/recurring';
 import { runAutomaticBudgetAlertScheduler } from '$lib/server/services/budgets';
+import { pruneEmailDeliveryEvents } from '$lib/server/services/email-delivery-events';
 
 export const verificationCleanupIntervalMs = 60_000;
 export const recurringSchedulerIntervalMs = 5 * 60 * 1000;
 export const budgetAlertSchedulerIntervalMs = 60 * 60 * 1000;
+export const emailDeliveryCleanupIntervalMs = 24 * 60 * 60 * 1000;
 
-type BackgroundJobName = 'verificationCleanup' | 'recurringScheduler' | 'budgetAlertScheduler';
+type BackgroundJobName =
+	'verificationCleanup' | 'recurringScheduler' | 'budgetAlertScheduler' | 'emailDeliveryCleanup';
 type BackgroundJobResult = { skipped?: boolean } | void;
 type BackgroundJobRunner = () => Promise<BackgroundJobResult>;
 
@@ -27,9 +30,11 @@ type BackgroundJobCoordinatorOptions = {
 	verificationCleanup?: BackgroundJobRunner;
 	recurringScheduler?: BackgroundJobRunner;
 	budgetAlertScheduler?: BackgroundJobRunner;
+	emailDeliveryCleanup?: BackgroundJobRunner;
 	verificationIntervalMs?: number;
 	recurringIntervalMs?: number;
 	budgetAlertIntervalMs?: number;
+	emailDeliveryCleanupIntervalMs?: number;
 	now?: () => number;
 	setIntervalFn?: (callback: () => void, intervalMs: number) => TimerHandle;
 	clearIntervalFn?: (timer: TimerHandle) => void;
@@ -59,12 +64,14 @@ export class BackgroundJobCoordinator {
 	private readonly states: Record<BackgroundJobName, BackgroundJobState> = {
 		verificationCleanup: initialJobState(),
 		recurringScheduler: initialJobState(),
-		budgetAlertScheduler: initialJobState()
+		budgetAlertScheduler: initialJobState(),
+		emailDeliveryCleanup: initialJobState()
 	};
 	private readonly nextRunAt: Record<BackgroundJobName, number> = {
 		verificationCleanup: 0,
 		recurringScheduler: 0,
-		budgetAlertScheduler: 0
+		budgetAlertScheduler: 0,
+		emailDeliveryCleanup: 0
 	};
 	private readonly promises: Partial<Record<BackgroundJobName, Promise<void>>> = {};
 	private timer: TimerHandle | null = null;
@@ -73,12 +80,14 @@ export class BackgroundJobCoordinator {
 		this.jobs = {
 			verificationCleanup: options.verificationCleanup ?? pruneExpiredUnverifiedRegistrations,
 			recurringScheduler: options.recurringScheduler ?? runRecurringExpenseScheduler,
-			budgetAlertScheduler: options.budgetAlertScheduler ?? runAutomaticBudgetAlertScheduler
+			budgetAlertScheduler: options.budgetAlertScheduler ?? runAutomaticBudgetAlertScheduler,
+			emailDeliveryCleanup: options.emailDeliveryCleanup ?? pruneEmailDeliveryEvents
 		};
 		this.intervals = {
 			verificationCleanup: options.verificationIntervalMs ?? verificationCleanupIntervalMs,
 			recurringScheduler: options.recurringIntervalMs ?? recurringSchedulerIntervalMs,
-			budgetAlertScheduler: options.budgetAlertIntervalMs ?? budgetAlertSchedulerIntervalMs
+			budgetAlertScheduler: options.budgetAlertIntervalMs ?? budgetAlertSchedulerIntervalMs,
+			emailDeliveryCleanup: options.emailDeliveryCleanupIntervalMs ?? emailDeliveryCleanupIntervalMs
 		};
 		this.now = options.now ?? Date.now;
 		this.setIntervalFn = options.setIntervalFn ?? setInterval;
@@ -100,6 +109,7 @@ export class BackgroundJobCoordinator {
 		this.triggerJob('verificationCleanup');
 		this.triggerJob('recurringScheduler');
 		this.triggerJob('budgetAlertScheduler');
+		this.triggerJob('emailDeliveryCleanup');
 	}
 
 	async stop() {
@@ -118,7 +128,8 @@ export class BackgroundJobCoordinator {
 		const jobs = {
 			verificationCleanup: this.publicJobState('verificationCleanup', now),
 			recurringScheduler: this.publicJobState('recurringScheduler', now),
-			budgetAlertScheduler: this.publicJobState('budgetAlertScheduler', now)
+			budgetAlertScheduler: this.publicJobState('budgetAlertScheduler', now),
+			emailDeliveryCleanup: this.publicJobState('emailDeliveryCleanup', now)
 		};
 		const values = Object.values(jobs);
 		return {

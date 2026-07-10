@@ -92,6 +92,20 @@
       "when": 1783728000000,
       "tag": "0012_budget_alert_preference",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1783814400000,
+      "tag": "0013_email_delivery_feedback",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1783900800000,
+      "tag": "0014_email_delivery_event_retention",
+      "breakpoints": true
     }
   ]
 }
