@@ -17,9 +17,7 @@ describe('registration access control', () => {
 	it('forwards the registration policy through every production Compose app', () => {
 		for (const composeFile of ['docker-compose.yml', 'docker-compose.traefik.yml']) {
 			const compose = readFileSync(resolve(process.cwd(), composeFile), 'utf8');
-			expect(compose, composeFile).toContain(
-				'ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}'
-			);
+			expect(compose, composeFile).toContain('ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}');
 		}
 	});
 
