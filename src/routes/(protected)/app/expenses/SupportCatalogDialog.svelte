@@ -332,7 +332,7 @@
 				role="tab"
 				id="support-catalog-tab-category"
 				aria-selected={activeTab === 'category'}
-				aria-controls="support-catalog-panel"
+				aria-controls="support-catalog-panel-category"
 				tabindex={activeTab === 'category' ? 0 : -1}
 				onclick={() => setActiveTab('category')}
 				onkeydown={(event) => handleTabKeydown(event, 'category')}
@@ -343,22 +343,29 @@
 		</div>
 
 		<div
+			class="support-catalog-active-panel support-catalog-category-panel"
+			id="support-catalog-panel-category"
+			role="tabpanel"
+			aria-labelledby="support-catalog-tab-category"
+			hidden={activeTab !== 'category'}
+		>
+			<CategoryManagerDialog
+				bind:this={categoryManager}
+				active={activeTab === 'category'}
+				{categories}
+				{returnTo}
+				{locale}
+				{t}
+			/>
+		</div>
+
+		<div
 			class="support-catalog-active-panel"
 			id="support-catalog-panel"
 			role="tabpanel"
-			aria-labelledby={`support-catalog-tab-${activeTab}`}
+			aria-labelledby={`support-catalog-tab-${activeCatalogKind}`}
+			hidden={activeTab === 'category'}
 		>
-			<div class="support-catalog-category-panel" hidden={activeTab !== 'category'}>
-				<CategoryManagerDialog
-					bind:this={categoryManager}
-					active={activeTab === 'category'}
-					{categories}
-					{returnTo}
-					{locale}
-					{t}
-				/>
-			</div>
-
 			{#if activeTab !== 'category'}
 				<!-- ── Catalog (payment / vendor / cost center) tab ──────────────── -->
 				<form
