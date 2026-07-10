@@ -168,11 +168,6 @@
 	padding: 0.75rem;
 }
 
-.support-catalog-category-panel {
-	display: grid;
-	gap: 0.7rem;
-}
-
 .support-catalog-active-panel[hidden] {
 	display: none;
 }
