@@ -17,13 +17,16 @@ describe('BackgroundJobCoordinator', () => {
 		const budgetAlertScheduler = vi
 			.fn()
 			.mockResolvedValue({ processed: 0, sent: 0, failed: 0, errors: 0 });
+		const emailDeliveryCleanup = vi.fn().mockResolvedValue({ deletedEvents: 0 });
 		const coordinator = new BackgroundJobCoordinator({
 			verificationCleanup,
 			recurringScheduler,
 			budgetAlertScheduler,
+			emailDeliveryCleanup,
 			verificationIntervalMs: 100,
 			recurringIntervalMs: 300,
-			budgetAlertIntervalMs: 500
+			budgetAlertIntervalMs: 500,
+			emailDeliveryCleanupIntervalMs: 700
 		});
 
 		coordinator.start(true);
@@ -31,12 +34,14 @@ describe('BackgroundJobCoordinator', () => {
 		expect(verificationCleanup).toHaveBeenCalledTimes(1);
 		expect(recurringScheduler).toHaveBeenCalledTimes(1);
 		expect(budgetAlertScheduler).toHaveBeenCalledTimes(1);
+		expect(emailDeliveryCleanup).toHaveBeenCalledTimes(1);
 
 		await vi.advanceTimersByTimeAsync(300);
 		await coordinator.waitForIdle();
 		expect(verificationCleanup).toHaveBeenCalledTimes(4);
 		expect(recurringScheduler).toHaveBeenCalledTimes(2);
 		expect(budgetAlertScheduler).toHaveBeenCalledTimes(1);
+		expect(emailDeliveryCleanup).toHaveBeenCalledTimes(1);
 		expect(coordinator.health().status).toBe('ok');
 		await coordinator.stop();
 	});
@@ -48,6 +53,7 @@ describe('BackgroundJobCoordinator', () => {
 			verificationCleanup,
 			recurringScheduler,
 			budgetAlertScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			emailDeliveryCleanup: vi.fn().mockResolvedValue({ skipped: true }),
 			verificationIntervalMs: 100,
 			recurringIntervalMs: 100
 		});
@@ -75,6 +81,7 @@ describe('BackgroundJobCoordinator', () => {
 			verificationCleanup,
 			recurringScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			budgetAlertScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			emailDeliveryCleanup: vi.fn().mockResolvedValue({ skipped: true }),
 			verificationIntervalMs: 100,
 			recurringIntervalMs: 100,
 			logger
@@ -101,10 +108,12 @@ describe('BackgroundJobCoordinator', () => {
 		const verificationCleanup = vi.fn().mockResolvedValue({ deletedUsers: 0 });
 		const recurringScheduler = vi.fn().mockResolvedValue({ skipped: true });
 		const budgetAlertScheduler = vi.fn().mockResolvedValue({ skipped: true });
+		const emailDeliveryCleanup = vi.fn().mockResolvedValue({ skipped: true });
 		const coordinator = new BackgroundJobCoordinator({
 			verificationCleanup,
 			recurringScheduler,
 			budgetAlertScheduler,
+			emailDeliveryCleanup,
 			verificationIntervalMs: 100,
 			recurringIntervalMs: 100
 		});
@@ -114,5 +123,6 @@ describe('BackgroundJobCoordinator', () => {
 		expect(verificationCleanup).toHaveBeenCalledOnce();
 		expect(recurringScheduler).toHaveBeenCalledOnce();
 		expect(budgetAlertScheduler).toHaveBeenCalledOnce();
+		expect(emailDeliveryCleanup).toHaveBeenCalledOnce();
 	});
 });

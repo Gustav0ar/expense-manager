@@ -237,6 +237,8 @@ jobs:
           MAILJET_API_KEY: ${{ secrets.MAILJET_API_KEY }}
           MAILJET_SECRET_KEY: ${{ secrets.MAILJET_SECRET_KEY }}
           MAILJET_FROM: ${{ secrets.MAILJET_FROM }}
+          MAILJET_WEBHOOK_USERNAME: ${{ secrets.MAILJET_WEBHOOK_USERNAME }}
+          MAILJET_WEBHOOK_PASSWORD: ${{ secrets.MAILJET_WEBHOOK_PASSWORD }}
           SENDER_API_TOKEN: ${{ secrets.SENDER_API_TOKEN }}
           SENDER_FROM: ${{ secrets.SENDER_FROM }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
@@ -383,6 +385,8 @@ jobs:
             write_env_var MAILJET_API_KEY "${MAILJET_API_KEY}"
             write_env_var MAILJET_SECRET_KEY "${MAILJET_SECRET_KEY}"
             write_env_var MAILJET_FROM "${MAILJET_FROM}"
+            write_env_var MAILJET_WEBHOOK_USERNAME "${MAILJET_WEBHOOK_USERNAME}"
+            write_env_var MAILJET_WEBHOOK_PASSWORD "${MAILJET_WEBHOOK_PASSWORD}"
             write_env_var SENDER_API_TOKEN "${SENDER_API_TOKEN}"
             write_env_var SENDER_FROM "${SENDER_FROM}"
             write_env_var SMTP_HOST "${SMTP_HOST}"
