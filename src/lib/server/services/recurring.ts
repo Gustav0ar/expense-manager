@@ -294,6 +294,7 @@ export async function runRecurringExpenseScheduler(): Promise<{
 	processed: number;
 	created: number;
 	errors: number;
+	skipped?: boolean;
 }> {
 	// pg_try_advisory_lock is session-bound, so acquire and release it on one
 	// reserved connection. This uses a dedicated one-connection client rather
@@ -307,7 +308,7 @@ export async function runRecurringExpenseScheduler(): Promise<{
 
 		if (!lockResult[0]?.acquired) {
 			// Another instance is already running the scheduler — skip this cycle.
-			return { processed: 0, created: 0, errors: 0 };
+			return { processed: 0, created: 0, errors: 0, skipped: true };
 		}
 
 		try {

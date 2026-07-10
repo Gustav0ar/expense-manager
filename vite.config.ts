@@ -56,6 +56,7 @@ export default defineConfig({
 			reporter: ['text', 'lcov'],
 			include: [
 				'src/lib/category-emojis.ts',
+				'src/lib/server/background-jobs.ts',
 				'src/lib/server/email.ts',
 				'src/lib/server/registration.ts',
 				'src/lib/server/security/client-ip.ts',

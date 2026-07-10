@@ -89,7 +89,7 @@ export async function pruneExpiredUnverifiedRegistrations(now = new Date()) {
 		const [lock] = await tx.execute<{ acquired: boolean }>(sql`
 			SELECT pg_try_advisory_xact_lock(hashtextextended(${cleanupLockName}, 0)) AS acquired
 		`);
-		if (!lock?.acquired) return { deletedUsers: 0 };
+		if (!lock?.acquired) return { deletedUsers: 0, skipped: true };
 
 		// Run SELECT and DELETEs inside one transaction to prevent the TOCTOU
 		// window where a user verifies their email between the SELECT and the DELETE.

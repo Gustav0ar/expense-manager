@@ -190,7 +190,10 @@ describe('server service integration', () => {
 					hashtextextended('expense-manager:email-verification-cleanup:v1', 0)
 				)
 			`;
-			await expect(pruneExpiredUnverifiedRegistrations()).resolves.toEqual({ deletedUsers: 0 });
+			await expect(pruneExpiredUnverifiedRegistrations()).resolves.toEqual({
+				deletedUsers: 0,
+				skipped: true
+			});
 		} finally {
 			await reserved`
 				SELECT pg_advisory_unlock(
@@ -972,7 +975,8 @@ describe('server service integration', () => {
 			await expect(runRecurringExpenseScheduler()).resolves.toEqual({
 				processed: 0,
 				created: 0,
-				errors: 0
+				errors: 0,
+				skipped: true
 			});
 		} finally {
 			await reserved`SELECT pg_advisory_unlock(${7_273_299_171})`;
