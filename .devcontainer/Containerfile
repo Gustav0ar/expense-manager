@@ -33,6 +33,7 @@ RUN apt-get update \
 		openssh-client \
 		openssl \
 		postgresql-client \
+		prometheus \
 	&& rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@11.9.0 --activate

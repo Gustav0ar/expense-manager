@@ -10,6 +10,8 @@ export default defineConfig({
 		env: {
 			BETTER_AUTH_RATE_LIMIT_MAX: '1000',
 			EMAIL_DELIVERY: 'log',
+			MAILJET_WEBHOOK_PASSWORD: 'mailjet-e2e-password',
+			MAILJET_WEBHOOK_USERNAME: 'mailjet-e2e',
 			ORIGIN: 'http://localhost:4173'
 		},
 		port: 4173

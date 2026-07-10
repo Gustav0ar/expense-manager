@@ -6,7 +6,7 @@
 - Email verification required by default in production
 - Secure cookies configured by the auth library
 - Persistent rate limiting for login, registration and password reset
-- Rate limiting uses the real proxy IP only when `TRUST_PROXY_HEADERS=true`
+- Rate limiting uses forwarded client addresses only when `TRUST_PROXY_HEADERS=true` and the immediate peer matches `TRUSTED_PROXY_CIDR`
 - Isolation by `workspace_id` in all domain services
 - Workspace-scoped RBAC
 - Financial values stored in cents
@@ -32,7 +32,7 @@
 - `REQUIRE_EMAIL_VERIFICATION=true` in production unless an operational exception is documented
 - `ALLOW_REGISTRATION=false` when production access should be invite-only or manually managed
 - HTTPS active
-- `TRUST_PROXY_HEADERS=true` only if the app is isolated behind a trusted reverse proxy
+- `TRUST_PROXY_HEADERS=true` only if the app is isolated behind a trusted reverse proxy, with `TRUSTED_PROXY_CIDR` set to the narrowest deployment-specific proxy subnet; no broad private-network CIDR is trusted by default
 - Backups copied outside the VPS
 - Restore tested
 - `uploads` volume backup checked and copied outside the VPS when receipts are used

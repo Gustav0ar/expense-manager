@@ -7,6 +7,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { env } from '$env/dynamic/private';
 import { and, eq, isNull } from 'drizzle-orm';
+import { maxAttachmentBytes } from '$lib/attachment-limits';
 import { db } from '$lib/server/db';
 import { auditEvent, expense, expenseAttachment } from '$lib/server/db/schema';
 import { canWriteExpenses } from '$lib/server/security/roles';
@@ -14,7 +15,7 @@ import { randomToken } from '$lib/server/utils/crypto';
 import type { WorkspaceContext } from './workspaces';
 import { translate } from '$lib/i18n';
 
-export const maxAttachmentBytes = 5 * 1024 * 1024;
+export { maxAttachmentBytes };
 
 class AttachmentTooLargeError extends Error {}
 
@@ -48,11 +49,11 @@ export async function saveExpenseAttachment(
 ) {
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
-	await assertExpenseInWorkspace(context.workspaceId, expenseId);
+	await assertExpenseInWorkspace(context.workspaceId, expenseId, context.locale);
 
 	if (!file || file.size === 0) return null;
 	if (file.size > maxAttachmentBytes)
-		throw error(400, translate(context.locale, 'Attachment is larger than 5 MB.'));
+		throw error(400, translate(context.locale, 'Attachment is larger than 2 MB.'));
 	if (!isAllowedAttachmentType(file.type))
 		throw error(400, translate(context.locale, 'Attachment type is not allowed.'));
 
@@ -60,15 +61,15 @@ export async function saveExpenseAttachment(
 	const storageKey = `${context.workspaceId}/${expenseId}/${randomToken(16)}-${originalName}`;
 	const tempStorageKey = `${storageKey}.${randomToken(8)}.tmp`;
 	const uploadDir = getUploadDir();
-	const filePath = safeStoragePath(uploadDir, storageKey);
-	const tempPath = safeStoragePath(uploadDir, tempStorageKey);
+	const filePath = safeStoragePath(uploadDir, storageKey, context.locale);
+	const tempPath = safeStoragePath(uploadDir, tempStorageKey, context.locale);
 
 	await mkdir(path.dirname(filePath), { recursive: true });
 	let fileWritten = false;
 
 	try {
-		const storedFile = await streamAttachmentToFile(file, tempPath);
-		await assertStoragePathAvailable(filePath);
+		const storedFile = await streamAttachmentToFile(file, tempPath, context.locale);
+		await assertStoragePathAvailable(filePath, context.locale);
 		await rename(tempPath, filePath);
 		fileWritten = true;
 
@@ -130,7 +131,7 @@ export async function getAttachmentForDownload(context: WorkspaceContext, id: nu
 
 	if (!attachment) throw error(404, translate(context.locale, 'Attachment not found.'));
 
-	const filePath = safeStoragePath(getUploadDir(), attachment.storageKey);
+	const filePath = safeStoragePath(getUploadDir(), attachment.storageKey, context.locale);
 	const fileStats = await stat(filePath).catch(() => {
 		throw error(404, translate(context.locale, 'Attachment file not found.'));
 	});
@@ -172,7 +173,7 @@ export async function deleteExpenseAttachment(context: WorkspaceContext, attachm
 
 	if (!attachment) throw error(404, translate(context.locale, 'Attachment not found.'));
 
-	const filePath = safeStoragePath(getUploadDir(), attachment.storageKey);
+	const filePath = safeStoragePath(getUploadDir(), attachment.storageKey, context.locale);
 
 	await db.transaction(async (tx) => {
 		await tx.delete(expenseAttachment).where(eq(expenseAttachment.id, attachment.id));
@@ -205,16 +206,24 @@ export function getUploadDir() {
 	return process.env.UPLOAD_DIR || env.UPLOAD_DIR || path.join(process.cwd(), 'uploads');
 }
 
-export function safeStoragePath(root: string, storageKey: string) {
+export function safeStoragePath(
+	root: string,
+	storageKey: string,
+	locale: WorkspaceContext['locale'] = 'en'
+) {
 	const resolvedRoot = path.resolve(root);
 	const resolvedPath = path.resolve(resolvedRoot, storageKey);
 	if (!resolvedPath.startsWith(`${resolvedRoot}${path.sep}`)) {
-		throw error(400, 'Attachment path is invalid.');
+		throw error(400, translate(locale, 'Attachment path is invalid.'));
 	}
 	return resolvedPath;
 }
 
-async function streamAttachmentToFile(file: File, filePath: string) {
+async function streamAttachmentToFile(
+	file: File,
+	filePath: string,
+	locale: WorkspaceContext['locale']
+) {
 	const hash = createHash('sha256');
 	let sizeBytes = 0;
 
@@ -240,11 +249,12 @@ async function streamAttachmentToFile(file: File, filePath: string) {
 	try {
 		await pipeline(chunks(), createWriteStream(filePath, { flags: 'wx' }));
 	} catch (err) {
-		if (err instanceof AttachmentTooLargeError) throw error(400, 'Attachment is larger than 5 MB.');
+		if (err instanceof AttachmentTooLargeError)
+			throw error(400, translate(locale, 'Attachment is larger than 2 MB.'));
 		throw err;
 	}
 
-	if (sizeBytes === 0) throw error(400, 'Attachment is empty.');
+	if (sizeBytes === 0) throw error(400, translate(locale, 'Attachment is empty.'));
 
 	return {
 		sizeBytes,
@@ -252,7 +262,7 @@ async function streamAttachmentToFile(file: File, filePath: string) {
 	};
 }
 
-async function assertStoragePathAvailable(filePath: string) {
+async function assertStoragePathAvailable(filePath: string, locale: WorkspaceContext['locale']) {
 	try {
 		await stat(filePath);
 	} catch (err) {
@@ -260,10 +270,14 @@ async function assertStoragePathAvailable(filePath: string) {
 		throw err;
 	}
 
-	throw error(409, 'Attachment file already exists.');
+	throw error(409, translate(locale, 'Attachment file already exists.'));
 }
 
-async function assertExpenseInWorkspace(workspaceId: number, expenseId: number) {
+async function assertExpenseInWorkspace(
+	workspaceId: number,
+	expenseId: number,
+	locale: WorkspaceContext['locale']
+) {
 	const [row] = await db
 		.select({ id: expense.id })
 		.from(expense)
@@ -276,5 +290,5 @@ async function assertExpenseInWorkspace(workspaceId: number, expenseId: number) 
 		)
 		.limit(1);
 
-	if (!row) throw error(404, 'Expense not found.');
+	if (!row) throw error(404, translate(locale, 'Expense not found.'));
 }

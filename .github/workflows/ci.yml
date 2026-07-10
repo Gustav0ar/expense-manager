@@ -34,6 +34,7 @@ jobs:
       POSTGRES_PASSWORD: expense_manager
       DATABASE_URL: postgres://expense_manager:expense_manager@localhost:5432/expense_manager
       DB_POOL_MAX: 5
+      TRUSTED_PROXY_CIDR: 172.16.0.0/12
       DOMAIN_NAME: example.invalid
       IMAGE_OWNER_LOWERCASE: example
       IMAGE_TAG: ci
@@ -75,3 +76,77 @@ jobs:
       - run: docker build --target backup -t expense-manager-backup:ci .
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
+
+  quality:
+    name: Quality / ${{ matrix.suite }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [visual, performance, infrastructure, smoke]
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: expense_manager
+          POSTGRES_USER: expense_manager
+          POSTGRES_PASSWORD: expense_manager
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U expense_manager -d expense_manager"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      PUBLIC_APP_NAME: Expense Manager
+      ORIGIN: http://localhost:4173
+      BETTER_AUTH_SECRET: ci-secret-ci-secret-ci-secret-32
+      REQUIRE_EMAIL_VERIFICATION: false
+      EMAIL_DELIVERY: log
+      DATABASE_URL: postgres://expense_manager:expense_manager@localhost:5432/expense_manager
+      DB_POOL_MAX: 5
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.9.0
+          run_install: false
+      - name: Configure pnpm cache
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+      - uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+      - name: Install Chromium
+        if: matrix.suite != 'infrastructure'
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run ${{ matrix.suite }} quality gate
+        run: pnpm test:${{ matrix.suite }}
+      - name: Upload Playwright diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: playwright-${{ matrix.suite }}-${{ github.run_id }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  prometheus-rules:
+    name: Quality / Prometheus rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate alert rules and scenarios
+        run: scripts/ops/test-prometheus-rules.sh

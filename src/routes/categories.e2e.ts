@@ -205,9 +205,7 @@ test('validates category creation and update errors', async ({ page }) => {
 	await expect(await categoryRow(page, 'Categoria válida')).toBeVisible();
 });
 
-test('archives categories and removes archived categories from active rule options', async ({
-	page
-}) => {
+test('deletes unused categories and restores archived associated categories', async ({ page }) => {
 	await registerAndCreateWorkspace(page);
 	await createCategory(page, {
 		name: 'Ativa',
@@ -219,26 +217,52 @@ test('archives categories and removes archived categories from active rule optio
 		color: '#dc2626',
 		emoji: '📦'
 	});
+	await createCategory(page, {
+		name: 'Sem uso',
+		color: '#7c3aed',
+		emoji: '📄'
+	});
+
+	const unusedRow = await categoryRow(page, 'Sem uso');
+	await unusedRow.getByRole('button', { name: 'Excluir categoria Sem uso' }).click();
+	await expect(categoryListPanel(page).locator('.category-item')).toHaveCount(2);
+
+	await createRule(page, {
+		name: 'Regra arquivável',
+		categoryLabel: '📦 Arquivável',
+		matchTarget: 'description',
+		pattern: 'arquivar',
+		priority: '50'
+	});
 
 	const archivedRow = await categoryRow(page, 'Arquivável');
-	await archivedRow.getByRole('button', { name: 'Arquivar' }).click();
+	await archivedRow.getByRole('button', { name: 'Arquivar categoria Arquivável' }).click();
 
 	const mutedRow = await categoryRow(page, 'Arquivável');
 	await expect(mutedRow).toHaveClass(/muted/);
-	await expect(mutedRow.getByRole('button', { name: 'Arquivar' })).toHaveCount(0);
+	await expect(mutedRow.getByRole('button', { name: 'Arquivar categoria Arquivável' })).toHaveCount(
+		0
+	);
+	await expect(
+		mutedRow.getByRole('button', { name: 'Restaurar categoria Arquivável' })
+	).toBeVisible();
 	const activeRow = await categoryRow(page, 'Ativa');
-	await expect(activeRow.getByRole('button', { name: 'Arquivar' })).toBeVisible();
+	await expect(activeRow.getByRole('button', { name: 'Excluir categoria Ativa' })).toBeVisible();
 
 	const categoriesSelect = ruleForm(page).getByLabel('Categoria');
 	await expect(categoriesSelect).toContainText('💼 Ativa');
 	await expect(categoriesSelect).not.toContainText('📦 Arquivável');
+
+	await mutedRow.getByRole('button', { name: 'Restaurar categoria Arquivável' }).click();
+	await expect(await categoryRow(page, 'Arquivável')).not.toHaveClass(/muted/);
+	await expect(ruleForm(page).getByLabel('Categoria')).toContainText('📦 Arquivável');
 
 	await updateCategory(page, 'Arquivável', {
 		name: 'Arquivável renomeada',
 		color: '#7c3aed',
 		emoji: '📄'
 	});
-	await expect(await categoryRow(page, 'Arquivável renomeada')).toHaveClass(/muted/);
+	await expect(await categoryRow(page, 'Arquivável renomeada')).not.toHaveClass(/muted/);
 });
 
 test('creates and archives automatic rules for every match target', async ({ page }) => {

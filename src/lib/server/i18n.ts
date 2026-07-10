@@ -4,6 +4,7 @@ import {
 	defaultLocale,
 	isLocalePreference,
 	resolveLocale,
+	translate,
 	type LocalePreference,
 	type SupportedLocale
 } from '$lib/i18n';
@@ -39,4 +40,8 @@ export function resolveRequestLocale(event: RequestEvent): {
 		preference,
 		locale: resolveLocale(preference, event.request.headers.get('accept-language')) ?? defaultLocale
 	};
+}
+
+export function internalErrorMessage(locale: SupportedLocale | null | undefined) {
+	return translate(locale ?? defaultLocale, 'Internal error.');
 }

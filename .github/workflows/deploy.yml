@@ -207,6 +207,7 @@ jobs:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           DB_POOL_MAX: ${{ vars.DB_POOL_MAX || '5' }}
           TRUST_PROXY_HEADERS: ${{ vars.TRUST_PROXY_HEADERS || 'true' }}
+          TRUSTED_PROXY_CIDR: ${{ vars.TRUSTED_PROXY_CIDR || '' }}
           BACKUP_ENABLED: ${{ vars.BACKUP_ENABLED || 'true' }}
           RESTIC_REPOSITORY: ${{ secrets.RESTIC_REPOSITORY }}
           RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
@@ -236,6 +237,8 @@ jobs:
           MAILJET_API_KEY: ${{ secrets.MAILJET_API_KEY }}
           MAILJET_SECRET_KEY: ${{ secrets.MAILJET_SECRET_KEY }}
           MAILJET_FROM: ${{ secrets.MAILJET_FROM }}
+          MAILJET_WEBHOOK_USERNAME: ${{ secrets.MAILJET_WEBHOOK_USERNAME }}
+          MAILJET_WEBHOOK_PASSWORD: ${{ secrets.MAILJET_WEBHOOK_PASSWORD }}
           SENDER_API_TOKEN: ${{ secrets.SENDER_API_TOKEN }}
           SENDER_FROM: ${{ secrets.SENDER_FROM }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
@@ -352,6 +355,7 @@ jobs:
             write_env_var POSTGRES_PASSWORD "${POSTGRES_PASSWORD}"
             write_env_var DB_POOL_MAX "${DB_POOL_MAX}"
             write_env_var TRUST_PROXY_HEADERS "${TRUST_PROXY_HEADERS}"
+            write_env_var TRUSTED_PROXY_CIDR "${TRUSTED_PROXY_CIDR}"
             write_env_var BACKUP_ENABLED "${BACKUP_ENABLED}"
             write_env_var RESTIC_REPOSITORY "${RESTIC_REPOSITORY}"
             write_env_var RESTIC_PASSWORD "${RESTIC_PASSWORD}"
@@ -381,6 +385,8 @@ jobs:
             write_env_var MAILJET_API_KEY "${MAILJET_API_KEY}"
             write_env_var MAILJET_SECRET_KEY "${MAILJET_SECRET_KEY}"
             write_env_var MAILJET_FROM "${MAILJET_FROM}"
+            write_env_var MAILJET_WEBHOOK_USERNAME "${MAILJET_WEBHOOK_USERNAME}"
+            write_env_var MAILJET_WEBHOOK_PASSWORD "${MAILJET_WEBHOOK_PASSWORD}"
             write_env_var SENDER_API_TOKEN "${SENDER_API_TOKEN}"
             write_env_var SENDER_FROM "${SENDER_FROM}"
             write_env_var SMTP_HOST "${SMTP_HOST}"
@@ -423,6 +429,19 @@ jobs:
             TRAEFIK_CERT_RESOLVER
             EMAIL_PROVIDER
           )
+
+          proxy_headers_value="$( (grep -E "^TRUST_PROXY_HEADERS=" "${ENV_FILE_PATH}" || true) | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//' )"
+          case "${proxy_headers_value}" in
+            true)
+              required_keys+=(TRUSTED_PROXY_CIDR)
+              ;;
+            false)
+              ;;
+            *)
+              echo "::error::TRUST_PROXY_HEADERS must be true or false."
+              exit 1
+              ;;
+          esac
 
           email_provider_value="$( (grep -E "^EMAIL_PROVIDER=" "${ENV_FILE_PATH}" || true) | tail -n 1 | cut -d= -f2- | sed -E 's/^"//; s/"$//' )"
           case "${email_provider_value}" in

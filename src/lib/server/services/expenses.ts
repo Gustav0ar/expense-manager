@@ -38,7 +38,8 @@ import {
 	firstDayOfMonth,
 	lastDayOfMonth,
 	previousPeriod,
-	startOfMonth
+	startOfMonth,
+	todayIso
 } from '$lib/server/utils/date';
 import { writeAuditEvent } from './audit';
 import { getBudgetSummary } from './budgets';
@@ -290,8 +291,9 @@ function buildExpenseConditions(
 }
 
 export async function createExpense(context: WorkspaceContext, input: ExpenseInput) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permission denied.');
-	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
+	if (!canWriteExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
+	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
 	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
 		locale: context.locale
 	});
@@ -349,8 +351,9 @@ export async function createExpense(context: WorkspaceContext, input: ExpenseInp
 }
 
 export async function updateExpense(context: WorkspaceContext, id: number, input: ExpenseInput) {
-	if (!canWriteExpenses(context.role)) throw error(403, 'Permission denied.');
-	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
+	if (!canWriteExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
+	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
 	const [current] = await db
 		.select({
 			paymentMethodId: expense.paymentMethodId,
@@ -368,7 +371,7 @@ export async function updateExpense(context: WorkspaceContext, id: number, input
 			)
 		)
 		.limit(1);
-	if (!current) throw error(404, 'Expense not found.');
+	if (!current) throw error(404, translate(context.locale, 'Expense not found.'));
 	if (current.paymentStatus !== 'unpaid' && !canReconcileExpenses(context.role)) {
 		throw error(403, translate(context.locale, 'Permission denied.'));
 	}
@@ -553,7 +556,7 @@ export async function updateExpensePaymentStatus(
 	// When reconciling an already-paid expense, preserve the original paidAt
 	// unless the caller explicitly supplies a new value.
 	const paidAt =
-		input.paymentStatus === 'unpaid' ? null : (input.paidAt ?? current.paidAt ?? todayIsoDate());
+		input.paymentStatus === 'unpaid' ? null : (input.paidAt ?? current.paidAt ?? todayIso());
 
 	// Re-assert current paymentStatus to detect concurrent changes (409).
 	const [updated] = await db
@@ -694,6 +697,12 @@ export async function bulkReviewExpenses(
 	if (ids.length === 0) throw error(400, translate(context.locale, 'No expenses selected.'));
 
 	const reviewedAt = new Date();
+
+	// Bulk rejection never resets financial state. A paid/reconciled row should
+	// not normally be pending, but the database permits that legacy/inconsistent
+	// combination, so skip it defensively regardless of the actor's permissions.
+	const paymentGuard = decision === 'rejected' ? eq(expense.paymentStatus, 'unpaid') : sql`true`;
+
 	const updated = await db
 		.update(expense)
 		.set({
@@ -716,6 +725,7 @@ export async function bulkReviewExpenses(
 				eq(expense.workspaceId, context.workspaceId),
 				eq(expense.status, 'posted'),
 				eq(expense.reviewStatus, 'pending'),
+				paymentGuard,
 				isNull(expense.deletedAt)
 			)
 		)
@@ -1082,8 +1092,4 @@ function groupedReportFilterSql(filters: GroupedReportFilters) {
 		${filters.costCenterId ? sql`and e.cost_center_id = ${filters.costCenterId}` : sql``}
 		${filters.competencyMonth ? sql`and e.competency_month = ${filters.competencyMonth}` : sql``}
 	`;
-}
-
-function todayIsoDate() {
-	return new Date().toISOString().slice(0, 10);
 }

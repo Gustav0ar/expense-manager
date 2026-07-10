@@ -2,13 +2,27 @@
 
 ## Development environment
 
-The project uses a **dev container** (`.devcontainer/`) backed by podman. All build, test, and runtime commands must run inside the container, not on the host — the host lacks the right Node version, pnpm, and the Playwright browser deps.
+The project uses a **dev container** (`.devcontainer/`), with Podman as the preferred container runtime and Docker as a fallback. All build, test, and runtime commands must run inside the container, not on the host — the host lacks the right Node version, pnpm, and the Playwright browser deps.
+
+Before running container commands, detect the available Compose implementation. Prefer `podman compose` when both Podman and its Compose command work. Fall back to `docker compose` only when the Podman pair is unavailable. Do not use the legacy `docker-compose` command and do not set `DOCKER_HOST`.
+
+```bash
+if command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then
+	COMPOSE="podman compose"
+elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+	COMPOSE="docker compose"
+else
+	echo "Neither podman compose nor docker compose is available." >&2
+	exit 1
+fi
+```
+
+Keep the selected `COMPOSE` value for the current shell session and use it for every command below. Never switch runtimes during the same task.
 
 ### Start the container
 
 ```bash
-export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
-docker-compose --file .devcontainer/compose.yml up -d
+$COMPOSE --file .devcontainer/compose.yml up -d
 ```
 
 The `postgres` service starts automatically. The `app` service mounts the repo at `/workspaces/expense-manager`.
@@ -16,8 +30,7 @@ The `postgres` service starts automatically. The `app` service mounts the repo a
 ### Run commands inside the container
 
 ```bash
-export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
-docker-compose --file .devcontainer/compose.yml exec app sh -c "cd /workspaces/expense-manager && <command>"
+$COMPOSE --file .devcontainer/compose.yml exec app sh -c "cd /workspaces/expense-manager && <command>"
 ```
 
 ### Common commands (all run inside the container)
@@ -38,7 +51,7 @@ docker-compose --file .devcontainer/compose.yml exec app sh -c "cd /workspaces/e
 Worktrees live inside the repo (`.claude/worktrees/<name>/`) and are mounted into the container at the same path under `/workspaces/expense-manager/.claude/worktrees/<name>/`. To run commands in a worktree:
 
 ```bash
-docker-compose --file .devcontainer/compose.yml exec app sh -c \
+$COMPOSE --file .devcontainer/compose.yml exec app sh -c \
   "cd /workspaces/expense-manager/.claude/worktrees/<name> && CI=true pnpm install --frozen-lockfile && pnpm build"
 ```
 
@@ -62,6 +75,8 @@ Playwright chromium is pre-installed in the container at `/home/node/.cache/ms-p
 The `postCreateCommand` in `devcontainer.json` runs `pnpm install`, `playwright install chromium`, and `pnpm db:migrate` automatically on container creation.
 
 **Known pre-existing E2E failure:** `settings.e2e.ts` › `covers security MFA setup…` fails on HEAD due to a timing issue with `'MFA ativado.'` text — not caused by our changes.
+
+Functional Playwright specs are intentionally colocated with routes as `src/routes/*.e2e.ts`. Runtime-specific registration and email-verification specs also live under `src/routes/`, while visual, performance, infrastructure and smoke specs live under `tests/quality/`. See `docs/development.md` for the configuration-to-suite map.
 
 ### When a test fails after UI changes
 

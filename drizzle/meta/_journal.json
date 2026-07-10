@@ -71,6 +71,41 @@
       "when": 1751500000000,
       "tag": "0009_totp_replay_prevention",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783464062738,
+      "tag": "0010_attachment_size_2mb",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1783641600000,
+      "tag": "0011_budget_alert_delivery",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1783728000000,
+      "tag": "0012_budget_alert_preference",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1783814400000,
+      "tag": "0013_email_delivery_feedback",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1783900800000,
+      "tag": "0014_email_delivery_event_retention",
+      "breakpoints": true
     }
   ]
 }

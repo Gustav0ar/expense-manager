@@ -6,6 +6,7 @@ import {
 	char,
 	check,
 	date,
+	foreignKey,
 	index,
 	integer,
 	type AnyPgColumn,
@@ -13,6 +14,7 @@ import {
 	pgTable,
 	text,
 	timestamp,
+	uuid,
 	uniqueIndex
 } from 'drizzle-orm/pg-core';
 import { session, user } from './auth.schema';
@@ -251,6 +253,114 @@ export const categoryBudget = pgTable(
 		index('category_budget_workspace_month_idx').on(table.workspaceId, table.periodMonth),
 		index('category_budget_category_idx').on(table.categoryId),
 		index('category_budget_created_by_idx').on(table.createdByUserId)
+	]
+);
+
+export const budgetAlertDelivery = pgTable(
+	'budget_alert_delivery',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		workspaceId: bigint('workspace_id', { mode: 'number' })
+			.notNull()
+			.references(() => workspace.id, { onDelete: 'cascade' }),
+		periodMonth: date('period_month', { mode: 'string' }).notNull(),
+		recipientEmail: text('recipient_email').notNull(),
+		status: text('status').notNull().default('pending'),
+		claimToken: text('claim_token'),
+		claimExpiresAt: timestamp('claim_expires_at', { withTimezone: true }),
+		attemptCount: integer('attempt_count').notNull().default(0),
+		sentAt: timestamp('sent_at', { withTimezone: true }),
+		providerReference: uuid('provider_reference').notNull().defaultRandom(),
+		provider: text('provider'),
+		providerMessageId: text('provider_message_id'),
+		providerMessageUuid: text('provider_message_uuid'),
+		lastProviderEvent: text('last_provider_event'),
+		lastProviderEventAt: timestamp('last_provider_event_at', { withTimezone: true }),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp('updated_at', { withTimezone: true })
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date())
+	},
+	(table) => [
+		check(
+			'budget_alert_delivery_status_check',
+			sql`${table.status} in ('pending', 'sending', 'sent', 'failed')`
+		),
+		check('budget_alert_delivery_attempt_count_check', sql`${table.attemptCount} >= 0`),
+		uniqueIndex('budget_alert_delivery_workspace_month_recipient_unique_idx').on(
+			table.workspaceId,
+			table.periodMonth,
+			sql`lower(${table.recipientEmail})`
+		),
+		index('budget_alert_delivery_workspace_month_status_idx').on(
+			table.workspaceId,
+			table.periodMonth,
+			table.status
+		),
+		uniqueIndex('budget_alert_delivery_provider_reference_unique_idx').on(table.providerReference),
+		index('budget_alert_delivery_claim_expires_at_idx')
+			.on(table.claimExpiresAt)
+			.where(sql`${table.status} = 'sending'`)
+	]
+);
+
+export const emailDeliveryEvent = pgTable(
+	'email_delivery_event',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		provider: text('provider').notNull(),
+		fingerprint: char('fingerprint', { length: 64 }).notNull(),
+		eventType: text('event_type').notNull(),
+		eventTime: timestamp('event_time', { withTimezone: true }).notNull(),
+		budgetAlertDeliveryId: bigint('budget_alert_delivery_id', { mode: 'number' }),
+		providerMessageId: text('provider_message_id'),
+		providerMessageUuid: text('provider_message_uuid'),
+		receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(table) => [
+		foreignKey({
+			columns: [table.budgetAlertDeliveryId],
+			foreignColumns: [budgetAlertDelivery.id],
+			name: 'email_delivery_event_budget_alert_delivery_fk'
+		}).onDelete('cascade'),
+		check('email_delivery_event_provider_check', sql`${table.provider} in ('mailjet')`),
+		check(
+			'email_delivery_event_type_check',
+			sql`${table.eventType} in ('sent', 'open', 'click', 'bounce', 'spam', 'blocked', 'unsub')`
+		),
+		uniqueIndex('email_delivery_event_provider_fingerprint_unique_idx').on(
+			table.provider,
+			table.fingerprint
+		),
+		index('email_delivery_event_type_time_idx').on(table.eventType, table.eventTime),
+		index('email_delivery_event_received_at_idx').on(table.receivedAt),
+		index('email_delivery_event_budget_alert_delivery_idx').on(table.budgetAlertDeliveryId)
+	]
+);
+
+export const budgetAlertPreference = pgTable(
+	'budget_alert_preference',
+	{
+		workspaceId: bigint('workspace_id', { mode: 'number' })
+			.primaryKey()
+			.references(() => workspace.id, { onDelete: 'cascade' }),
+		isEnabled: boolean('is_enabled').notNull().default(false),
+		locale: text('locale').notNull().default('en'),
+		updatedByUserId: text('updated_by_user_id').references(() => user.id, {
+			onDelete: 'set null'
+		}),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp('updated_at', { withTimezone: true })
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date())
+	},
+	(table) => [
+		check('budget_alert_preference_locale_check', sql`${table.locale} in ('en', 'pt-BR')`),
+		index('budget_alert_preference_enabled_idx')
+			.on(table.workspaceId)
+			.where(sql`${table.isEnabled} = true`)
 	]
 );
 
@@ -522,7 +632,7 @@ export const expenseAttachment = pgTable(
 		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 	},
 	(table) => [
-		check('expense_attachment_size_bytes_check', sql`${table.sizeBytes} between 1 and 5242880`),
+		check('expense_attachment_size_bytes_check', sql`${table.sizeBytes} between 1 and 2097152`),
 		index('expense_attachment_workspace_expense_idx').on(table.workspaceId, table.expenseId),
 		index('expense_attachment_expense_idx').on(table.expenseId),
 		index('expense_attachment_uploaded_by_idx').on(table.uploadedByUserId)

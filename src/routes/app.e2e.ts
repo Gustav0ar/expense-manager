@@ -11,19 +11,44 @@ function uniqueEmail(prefix: string) {
 	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
 }
 
-async function submitRegisterForm(page: Page, input: { email: string; name: string }) {
-	const form = page
-		.locator('form')
-		.filter({ has: page.getByRole('button', { name: 'Criar conta' }) });
+async function submitRegisterForm(
+	page: Page,
+	input: { email: string; name: string },
+	buttonName = 'Criar conta'
+) {
+	const form = page.locator('form').filter({ has: page.getByRole('button', { name: buttonName }) });
+	const password = ['test', 'password', '123'].join('-');
 	await form.locator('input[name="name"]').fill(input.name);
 	await form.locator('input[name="email"]').fill(input.email);
-	await form.locator('input[name="password"]').fill(['test', 'password', '123'].join('-'));
-	await form
-		.locator('input[name="passwordConfirmation"]')
-		.fill(['test', 'password', '123'].join('-'));
+	await form.locator('input[name="password"]').fill(password);
+	await form.locator('input[name="passwordConfirmation"]').fill(password);
 	await expect(form.locator('input[name="name"]')).toHaveValue(input.name);
 	await expect(form.locator('input[name="email"]')).toHaveValue(input.email);
-	await form.getByRole('button', { name: 'Criar conta' }).click();
+	await expect(form.locator('input[name="password"]')).toHaveValue(password);
+	await expect(form.locator('input[name="passwordConfirmation"]')).toHaveValue(password);
+	await form.getByRole('button', { name: buttonName }).click();
+}
+
+async function registerAccount(
+	page: Page,
+	input: { email: string; name: string },
+	options: { buttonName?: string; path?: string } = {}
+) {
+	const buttonName = options.buttonName ?? 'Criar conta';
+	const path = options.path ?? '/register';
+
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		await page.goto(path);
+		await page.waitForLoadState('networkidle');
+		await submitRegisterForm(page, input, buttonName);
+
+		try {
+			await expect(page).not.toHaveURL(/\/register/, { timeout: 5000 });
+			return;
+		} catch (error) {
+			if (attempt === 2) throw error;
+		}
+	}
 }
 
 async function browserDateLabel(page: Page, value: string) {
@@ -460,11 +485,7 @@ test.describe('english locale defaults', () => {
 		await page.goto('/register');
 		await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 		await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible();
-		await page.getByLabel('Name').fill('Test User');
-		await page.getByLabel('Email').fill(email);
-		await page.getByLabel('Password', { exact: true }).fill(['test', 'password', '123'].join('-'));
-		await page.getByLabel('Confirm password').fill(['test', 'password', '123'].join('-'));
-		await page.getByRole('button', { name: 'Create account' }).click();
+		await registerAccount(page, { email, name: 'Test User' }, { buttonName: 'Create account' });
 
 		await expect(page).toHaveURL(/\/app\/onboarding/);
 		await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
@@ -707,6 +728,59 @@ test('covers dashboard, categories, expenses and reports happy path', async ({ p
 	expect(analyticalCsvText).toContain('12540');
 });
 
+test('nav has exactly 5 items, Settings tab is active for all settings sub-routes, back-links work', async ({
+	page
+}) => {
+	await registerAndCreateWorkspace(page);
+
+	// Nav has 5 items (down from 7)
+	await page.goto('/app/dashboard');
+	await expect(page.locator('.nav-item')).toHaveCount(5);
+
+	// Nav labels (pt-BR)
+	const labels = ['Dashboard', 'Despesas', 'Orçamento', 'Relatórios', 'Ajustes'];
+	for (const label of labels) {
+		await expect(page.locator('.nav-item').filter({ hasText: label }).first()).toBeVisible();
+	}
+
+	// Settings tab lights up for /users, /security, /audit
+	for (const subPath of ['/app/settings/users', '/app/settings/security', '/app/settings/audit']) {
+		await page.goto(subPath);
+		const settingsItem = page.locator('.nav-item[href="/app/settings/workspace"]');
+		await expect(settingsItem).toHaveClass(/active/);
+	}
+
+	// Expenses tab lights up for /categories (Categories moved to Expenses dialog)
+	await page.goto('/app/categories');
+	const expensesItem = page.locator('.nav-item[href="/app/expenses"]');
+	await expect(expensesItem).toHaveClass(/active/);
+
+	// Users page has back link to settings
+	await page.goto('/app/settings/users');
+	await expect(
+		page.locator('#main-content').getByRole('link', { name: /Ajustes/i })
+	).toHaveAttribute('href', '/app/settings/workspace');
+
+	// Settings page shows Users shortcut
+	await page.goto('/app/settings/workspace');
+	await expect(page.getByRole('link', { name: 'Usuários' })).toHaveAttribute(
+		'href',
+		'/app/settings/users'
+	);
+
+	// Support catalogs dialog shows Categories tab
+	await page.goto('/app/expenses');
+	await page.getByRole('button', { name: 'Cadastros' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Cadastros de apoio' });
+	await expect(dialog).toBeVisible();
+	const categoriesTab = dialog.getByRole('tab', { name: /Categorias/ });
+	await expect(categoriesTab).toBeVisible();
+	await expect(categoriesTab).toHaveAttribute('type', 'button');
+	await expect(categoriesTab).toHaveAttribute('aria-controls', 'support-catalog-panel-category');
+	await categoriesTab.click();
+	await expect(categoriesTab).toHaveAttribute('aria-selected', 'true');
+});
+
 test('keeps core app screens responsive without horizontal overflow', async ({ page }) => {
 	await page.setViewportSize({ width: 1280, height: 800 });
 	await registerAndCreateWorkspace(page);
@@ -728,7 +802,8 @@ test('keeps core app screens responsive without horizontal overflow', async ({ p
 		},
 		{
 			url: '/app/planning?periodMonth=2026-06-01',
-			assertReady: () => expect(page.getByRole('heading', { name: 'Planejamento' })).toBeVisible()
+			assertReady: () =>
+				expect(page.getByRole('heading', { name: 'Orçamento', exact: true })).toBeVisible()
 		},
 		{
 			url: '/app/reports?from=2026-06-01&to=2026-06-30&groupBy=expense',
@@ -773,7 +848,13 @@ test('keeps core app screens responsive without horizontal overflow', async ({ p
 
 	await page.setViewportSize({ width: 1280, height: 800 });
 	await page.goto('/app/expenses');
-	await expect(page.locator('.expense-table-header')).toBeHidden();
+	const responsiveHeader = page.locator('.expense-table-header');
+	await expect(responsiveHeader).toBeAttached();
+	const responsiveHeaderBox = await responsiveHeader.boundingBox();
+	expect(responsiveHeaderBox).not.toBeNull();
+	expect(responsiveHeaderBox!.width).toBeLessThanOrEqual(1);
+	expect(responsiveHeaderBox!.height).toBeLessThanOrEqual(1);
+	await expect(page.getByRole('columnheader', { name: 'Valor' })).toBeAttached();
 });
 
 test('shows validation errors and supports editing and deleting expenses', async ({ page }) => {
@@ -978,7 +1059,13 @@ test('covers planning, imports, attachments and audit flows', async ({ page }) =
 	await expect(page.locator('.budget-item').filter({ hasText: 'Limpeza' })).toContainText(
 		'R$ 500,00'
 	);
-	await page.getByRole('button', { name: 'Enviar alertas' }).click();
+	await expect(page.getByText('Alertas automáticos desativados')).toBeVisible();
+	await page.getByRole('button', { name: 'Ativar alertas automáticos' }).click();
+	await expect(page.getByText('Alertas automáticos de orçamento ativados.')).toBeVisible();
+	await expect(page.getByText('Alertas automáticos ativados')).toBeVisible();
+	await page.getByRole('button', { name: 'Desativar alertas automáticos' }).click();
+	await expect(page.getByText('Alertas automáticos de orçamento desativados.')).toBeVisible();
+	await page.getByRole('button', { name: 'Enviar alertas agora' }).click();
 	await expect(page.getByText('Nenhum alerta de orçamento para enviar.')).toBeVisible();
 
 	const planningPaymentForm = page.locator('form.compact-support');

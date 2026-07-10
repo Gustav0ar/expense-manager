@@ -144,6 +144,7 @@ POSTGRES_USER=expense_manager
 POSTGRES_PASSWORD=<long-random-database-password>
 DB_POOL_MAX=5
 TRUST_PROXY_HEADERS=true
+TRUSTED_PROXY_CIDR=<immediate-traefik-proxy-cidr>
 
 BACKUP_ENABLED=true
 RESTIC_REPOSITORY=s3:s3.example.com/expense-manager-backups

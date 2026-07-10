@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page, test } from '@playwright/test';
+import { expect, type Browser, type Locator, type Page, test } from '@playwright/test';
 
 test.describe.configure({ mode: 'serial' });
 test.use({
@@ -24,6 +24,46 @@ async function registerAndCreateWorkspace(page: Page, workspaceName = 'Despesas 
 	await page.getByLabel('Nome').fill(workspaceName);
 	await page.getByRole('button', { name: 'Criar workspace' }).click();
 	await expect(page).toHaveURL(/\/app\/dashboard/);
+}
+
+async function registerAccount(page: Page, input: { email: string; name: string; next?: string }) {
+	const target = input.next ? `/register?next=${encodeURIComponent(input.next)}` : '/register';
+	await page.goto(target);
+	await page.getByLabel('Nome').fill(input.name);
+	await page.getByLabel('Email').fill(input.email);
+	await page.locator('input[name="password"]').fill(['test', 'password', '123'].join('-'));
+	await page
+		.locator('input[name="passwordConfirmation"]')
+		.fill(['test', 'password', '123'].join('-'));
+	await page.getByRole('button', { name: 'Criar conta' }).click();
+}
+
+async function inviteAndAcceptMember(browser: Browser, page: Page) {
+	await page.goto('/app/settings/users');
+	const email = uniqueEmail('expenses-member');
+	const inviteForm = page.locator('form[action="?/invite"]');
+	await inviteForm.getByLabel('Email').fill(email);
+	await inviteForm.getByLabel('Papel').selectOption('member');
+	await inviteForm.getByRole('button', { name: 'Convidar' }).click();
+	const inviteUrl = (await page.locator('.invite-url-row .invite-url-code').textContent())?.trim();
+	expect(inviteUrl).toBeTruthy();
+
+	const context = await browser.newContext({
+		locale: 'pt-BR',
+		extraHTTPHeaders: { 'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8' }
+	});
+	const memberPage = await context.newPage();
+	const invitePath = new URL(inviteUrl!, 'http://localhost:4173').pathname;
+	await registerAccount(memberPage, {
+		email,
+		name: 'Expense Member',
+		next: invitePath
+	});
+	await expect(memberPage).toHaveURL(/\/invite\//);
+	await memberPage.getByRole('button', { name: 'Aceitar convite' }).click();
+	await expect(memberPage).toHaveURL(/\/app\/dashboard/);
+
+	return { context, page: memberPage };
 }
 
 async function createCategory(
@@ -71,6 +111,14 @@ async function createCatalogByRequest(
 		}
 	});
 	await expect(response).toBeOK();
+}
+
+async function openSupportCatalogDialog(page: Page) {
+	await page.goto('/app/expenses');
+	await page.getByRole('button', { name: 'Cadastros' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Cadastros de apoio' });
+	await expect(dialog).toBeVisible();
+	return dialog;
 }
 
 async function createExpenseByRequest(
@@ -126,11 +174,42 @@ async function createExpenseFromForm(
 	await expect(expenseRow(page, input.description).first()).toBeVisible();
 }
 
+async function createLargePngAttachment(page: Page) {
+	const bytes = await page.evaluate(async () => {
+		const width = 1024;
+		const height = 1024;
+		const canvas = document.createElement('canvas');
+		canvas.width = width;
+		canvas.height = height;
+		const context = canvas.getContext('2d');
+		if (!context) throw new Error('Canvas is unavailable');
+		const imageData = context.createImageData(width, height);
+		let seed = 7;
+
+		for (let index = 0; index < imageData.data.length; index += 4) {
+			seed = (seed * 1664525 + 1013904223) >>> 0;
+			imageData.data[index] = seed & 255;
+			imageData.data[index + 1] = (seed >>> 8) & 255;
+			imageData.data[index + 2] = (seed >>> 16) & 255;
+			imageData.data[index + 3] = 255;
+		}
+
+		context.putImageData(imageData, 0, 0);
+		const blob = await new Promise<Blob>((resolve, reject) => {
+			canvas.toBlob((value) => {
+				if (value) resolve(value);
+				else reject(new Error('Could not create PNG attachment'));
+			}, 'image/png');
+		});
+		return Array.from(new Uint8Array(await blob.arrayBuffer()));
+	});
+
+	expect(bytes.length).toBeGreaterThan(2 * 1024 * 1024);
+	return Buffer.from(bytes);
+}
+
 async function openCatalogDialog(page: Page, kind: 'paymentMethod' | 'vendor' | 'costCenter') {
-	await page.goto('/app/expenses');
-	await page.getByRole('button', { name: 'Cadastros' }).click();
-	const dialog = page.getByRole('dialog', { name: 'Cadastros de apoio' });
-	await expect(dialog).toBeVisible();
+	const dialog = await openSupportCatalogDialog(page);
 	await dialog.getByRole('tab', { name: new RegExp(tabLabel(kind)) }).click();
 	return dialog;
 }
@@ -179,6 +258,22 @@ async function categoryIdByLabel(page: Page, label: string) {
 	return value!;
 }
 
+async function catalogIdByLabel(
+	page: Page,
+	kind: 'paymentMethod' | 'vendor' | 'costCenter',
+	label: string
+) {
+	await page.goto('/app/expenses');
+	const fieldName =
+		kind === 'paymentMethod' ? 'paymentMethodId' : kind === 'vendor' ? 'vendorId' : 'costCenterId';
+	const option = page
+		.locator(`form.expense-create-form select[name="${fieldName}"] option`)
+		.filter({ hasText: label });
+	const value = await option.getAttribute('value');
+	expect(value).toBeTruthy();
+	return value!;
+}
+
 async function applyExpenseFilter(page: Page, configure: (filterForm: Locator) => Promise<void>) {
 	await page.goto('/app/expenses');
 	const filterForm = page.locator('form.expense-filter-form');
@@ -194,6 +289,17 @@ async function expectExpenseResults(page: Page, visible: string[], hidden: strin
 	for (const description of hidden) {
 		await expect(expenseRow(page, description)).toHaveCount(0);
 	}
+}
+
+async function visibleBox(locator: Locator, name: string) {
+	await expect(locator, `${name} should be visible`).toBeVisible();
+	const box = await locator.boundingBox();
+	expect(box, `${name} should have a rendered box`).not.toBeNull();
+	return box!;
+}
+
+function expectCloseTo(actual: number, expected: number, label: string, tolerance = 4) {
+	expect(Math.abs(actual - expected), label).toBeLessThanOrEqual(tolerance);
 }
 
 async function updateExpensePaymentStatus(
@@ -222,6 +328,319 @@ async function rejectExpense(page: Page, description: string) {
 	await expect(row).toContainText('Rejeitada');
 }
 
+test('keeps desktop expense table columns and delete action aligned', async ({ page }) => {
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await registerAndCreateWorkspace(page);
+	await createCategory(page, { name: 'Layout', emoji: '🧰', color: '#2563eb' });
+	await createCatalogByRequest(page, 'paymentMethod', 'Pix Layout');
+	await createCatalogByRequest(page, 'vendor', 'Fornecedor Layout');
+	await createCatalogByRequest(page, 'costCenter', 'Centro Layout');
+	await createExpenseFromForm(page, {
+		description: 'Alinhamento desktop',
+		amount: '123,45',
+		date: '2026-06-16',
+		category: '🧰 Layout',
+		payment: 'Pix Layout',
+		vendor: 'Fornecedor Layout',
+		costCenter: 'Centro Layout',
+		notes: 'Observação de layout'
+	});
+
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await page.goto(`/app/expenses?q=${encodeURIComponent('Alinhamento desktop')}`);
+
+	const table = page.locator('.expense-table');
+	await expect(table).toHaveClass(/with-select/);
+	const headerCells = table.locator('.expense-table-header > span');
+	await expect(headerCells).toHaveText([
+		'Revisão',
+		'Data',
+		'Descrição',
+		'Categoria',
+		'Pagamento',
+		'Detalhes',
+		'Valor',
+		'Ações'
+	]);
+
+	const row = expenseRow(page, 'Alinhamento desktop').first();
+	await expect(row).toBeVisible();
+	const rowSummary = row.locator('.expense-table-row');
+	const rowBox = await visibleBox(rowSummary, 'expense row');
+	const columns = [
+		{ header: 1, cell: row.locator('.expense-table-date'), label: 'date column left edge' },
+		{
+			header: 2,
+			cell: row.locator('.expense-table-description'),
+			label: 'description column left edge'
+		},
+		{ header: 3, cell: row.locator('.expense-table-category'), label: 'category column left edge' },
+		{ header: 4, cell: row.locator('.expense-table-payment'), label: 'payment column left edge' },
+		{ header: 5, cell: row.locator('.expense-table-note'), label: 'details column left edge' },
+		{ header: 7, cell: row.locator('.expense-table-action'), label: 'actions column left edge' }
+	];
+
+	for (const column of columns) {
+		const headerBox = await visibleBox(headerCells.nth(column.header), `${column.label} header`);
+		const cellBox = await visibleBox(column.cell, `${column.label} cell`);
+		expectCloseTo(cellBox.x, headerBox.x, column.label);
+	}
+
+	const valueHeaderBox = await visibleBox(headerCells.nth(6), 'value column header');
+	const amountBox = await visibleBox(row.locator('.expense-table-amount'), 'amount column cell');
+	expectCloseTo(
+		amountBox.x + amountBox.width,
+		valueHeaderBox.x + valueHeaderBox.width,
+		'value column right edge'
+	);
+
+	const actionBox = await visibleBox(row.locator('.expense-table-action'), 'actions column cell');
+	const deleteBox = await visibleBox(
+		row.getByRole('button', { name: 'Excluir Alinhamento desktop' }),
+		'delete action'
+	);
+	const rowCenter = rowBox.y + rowBox.height / 2;
+	const actionCenter = actionBox.y + actionBox.height / 2;
+	const deleteCenter = deleteBox.y + deleteBox.height / 2;
+	expectCloseTo(deleteCenter, rowCenter, 'delete action row vertical center');
+	expectCloseTo(deleteCenter, actionCenter, 'delete action field vertical center');
+
+	await row.locator('summary').click();
+	const editForm = row.locator('.expense-edit-form-table');
+	const workflowPanel = row.locator('.expense-workflow-panel');
+	await expect(editForm).toBeVisible();
+	await expect(workflowPanel).toBeVisible();
+	const editFormBox = await visibleBox(editForm, 'desktop edit form');
+	const workflowPanelBox = await visibleBox(workflowPanel, 'desktop workflow panel');
+	expectCloseTo(editFormBox.y, workflowPanelBox.y, 'expanded desktop panels top edge', 8);
+	expect(
+		editFormBox.x + editFormBox.width,
+		'edit form should sit before workflow rail'
+	).toBeLessThanOrEqual(workflowPanelBox.x + 1);
+	expect(
+		workflowPanelBox.width,
+		'workflow rail should be compact instead of spanning the full row'
+	).toBeLessThan(rowBox.width * 0.35);
+});
+
+test('keeps tablet expense actions compact above the edit form', async ({ page }) => {
+	await page.setViewportSize({ width: 820, height: 1180 });
+	await registerAndCreateWorkspace(page);
+	await createCategory(page, { name: 'Tablet', emoji: '🧰', color: '#2563eb' });
+	const tabletCategoryId = await categoryIdByLabel(page, 'Tablet');
+	await createExpenseByRequest(page, {
+		categoryId: tabletCategoryId,
+		description: 'Alinhamento tablet',
+		amount: '554,69',
+		expenseDate: '2026-07-07'
+	});
+
+	await page.setViewportSize({ width: 820, height: 1180 });
+	await page.goto(`/app/expenses?q=${encodeURIComponent('Alinhamento tablet')}`);
+	const row = expenseRow(page, 'Alinhamento tablet').first();
+	await expect(row).toBeVisible();
+	await row.locator('summary').click();
+
+	const rowBox = await visibleBox(row, 'tablet expense row');
+	const workflowPanel = row.locator('.expense-workflow-panel');
+	const editForm = row.locator('.expense-edit-form-table');
+	const workflowBox = await visibleBox(workflowPanel, 'tablet workflow panel');
+	const editFormBox = await visibleBox(editForm, 'tablet edit form');
+	const summaryBox = await visibleBox(
+		workflowPanel.locator('.workflow-summary'),
+		'tablet workflow summary'
+	);
+	const approveBox = await visibleBox(
+		workflowPanel.locator('.workflow-approve-form'),
+		'tablet approve form'
+	);
+	const rejectBox = await visibleBox(workflowPanel.locator('.reject-form'), 'tablet reject form');
+	const paymentBox = await visibleBox(
+		workflowPanel.locator("form[action='?/payment']"),
+		'tablet payment form'
+	);
+
+	expect(workflowBox.width, 'tablet workflow panel should use the row width').toBeGreaterThan(
+		rowBox.width * 0.9
+	);
+	expect(editFormBox.width, 'tablet edit form should align to the workflow width').toBeGreaterThan(
+		rowBox.width * 0.9
+	);
+	expect(summaryBox.y, 'status summary should be the first workflow row').toBeLessThan(
+		approveBox.y
+	);
+	expectCloseTo(approveBox.y, rejectBox.y, 'tablet approve and reject row alignment', 8);
+	expect(paymentBox.y, 'payment controls should sit below review controls').toBeGreaterThan(
+		approveBox.y
+	);
+	expect(
+		paymentBox.width,
+		'payment controls should span the tablet workflow panel'
+	).toBeGreaterThan(workflowBox.width * 0.9);
+	expect(
+		editFormBox.y,
+		'edit form should start below tablet workflow panel'
+	).toBeGreaterThanOrEqual(workflowBox.y + workflowBox.height - 8);
+	expect(
+		workflowBox.height,
+		'tablet workflow panel should stay compact instead of creating a large empty band'
+	).toBeLessThan(230);
+});
+
+test('keeps mobile expense cards and review actions aligned above navigation', async ({
+	browser,
+	page
+}) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await registerAndCreateWorkspace(page);
+	await createCategory(page, { name: 'Mobile', emoji: '🧰', color: '#2563eb' });
+	await createCatalogByRequest(page, 'paymentMethod', 'Pix Mobile');
+	await createCatalogByRequest(page, 'vendor', 'Fornecedor Mobile');
+	await createCatalogByRequest(page, 'costCenter', 'Centro Mobile');
+	const mobileCategoryId = await categoryIdByLabel(page, 'Mobile');
+	const memberSession = await inviteAndAcceptMember(browser, page);
+	try {
+		await createExpenseByRequest(memberSession.page, {
+			categoryId: mobileCategoryId,
+			description: 'Mobile revisão',
+			amount: '554,69',
+			expenseDate: '2026-07-07'
+		});
+		await createExpenseByRequest(memberSession.page, {
+			categoryId: mobileCategoryId,
+			description: 'Mobile revisão meio',
+			amount: '13,86',
+			expenseDate: '2026-07-05'
+		});
+		await createExpenseByRequest(memberSession.page, {
+			categoryId: mobileCategoryId,
+			description: 'Mobile revisão baixa',
+			amount: '16,46',
+			expenseDate: '2026-07-03'
+		});
+	} finally {
+		await memberSession.context.close();
+	}
+
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto('/app/expenses');
+	await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+	const row = expenseRow(page, 'Mobile revisão baixa').first();
+	await expect(row).toBeVisible();
+
+	const dateBox = await visibleBox(row.locator('.expense-table-date'), 'mobile date');
+	const amountBox = await visibleBox(row.locator('.expense-table-amount'), 'mobile amount');
+	const deleteBox = await visibleBox(
+		row.getByRole('button', { name: 'Excluir Mobile revisão baixa' }),
+		'mobile delete action'
+	);
+	expectCloseTo(
+		dateBox.y + dateBox.height / 2,
+		amountBox.y + amountBox.height / 2,
+		'mobile date and amount vertical center',
+		8
+	);
+	expectCloseTo(
+		deleteBox.y + deleteBox.height / 2,
+		amountBox.y + amountBox.height / 2,
+		'mobile delete and amount vertical center',
+		14
+	);
+
+	const categoryBox = await visibleBox(row.locator('.expense-table-category'), 'mobile category');
+	const editBox = await visibleBox(row.locator('.expense-table-action'), 'mobile edit action');
+	await expect(row.locator('.expense-table-action')).toContainText('Ações');
+	expectCloseTo(
+		categoryBox.y + categoryBox.height / 2,
+		editBox.y + editBox.height / 2,
+		'mobile category and edit vertical center',
+		10
+	);
+
+	const selectLabel = row.locator('.expense-select-label');
+	const unselectedStyle = await selectLabel.evaluate((element) => {
+		const style = getComputedStyle(element);
+		return {
+			backgroundColor: style.backgroundColor,
+			borderColor: style.borderColor,
+			boxShadow: style.boxShadow
+		};
+	});
+	const primaryColor = await page.evaluate(() => {
+		const probe = document.createElement('span');
+		probe.style.color = getComputedStyle(document.documentElement)
+			.getPropertyValue('--color-primary')
+			.trim();
+		document.body.append(probe);
+		const color = getComputedStyle(probe).color;
+		probe.remove();
+		return color;
+	});
+	const selectCheckbox = row.locator('.expense-select-checkbox');
+	await selectCheckbox.check();
+	await expect(selectCheckbox).toBeChecked();
+	await expect(selectLabel).toHaveClass(/selected/);
+	await expect
+		.poll(async () => {
+			const selectedStyle = await selectLabel.evaluate((element) => {
+				const style = getComputedStyle(element);
+				return {
+					backgroundColor: style.backgroundColor,
+					borderColor: style.borderColor,
+					boxShadow: style.boxShadow
+				};
+			});
+			const checkboxStyle = await selectCheckbox.evaluate((element) => {
+				const style = getComputedStyle(element);
+				return {
+					backgroundColor: style.backgroundColor,
+					borderColor: style.borderColor
+				};
+			});
+			return (
+				selectedStyle.backgroundColor === primaryColor &&
+				checkboxStyle.backgroundColor === 'rgba(0, 0, 0, 0)' &&
+				selectedStyle.borderColor !== unselectedStyle.borderColor &&
+				selectedStyle.boxShadow !== unselectedStyle.boxShadow
+			);
+		}, 'selected checkbox control should fill with the primary color')
+		.toBe(true);
+	const bulkActionBar = page.locator('.bulk-action-bar');
+	await expect(bulkActionBar).toBeVisible();
+	await expect
+		.poll(async () => {
+			const bulkBox = await bulkActionBar.boundingBox();
+			const bottomNavBox = await page.locator('.sidebar').boundingBox();
+			if (!bulkBox || !bottomNavBox) return false;
+			return bulkBox.y + bulkBox.height <= bottomNavBox.y - 10;
+		}, 'bulk review actions should stay above mobile nav after selecting a pending expense')
+		.toBe(true);
+	await expect(bulkActionBar.getByRole('button', { name: 'Aprovar' })).toHaveClass(
+		/review-approve/
+	);
+	const filterForm = page.locator('form.expense-filter-form');
+	await filterForm.getByLabel('Busca').fill('Mobile revisão baixa');
+	await filterForm.getByRole('button', { name: 'Filtrar' }).click();
+	await expect(page).toHaveURL(/q=Mobile/);
+	await expect(bulkActionBar).toBeHidden();
+	await expect(selectCheckbox).not.toBeChecked();
+
+	await row.locator('summary').click();
+	const workflowPanel = row.locator('.expense-workflow-panel');
+	await expect(workflowPanel).toBeVisible();
+	const approveButton = row.getByRole('button', { name: 'Aprovar' });
+	await expect(approveButton).toBeVisible();
+	await expect
+		.poll(async () => {
+			const workflowBox = await workflowPanel.boundingBox();
+			const bottomNavBox = await page.locator('.sidebar').boundingBox();
+			if (!workflowBox || !bottomNavBox) return false;
+			return workflowBox.y + workflowBox.height <= bottomNavBox.y - 4;
+		}, 'expanded workflow actions should move above mobile nav after opening')
+		.toBe(true);
+	await expect(approveButton).toHaveClass(/review-approve/);
+});
+
 test('manages support catalogs from expenses', async ({ page }) => {
 	await registerAndCreateWorkspace(page);
 	await createCategory(page);
@@ -241,14 +660,54 @@ test('manages support catalogs from expenses', async ({ page }) => {
 	const paymentEdit = page.getByLabel('Editar pagamento Cartão corporativo');
 	await paymentEdit.fill('Cartão central');
 	await paymentEdit.locator('xpath=ancestor::form').getByRole('button', { name: 'Salvar' }).click();
+	const paymentDialog = page.getByRole('dialog', { name: 'Cadastros de apoio' });
+	await expect(paymentDialog).toBeVisible();
+	await expect(paymentDialog.getByRole('status')).toHaveText('Item atualizado com sucesso.');
 	await expect(
 		page.locator('form.expense-create-form select[name="paymentMethodId"]')
 	).toContainText('Cartão central');
+	await page.keyboard.press('Escape');
+	await expect(paymentDialog).toBeHidden();
+	await openCatalogDialog(page, 'paymentMethod');
+	await expect(
+		page.getByRole('dialog', { name: 'Cadastros de apoio' }).getByRole('status')
+	).toHaveCount(0);
+	await page.keyboard.press('Escape');
+
+	await createCatalogFromDialog(page, 'paymentMethod', 'Pagamento recorrente');
+	const recurringCategoryId = await categoryIdByLabel(page, 'Operacional');
+	const recurringPaymentId = await catalogIdByLabel(page, 'paymentMethod', 'Pagamento recorrente');
+	const recurringResponse = await page.request.post('/app/planning?/createRecurring', {
+		form: {
+			categoryId: recurringCategoryId,
+			description: 'Recorrência com catálogo exclusivo',
+			amount: '25,00',
+			frequency: 'monthly',
+			intervalCount: '1',
+			startDate: '2099-01-01',
+			endDate: '',
+			paymentMethodId: recurringPaymentId,
+			notes: '',
+			returnTo: '/app/planning'
+		}
+	});
+	await expect(recurringResponse).toBeOK();
+	const recurringDialog = await openCatalogDialog(page, 'paymentMethod');
+	await expect(
+		recurringDialog.getByRole('button', {
+			name: 'Arquivar pagamento Pagamento recorrente'
+		})
+	).toBeVisible();
+	await recurringDialog.getByRole('button', { name: 'Fechar' }).click();
 
 	await createCatalogFromDialog(page, 'vendor', 'Fornecedor temporário');
 	await openCatalogDialog(page, 'vendor');
 	await page.getByRole('button', { name: 'Excluir fornecedor Fornecedor temporário' }).click();
-	await page.goto('/app/expenses');
+	const vendorDialog = page.getByRole('dialog', { name: 'Cadastros de apoio' });
+	await expect(vendorDialog).toBeVisible();
+	await expect(vendorDialog.getByRole('status')).toHaveText('Item excluído com sucesso.');
+	await expect(vendorDialog.getByLabel('Editar fornecedor Fornecedor temporário')).toHaveCount(0);
+	await vendorDialog.getByRole('button', { name: 'Fechar' }).click();
 	await page
 		.locator('form.expense-create-form')
 		.getByRole('combobox', { name: 'Fornecedor' })
@@ -271,7 +730,14 @@ test('manages support catalogs from expenses', async ({ page }) => {
 
 	await openCatalogDialog(page, 'vendor');
 	await page.getByRole('button', { name: 'Arquivar fornecedor ACME Serviços' }).click();
-	await page.goto('/app/expenses');
+	await expect(page.getByRole('dialog', { name: 'Cadastros de apoio' })).toBeVisible();
+	await expect(
+		page.getByRole('dialog', { name: 'Cadastros de apoio' }).getByRole('status')
+	).toHaveText('Item arquivado com sucesso.');
+	await page
+		.getByRole('dialog', { name: 'Cadastros de apoio' })
+		.getByRole('button', { name: 'Fechar' })
+		.click();
 	await expect(expenseRow(page, 'Despesa com fornecedor usado')).toContainText('ACME Serviços');
 	const archivedVendorRow = expenseRow(page, 'Despesa com fornecedor usado');
 	await archivedVendorRow.locator('summary').click();
@@ -283,6 +749,145 @@ test('manages support catalogs from expenses', async ({ page }) => {
 		.getByRole('combobox', { name: 'Fornecedor' })
 		.fill('ACME Serviços');
 	await expect(page.getByRole('option', { name: 'ACME Serviços', exact: true })).toHaveCount(0);
+});
+
+test('manages categories from the expenses support dialog', async ({ page }) => {
+	await registerAndCreateWorkspace(page);
+
+	let dialog = await openSupportCatalogDialog(page);
+	const categoriesTab = dialog.getByRole('tab', { name: /Categorias/ });
+	await categoriesTab.click();
+	await expect(categoriesTab).toHaveAttribute('aria-selected', 'true');
+
+	const createForm = dialog.locator('form.support-catalog-category-form');
+	await createForm.getByLabel('Nova categoria').fill('Categoria Sem Uso');
+	await createForm.getByLabel('Cor').fill('#0f766e');
+	await createForm.getByLabel('Emoji').selectOption('🧾');
+	await createForm.getByRole('button', { name: 'Criar' }).click();
+
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('status')).toHaveText('Categoria criada com sucesso.');
+	await expect(dialog.getByLabel('Editar categoria Categoria Sem Uso')).toBeVisible();
+	await dialog.getByRole('button', { name: 'Excluir categoria Categoria Sem Uso' }).click();
+
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('status')).toHaveText('Categoria excluída com sucesso.');
+	await expect(dialog.getByLabel('Editar categoria Categoria Sem Uso')).toHaveCount(0);
+
+	const categoryCreateForm = dialog.locator('form.support-catalog-category-form');
+	await categoryCreateForm.getByLabel('Nova categoria').fill('Categoria Dialog');
+	await categoryCreateForm.getByLabel('Cor').fill('#0f766e');
+	await categoryCreateForm.getByLabel('Emoji').selectOption('🧾');
+	await categoryCreateForm.getByRole('button', { name: 'Criar' }).click();
+
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('status')).toHaveText('Categoria criada com sucesso.');
+	await expect(dialog.getByLabel('Editar categoria Categoria Dialog')).toBeVisible();
+	await expect(page.locator('form.expense-create-form select[name="categoryId"]')).toContainText(
+		'Categoria Dialog'
+	);
+
+	const editForm = dialog
+		.getByLabel('Editar categoria Categoria Dialog')
+		.locator('xpath=ancestor::form');
+	await editForm.getByLabel('Editar categoria Categoria Dialog').fill('Categoria Revisada');
+	await editForm.getByLabel('Cor Categoria Dialog').fill('#2563eb');
+	await editForm.getByLabel('Emoji Categoria Dialog').selectOption('🧰');
+	await editForm.getByRole('button', { name: 'Salvar' }).click();
+
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('status')).toHaveText('Categoria atualizada com sucesso.');
+	await expect(page.locator('form.expense-create-form select[name="categoryId"]')).toContainText(
+		'Categoria Revisada'
+	);
+	await expect(
+		page.locator('form.expense-create-form select[name="categoryId"]')
+	).not.toContainText('Categoria Dialog');
+	await dialog.getByRole('button', { name: 'Fechar' }).click();
+
+	await createExpenseFromForm(page, {
+		description: 'Categoria vinculada',
+		amount: '25,00',
+		date: '2026-06-12',
+		category: '🧰 Categoria Revisada'
+	});
+
+	dialog = await openSupportCatalogDialog(page);
+	await dialog.getByRole('tab', { name: /Categorias/ }).click();
+	await expect(dialog.getByLabel('Editar categoria Categoria Revisada')).toBeVisible();
+	await dialog.getByRole('button', { name: 'Arquivar categoria Categoria Revisada' }).click();
+
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('status')).toHaveText('Categoria arquivada com sucesso.');
+	await expect(
+		page.locator('form.expense-create-form select[name="categoryId"]')
+	).not.toContainText('Categoria Revisada');
+
+	await expect(dialog.getByLabel('Editar categoria Categoria Revisada')).toHaveCount(0);
+	await dialog.getByRole('button', { name: /Categorias arquivadas/ }).click();
+	await expect(dialog.getByLabel('Editar categoria Categoria Revisada')).toBeVisible();
+	await dialog.getByRole('button', { name: 'Restaurar categoria Categoria Revisada' }).click();
+
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('status')).toHaveText('Categoria restaurada com sucesso.');
+	await expect(page.locator('form.expense-create-form select[name="categoryId"]')).toContainText(
+		'Categoria Revisada'
+	);
+});
+
+test('exposes keyboard tabs and expense table relationships', async ({ page }) => {
+	await registerAndCreateWorkspace(page);
+
+	const dialog = await openSupportCatalogDialog(page);
+	const paymentsTab = dialog.getByRole('tab', { name: /Pagamentos/ });
+	const vendorsTab = dialog.getByRole('tab', { name: /Fornecedores/ });
+	const categoriesTab = dialog.getByRole('tab', { name: /Categorias/ });
+	const panel = dialog.getByRole('tabpanel');
+
+	await paymentsTab.focus();
+	await paymentsTab.press('ArrowRight');
+	await expect(vendorsTab).toBeFocused();
+	await expect(vendorsTab).toHaveAttribute('aria-selected', 'true');
+	await vendorsTab.press('End');
+	await expect(categoriesTab).toBeFocused();
+	await expect(categoriesTab).toHaveAttribute('aria-selected', 'true');
+	await categoriesTab.press('Home');
+	await expect(paymentsTab).toBeFocused();
+	await expect(paymentsTab).toHaveAttribute('aria-selected', 'true');
+	await expect(paymentsTab).toHaveAttribute('aria-controls', 'support-catalog-panel');
+	await expect(panel).toHaveAttribute('id', 'support-catalog-panel');
+	await dialog.getByRole('button', { name: 'Fechar' }).click();
+
+	await createCategory(page);
+	await createExpenseFromForm(page, {
+		description: 'Linha acessível',
+		amount: '42,00',
+		date: '2026-06-15',
+		category: '🧰 Operacional'
+	});
+
+	const table = page.getByRole('table', { name: 'Despesas lançadas' });
+	await expect(table).toBeVisible();
+	for (const heading of [
+		'Revisão',
+		'Data',
+		'Descrição',
+		'Categoria',
+		'Pagamento',
+		'Detalhes',
+		'Valor',
+		'Ações'
+	]) {
+		await expect(table.getByRole('columnheader', { name: heading })).toBeAttached();
+	}
+
+	const expenseTableRow = table.getByRole('row').filter({ hasText: 'Linha acessível' });
+	await expect(expenseTableRow).toHaveAttribute('aria-expanded', 'false');
+	await expect(expenseTableRow.getByRole('cell')).toHaveCount(8);
+	await expenseTableRow.focus();
+	await expenseTableRow.press('Enter');
+	await expect(expenseTableRow).toHaveAttribute('aria-expanded', 'true');
+	await expect(table.locator('.expense-details-cell[role="cell"]')).toBeVisible();
 });
 
 test('validates support catalog errors, search and pagination', async ({ page }) => {
@@ -667,6 +1272,45 @@ test('edits, reviews, pays, attaches and deletes an expense', async ({ page }) =
 	await expect(page.getByText('Nenhuma despesa encontrada.')).toBeVisible();
 });
 
+test('compresses image attachments in the browser before upload', async ({ page }) => {
+	test.setTimeout(60_000);
+
+	await registerAndCreateWorkspace(page);
+	await createCategory(page);
+	await createExpenseFromForm(page, {
+		description: 'Despesa com imagem',
+		amount: '90,00',
+		date: '2026-06-23',
+		category: '🧰 Operacional'
+	});
+
+	const originalImage = await createLargePngAttachment(page);
+	let row = expenseRow(page, 'Despesa com imagem');
+	await row.locator('summary').click();
+	await row.locator('input[type="file"]').setInputFiles({
+		name: 'recibo-grande.png',
+		mimeType: 'image/png',
+		buffer: originalImage
+	});
+	await row.getByRole('button', { name: 'Anexar' }).click();
+
+	row = expenseRow(page, 'Despesa com imagem');
+	await expect(row.locator('.expense-attachment-count')).toContainText('1');
+	if ((await row.locator('details').getAttribute('open')) === null) {
+		await row.locator('summary').click();
+	}
+	const attachment = row.locator('.attachment-chip').filter({ hasText: 'recibo-grande.jpg' });
+	await expect(attachment).toBeVisible();
+	const attachmentHref = await attachment.first().getAttribute('href');
+	expect(attachmentHref).toBeTruthy();
+	const attachmentResponse = await page.request.get(attachmentHref!);
+	await expect(attachmentResponse).toBeOK();
+	expect(attachmentResponse.headers()['content-type']).toContain('image/jpeg');
+	const compressedImage = await attachmentResponse.body();
+	expect(compressedImage.length).toBeLessThan(originalImage.length);
+	expect(compressedImage.length).toBeLessThan(2 * 1024 * 1024);
+});
+
 test('keeps the page stable on update and attachment errors', async ({ page }) => {
 	await registerAndCreateWorkspace(page);
 	await createCategory(page);
@@ -693,7 +1337,8 @@ test('keeps the page stable on update and attachment errors', async ({ page }) =
 		buffer: Buffer.from('')
 	});
 	await row.getByRole('button', { name: 'Anexar' }).click();
-	await expect(page.getByText('Anexo inválido.')).toBeVisible();
+	await expect(page.getByText('Anexo inválido.')).toHaveCount(1);
+	await expect(row.getByText('Anexo inválido.')).toBeVisible();
 	await expect(page).toHaveURL(/\/app\/expenses/);
 	await expect(expenseRow(page, 'Despesa com erros')).toBeVisible();
 });

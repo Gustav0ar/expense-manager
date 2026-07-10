@@ -89,6 +89,7 @@ pnpm test:visual
 pnpm test:performance
 pnpm test:infrastructure
 pnpm test:smoke
+pnpm test:prometheus-rules
 pnpm test:quality
 pnpm build
 pnpm verify

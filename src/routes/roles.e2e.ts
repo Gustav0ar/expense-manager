@@ -189,6 +189,12 @@ function sendBudgetAlertsRequest(page: Page) {
 	});
 }
 
+function setBudgetAlertPreferenceRequest(page: Page, enabled = true) {
+	return page.request.post('/app/planning?/setBudgetAlertPreference', {
+		form: { enabled: String(enabled) }
+	});
+}
+
 function updateWorkspaceRequest(page: Page, name: string) {
 	return page.request.post('/app/settings/workspace?/update', {
 		form: { name, weekStartsOn: '1', currency: 'USD' }
@@ -419,7 +425,7 @@ test('allows every workspace role to read the shared application screens', async
 			{ path: '/app/dashboard', heading: 'Dashboard' },
 			{ path: '/app/expenses', heading: 'Expenses' },
 			{ path: '/app/categories', heading: 'Categories' },
-			{ path: '/app/planning', heading: 'Planning' },
+			{ path: '/app/planning', heading: 'Budget' },
 			{ path: '/app/reports', heading: 'Reports' },
 			{ path: '/app/settings/users', heading: 'Users' },
 			{ path: '/app/settings/workspace', heading: 'Workspace' },
@@ -532,6 +538,22 @@ test('enforces administration boundaries for workspace, members, categories and 
 		await expectDenied(
 			await sendBudgetAlertsRequest(invited.viewer.page),
 			'viewer cannot send budget alerts'
+		);
+		await expectAllowed(
+			await setBudgetAlertPreferenceRequest(owner.page),
+			'owner can enable automatic budget alerts'
+		);
+		await expectAllowed(
+			await setBudgetAlertPreferenceRequest(invited.admin.page),
+			'admin can enable automatic budget alerts'
+		);
+		await expectDenied(
+			await setBudgetAlertPreferenceRequest(invited.member.page),
+			'member cannot change automatic budget alerts'
+		);
+		await expectDenied(
+			await setBudgetAlertPreferenceRequest(invited.viewer.page),
+			'viewer cannot change automatic budget alerts'
 		);
 		const savedBudgetId = await budgetId(owner.page, 'Admin Base');
 		await expectDenied(

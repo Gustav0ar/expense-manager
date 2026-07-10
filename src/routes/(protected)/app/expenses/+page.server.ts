@@ -1,6 +1,13 @@
-import { error, fail, isHttpError, redirect } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { listCategories } from '$lib/server/services/categories';
+import { handleServiceError, expenseFormValues } from '$lib/server/action-utils';
+import {
+	createCategory as createCategoryService,
+	listCategories,
+	removeCategory as removeCategoryService,
+	unarchiveCategory as unarchiveCategoryService,
+	updateCategory as updateCategoryService
+} from '$lib/server/services/categories';
 import {
 	createExpenseCatalogItem,
 	listExpenseCatalogs,
@@ -21,6 +28,7 @@ import { saveExpenseAttachment, deleteExpenseAttachment } from '$lib/server/serv
 import { requireWorkspaceContext } from '$lib/server/services/workspaces';
 import {
 	expenseFilterSchema,
+	categorySchema,
 	expenseCatalogArchiveSchema,
 	expenseCatalogSchema,
 	expenseCatalogUpdateSchema,
@@ -42,7 +50,7 @@ export const load: PageServerLoad = async (event) => {
 		throw error(400, translate(event.locals.locale, 'Filters are invalid.'));
 
 	const [categories, catalogs, expenses, expenseSummary] = await Promise.all([
-		listCategories(context),
+		listCategories(context, true),
 		listExpenseCatalogs(context),
 		listExpenses(context, parsedFilters.data),
 		getExpenseListSummary(context, parsedFilters.data)
@@ -75,28 +83,14 @@ export const actions: Actions = {
 			return fail(400, {
 				message: translate(event.locals.locale, 'Check expense data.'),
 				fieldErrors,
-				values: {
-					description: (formData.get('description') as string) ?? '',
-					amount: (formData.get('amount') as string) ?? '',
-					expenseDate: (formData.get('expenseDate') as string) ?? '',
-					categoryId: (formData.get('categoryId') as string) ?? '',
-					paymentMethodId: (formData.get('paymentMethodId') as string) ?? '',
-					vendorId: formData.get('vendorId') ? Number(formData.get('vendorId')) : null,
-					costCenterId: formData.get('costCenterId') ? Number(formData.get('costCenterId')) : null,
-					competencyMonth: (formData.get('competencyMonth') as string) ?? '',
-					installments: (formData.get('installments') as string) ?? '1',
-					notes: (formData.get('notes') as string) ?? ''
-				}
+				values: expenseFormValues(formData)
 			});
 		}
 
 		try {
 			await createExpense(context, parsed.data);
 		} catch (err) {
-			if (isHttpError(err) && err.status === 409) {
-				return fail(409, { message: err.body.message });
-			}
-			throw err;
+			return handleServiceError(err, {}, { only409: true });
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -126,50 +120,192 @@ export const actions: Actions = {
 				catalogMessage: translate(event.locals.locale, 'Catalog item added successfully.')
 			};
 		} catch (catalogError) {
-			if (isHttpError(catalogError) && catalogError.status < 500 && catalogError.status !== 403) {
-				return fail(catalogError.status, {
-					message: catalogError.body.message,
-					catalogAction: 'createCatalog',
-					catalogKind: parsed.data.kind,
-					catalogMessage: catalogError.body.message
-				});
+			return handleServiceError(
+				catalogError,
+				{ catalogAction: 'createCatalog', catalogKind: parsed.data.kind },
+				{ exclude403: true }
+			);
+		}
+	},
+	createCategory: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const formData = await event.request.formData();
+		const parsed = parseForm(formData, categorySchema);
+		if (!parsed.success) {
+			const message = translate(event.locals.locale, 'Check category data.');
+			return fail(400, {
+				message,
+				categoryAction: 'createCategory',
+				categoryMessage: message
+			});
+		}
+
+		try {
+			await createCategoryService(context, parsed.data);
+			if (!isEnhancedAction(event)) {
+				throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 			}
-			throw catalogError;
+
+			return {
+				categoryAction: 'createCategory',
+				categoryMessage: translate(event.locals.locale, 'Category created successfully.')
+			};
+		} catch (categoryError) {
+			return handleServiceError(
+				categoryError,
+				{ categoryAction: 'createCategory' },
+				{ exclude403: true }
+			);
+		}
+	},
+	updateCategory: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const formData = await event.request.formData();
+		const id = idSchema.safeParse(formData.get('id'));
+		const parsed = parseForm(formData, categorySchema);
+		if (!id.success || !parsed.success) {
+			const message = translate(event.locals.locale, 'Check category data.');
+			return fail(400, {
+				message,
+				categoryAction: 'updateCategory',
+				categoryMessage: message
+			});
+		}
+
+		try {
+			await updateCategoryService(context, id.data, parsed.data);
+			if (!isEnhancedAction(event)) {
+				throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
+			}
+			return {
+				categoryAction: 'updateCategory',
+				categoryMessage: translate(event.locals.locale, 'Category updated successfully.')
+			};
+		} catch (categoryError) {
+			return handleServiceError(categoryError, { categoryAction: 'updateCategory' });
+		}
+	},
+	removeCategory: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const formData = await event.request.formData();
+		const id = idSchema.safeParse(formData.get('id'));
+		if (!id.success) {
+			const message = translate(event.locals.locale, 'Invalid category.');
+			return fail(400, {
+				message,
+				categoryAction: 'removeCategory',
+				categoryMessage: message
+			});
+		}
+
+		try {
+			const removed = await removeCategoryService(context, id.data);
+			if (!isEnhancedAction(event)) {
+				throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
+			}
+			return {
+				categoryAction: 'removeCategory',
+				categoryMessage: translate(
+					event.locals.locale,
+					removed.mode === 'archived'
+						? 'Category archived successfully.'
+						: 'Category deleted successfully.'
+				)
+			};
+		} catch (categoryError) {
+			return handleServiceError(categoryError, { categoryAction: 'removeCategory' });
+		}
+	},
+	unarchiveCategory: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const formData = await event.request.formData();
+		const id = idSchema.safeParse(formData.get('id'));
+		if (!id.success) {
+			const message = translate(event.locals.locale, 'Invalid category.');
+			return fail(400, {
+				message,
+				categoryAction: 'unarchiveCategory',
+				categoryMessage: message
+			});
+		}
+
+		try {
+			await unarchiveCategoryService(context, id.data);
+			if (!isEnhancedAction(event)) {
+				throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
+			}
+			return {
+				categoryAction: 'unarchiveCategory',
+				categoryMessage: translate(event.locals.locale, 'Category restored successfully.')
+			};
+		} catch (categoryError) {
+			return handleServiceError(categoryError, { categoryAction: 'unarchiveCategory' });
 		}
 	},
 	updateCatalog: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, expenseCatalogUpdateSchema);
-		if (!parsed.success)
-			return fail(400, { message: translate(event.locals.locale, 'Check auxiliary catalog.') });
+		if (!parsed.success) {
+			const message = translate(event.locals.locale, 'Check auxiliary catalog.');
+			return fail(400, {
+				message,
+				catalogAction: 'updateCatalog',
+				catalogMessage: message
+			});
+		}
 
 		try {
 			await updateExpenseCatalogItem(context, parsed.data);
-		} catch (catalogError) {
-			if (isHttpError(catalogError) && catalogError.status < 500) {
-				return fail(catalogError.status, { message: catalogError.body.message });
+			if (!isEnhancedAction(event)) {
+				throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 			}
-			throw catalogError;
+			return {
+				catalogAction: 'updateCatalog',
+				catalogKind: parsed.data.kind,
+				catalogMessage: translate(event.locals.locale, 'Catalog item updated successfully.')
+			};
+		} catch (catalogError) {
+			return handleServiceError(catalogError, {
+				catalogAction: 'updateCatalog',
+				catalogKind: parsed.data.kind
+			});
 		}
-		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
 	removeCatalog: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, expenseCatalogArchiveSchema);
-		if (!parsed.success)
-			return fail(400, { message: translate(event.locals.locale, 'Invalid auxiliary catalog.') });
+		if (!parsed.success) {
+			const message = translate(event.locals.locale, 'Invalid auxiliary catalog.');
+			return fail(400, {
+				message,
+				catalogAction: 'removeCatalog',
+				catalogMessage: message
+			});
+		}
 
 		try {
-			await removeExpenseCatalogItem(context, parsed.data);
-		} catch (catalogError) {
-			if (isHttpError(catalogError) && catalogError.status < 500) {
-				return fail(catalogError.status, { message: catalogError.body.message });
+			const removed = await removeExpenseCatalogItem(context, parsed.data);
+			if (!isEnhancedAction(event)) {
+				throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 			}
-			throw catalogError;
+			return {
+				catalogAction: 'removeCatalog',
+				catalogKind: parsed.data.kind,
+				catalogMessage: translate(
+					event.locals.locale,
+					removed.mode === 'archived'
+						? 'Catalog item archived successfully.'
+						: 'Catalog item deleted successfully.'
+				)
+			};
+		} catch (catalogError) {
+			return handleServiceError(catalogError, {
+				catalogAction: 'removeCatalog',
+				catalogKind: parsed.data.kind
+			});
 		}
-		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
 	update: async (event) => {
 		const context = await requireWorkspaceContext(event);
@@ -185,10 +321,7 @@ export const actions: Actions = {
 			// 409 means a concurrent modification was detected between the SELECT
 			// and the UPDATE; surface it as an inline form message so the user can
 			// reload and retry without losing context.
-			if (isHttpError(err) && err.status === 409) {
-				return fail(409, { message: err.body.message });
-			}
-			throw err;
+			return handleServiceError(err, {}, { only409: true });
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -202,10 +335,7 @@ export const actions: Actions = {
 		try {
 			await deleteExpense(context, id.data);
 		} catch (err) {
-			if (isHttpError(err) && err.status === 409) {
-				return fail(409, { message: err.body.message });
-			}
-			throw err;
+			return handleServiceError(err, {}, { only409: true });
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -219,10 +349,7 @@ export const actions: Actions = {
 		try {
 			await reviewExpense(context, parsed.data.id, parsed.data);
 		} catch (err) {
-			if (isHttpError(err) && err.status === 409) {
-				return fail(409, { message: err.body.message });
-			}
-			throw err;
+			return handleServiceError(err, {}, { only409: true });
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -236,10 +363,7 @@ export const actions: Actions = {
 		try {
 			await updateExpensePaymentStatus(context, parsed.data.id, parsed.data);
 		} catch (err) {
-			if (isHttpError(err) && err.status === 409) {
-				return fail(409, { message: err.body.message });
-			}
-			throw err;
+			return handleServiceError(err, {}, { only409: true });
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -255,10 +379,7 @@ export const actions: Actions = {
 		try {
 			await saveExpenseAttachment(context, id.data, file);
 		} catch (err) {
-			if (isHttpError(err) && err.status === 409) {
-				return fail(409, { message: err.body.message });
-			}
-			throw err;
+			return handleServiceError(err, {}, { exclude403: true });
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -272,10 +393,7 @@ export const actions: Actions = {
 		try {
 			await deleteExpenseAttachment(context, id.data);
 		} catch (err) {
-			if (isHttpError(err) && err.status < 500) {
-				return fail(err.status, { message: err.body.message });
-			}
-			throw err;
+			return handleServiceError(err);
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	},
@@ -294,12 +412,7 @@ export const actions: Actions = {
 		try {
 			await bulkReviewExpenses(context, ids, decision);
 		} catch (err) {
-			if (isHttpError(err) && err.status < 500) {
-				return fail((err as { status: number }).status, {
-					message: (err as { body: { message: string } }).body.message
-				});
-			}
-			throw err;
+			return handleServiceError(err);
 		}
 		throw redirect(303, safeExpensesReturnTo(formData.get('returnTo')));
 	}

@@ -56,6 +56,7 @@ export default defineConfig({
 			reporter: ['text', 'lcov'],
 			include: [
 				'src/lib/category-emojis.ts',
+				'src/lib/server/background-jobs.ts',
 				'src/lib/server/email.ts',
 				'src/lib/server/registration.ts',
 				'src/lib/server/security/client-ip.ts',
@@ -64,6 +65,7 @@ export default defineConfig({
 				'src/lib/server/theme.ts',
 				'src/lib/server/services/budgets.ts',
 				'src/lib/server/services/category-rules.ts',
+				'src/lib/server/services/email-delivery-events.ts',
 				'src/lib/server/services/expenses.ts',
 				'src/lib/server/services/imports.ts',
 				'src/lib/server/services/invitations.ts',

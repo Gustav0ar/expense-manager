@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { categoryEmojiLabels, categoryEmojiValues } from '$lib/category-emojis';
 	import { translate } from '$lib/i18n';
+	import { Archive, ArchiveRestore, Trash2 } from '@lucide/svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form } = $props<{ data: PageData; form: ActionData }>();
@@ -8,6 +9,18 @@
 
 	function isActiveCategory(category: PageData['categories'][number]) {
 		return !category.isArchived;
+	}
+
+	function categoryHasAssociations(category: PageData['categories'][number]) {
+		return category.associationCount > 0;
+	}
+
+	function categoryRemoveLabel(category: PageData['categories'][number]) {
+		return categoryHasAssociations(category) ? t('Archive') : t('Delete');
+	}
+
+	function categoryRemoveAriaLabel(category: PageData['categories'][number]) {
+		return `${categoryHasAssociations(category) ? t('Archive category') : t('Delete category')} ${category.name}`;
 	}
 
 	function ruleTargetLabel(value: string) {
@@ -93,10 +106,33 @@
 							</select>
 							<button class="button secondary" type="submit">{t('Save')}</button>
 						</form>
-						{#if !category.isArchived}
-							<form method="post" action="?/archive">
+						{#if category.isArchived}
+							<form method="post" action="?/unarchive">
 								<input type="hidden" name="id" value={category.id} />
-								<button class="text-button danger" type="submit">{t('Archive')}</button>
+								<button
+									class="button secondary"
+									type="submit"
+									aria-label={`${t('Restore category')} ${category.name}`}
+								>
+									<ArchiveRestore size={15} />
+									<span>{t('Restore')}</span>
+								</button>
+							</form>
+						{:else}
+							<form method="post" action="?/remove">
+								<input type="hidden" name="id" value={category.id} />
+								<button
+									class="button secondary danger"
+									type="submit"
+									aria-label={categoryRemoveAriaLabel(category)}
+								>
+									{#if categoryHasAssociations(category)}
+										<Archive size={15} />
+									{:else}
+										<Trash2 size={15} />
+									{/if}
+									<span>{categoryRemoveLabel(category)}</span>
+								</button>
 							</form>
 						{/if}
 					</article>

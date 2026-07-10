@@ -52,11 +52,12 @@ export const actions: Actions = {
 				email: event.locals.user.email,
 				secret,
 				code: code.data.code,
-				sessionId: event.locals.session?.id
+				sessionId: event.locals.session?.id,
+				locale: event.locals.locale
 			});
 		} catch (err) {
 			if (isHttpError(err) && err.status < 500) {
-				return fail(err.status, { message: translate(event.locals.locale, err.body.message) });
+				return fail(err.status, { message: err.body.message });
 			}
 			throw err;
 		}
@@ -82,10 +83,14 @@ export const actions: Actions = {
 			return fail(400, { message: translate(event.locals.locale, 'Provide the MFA code.') });
 
 		try {
-			await disableMfa({ userId: event.locals.user.id, code: parsed.data.code });
+			await disableMfa({
+				userId: event.locals.user.id,
+				code: parsed.data.code,
+				locale: event.locals.locale
+			});
 		} catch (err) {
 			if (isHttpError(err) && err.status < 500) {
-				return fail(err.status, { message: translate(event.locals.locale, err.body.message) });
+				return fail(err.status, { message: err.body.message });
 			}
 			throw err;
 		}

@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { and, asc, eq, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
-import { db } from '$lib/server/db';
+import { advisoryLockClient, db } from '$lib/server/db';
 import {
 	auditEvent,
 	category,
@@ -65,7 +65,7 @@ export async function createRecurringExpense(
 ) {
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
-	await assertCategoryInWorkspace(context.workspaceId, input.categoryId);
+	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
 
 	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
 		locale: context.locale
@@ -132,43 +132,11 @@ export async function setRecurringExpenseStatus(
 
 export async function materializeDueRecurringExpenses(
 	context: WorkspaceContext,
-	asOf = todayIso()
+	asOf = todayIso(),
+	options: { afterSchedulesLocked?: () => Promise<void> } = {}
 ) {
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
-
-	// Pause schedules whose endDate has already passed nextRunDate but were
-	// never selected by the main query (because they aren't due). Without this,
-	// they remain status='active' indefinitely.
-	await db
-		.update(recurringExpense)
-		.set({ status: 'paused' })
-		.where(
-			and(
-				eq(recurringExpense.workspaceId, context.workspaceId),
-				eq(recurringExpense.status, 'active'),
-				lt(recurringExpense.endDate, recurringExpense.nextRunDate)
-			)
-		);
-
-	const schedules = await db
-		.select()
-		.from(recurringExpense)
-		.where(
-			and(
-				eq(recurringExpense.workspaceId, context.workspaceId),
-				eq(recurringExpense.status, 'active'),
-				lte(recurringExpense.nextRunDate, asOf),
-				or(
-					sql`${recurringExpense.endDate} is null`,
-					gte(recurringExpense.endDate, recurringExpense.nextRunDate)
-				)
-			)
-		)
-		.orderBy(asc(recurringExpense.nextRunDate), asc(recurringExpense.id))
-		.limit(50);
-
-	if (schedules.length === 0) return { createdCount: 0 };
 
 	let createdCount = 0;
 	const reviewStatus = canReviewExpenses(context.role) ? 'approved' : 'pending';
@@ -176,6 +144,40 @@ export async function materializeDueRecurringExpenses(
 	const reviewedAt = reviewStatus === 'approved' ? new Date() : null;
 
 	await db.transaction(async (tx) => {
+		// Keep status cleanup, due selection and materialization in one transaction.
+		// FOR UPDATE makes a concurrent pause/resume wait until this transaction
+		// commits, so a stale 'active' snapshot can never reactivate a schedule.
+		await tx
+			.update(recurringExpense)
+			.set({ status: 'paused' })
+			.where(
+				and(
+					eq(recurringExpense.workspaceId, context.workspaceId),
+					eq(recurringExpense.status, 'active'),
+					lt(recurringExpense.endDate, recurringExpense.nextRunDate)
+				)
+			);
+
+		const schedules = await tx
+			.select()
+			.from(recurringExpense)
+			.where(
+				and(
+					eq(recurringExpense.workspaceId, context.workspaceId),
+					eq(recurringExpense.status, 'active'),
+					lte(recurringExpense.nextRunDate, asOf),
+					or(
+						sql`${recurringExpense.endDate} is null`,
+						gte(recurringExpense.endDate, recurringExpense.nextRunDate)
+					)
+				)
+			)
+			.orderBy(asc(recurringExpense.nextRunDate), asc(recurringExpense.id))
+			.limit(50)
+			.for('update');
+
+		await options.afterSchedulesLocked?.();
+
 		for (const schedule of schedules) {
 			const dates: string[] = [];
 			let nextRunDate = schedule.nextRunDate;
@@ -243,9 +245,15 @@ export async function materializeDueRecurringExpenses(
 				.update(recurringExpense)
 				.set({
 					nextRunDate,
-					status: shouldPause ? 'paused' : schedule.status
+					status: shouldPause ? 'paused' : 'active'
 				})
-				.where(eq(recurringExpense.id, schedule.id));
+				.where(
+					and(
+						eq(recurringExpense.id, schedule.id),
+						eq(recurringExpense.workspaceId, context.workspaceId),
+						eq(recurringExpense.status, 'active')
+					)
+				);
 		}
 
 		if (createdCount > 0) {
@@ -269,8 +277,52 @@ export async function materializeDueRecurringExpenses(
  * owner as the actor (for audit attribution) but synthesises a 'member' role
  * so all generated expenses start as 'pending' and require explicit review.
  * This is the safe policy for unattended background jobs.
+ *
+ * Uses a Postgres session-level advisory lock (pg_try_advisory_lock) so that
+ * only one instance runs the scheduler at a time in a multi-node deployment.
+ * The lock is explicitly released on the same dedicated connection. If a
+ * second instance tries to acquire it while the first is still running, it
+ * skips this scheduler cycle and returns early.
  */
+// Constant advisory-lock key shared across all instances and deployments.
+// pg_advisory_lock keys are per-database, so any stable value works as long as
+// it does not collide with another advisory lock in this application. Kept within
+// JS safe-integer range so it can be passed as a plain number parameter.
+const SCHEDULER_LOCK_KEY = 7_273_299_171;
+
 export async function runRecurringExpenseScheduler(): Promise<{
+	processed: number;
+	created: number;
+	errors: number;
+	skipped?: boolean;
+}> {
+	// pg_try_advisory_lock is session-bound, so acquire and release it on one
+	// reserved connection. This uses a dedicated one-connection client rather
+	// than the application pool; otherwise DB_POOL_MAX=1 would deadlock as soon
+	// as runSchedulerWithLock() issued a query through `db`.
+	const reserved = await advisoryLockClient.reserve();
+	try {
+		const lockResult = await reserved<{ acquired: boolean }[]>`
+			SELECT pg_try_advisory_lock(${SCHEDULER_LOCK_KEY}) AS acquired
+		`;
+
+		if (!lockResult[0]?.acquired) {
+			// Another instance is already running the scheduler — skip this cycle.
+			return { processed: 0, created: 0, errors: 0, skipped: true };
+		}
+
+		try {
+			return await runSchedulerWithLock();
+		} finally {
+			await reserved`SELECT pg_advisory_unlock(${SCHEDULER_LOCK_KEY})`;
+		}
+	} finally {
+		// Return the pinned connection to the pool.
+		reserved.release();
+	}
+}
+
+async function runSchedulerWithLock(): Promise<{
 	processed: number;
 	created: number;
 	errors: number;

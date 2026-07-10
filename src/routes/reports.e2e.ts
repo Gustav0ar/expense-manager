@@ -7,9 +7,48 @@ test.use({
 });
 
 const workspaceName = 'Relatórios E2E';
+const password = ['test', 'password', '123'].join('-');
 
 function uniqueEmail(prefix: string) {
 	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
+}
+
+async function registerAccount(page: Page, input: { email: string; name: string; next?: string }) {
+	const search = input.next ? `?next=${encodeURIComponent(input.next)}` : '';
+
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		await page.goto(`/register${search}`);
+		await page.waitForLoadState('networkidle');
+		const form = page
+			.locator('form')
+			.filter({ has: page.getByRole('button', { name: 'Criar conta' }) });
+		await expect(form.getByRole('button', { name: 'Criar conta' })).toBeVisible();
+		await fillRegisterForm(form, input);
+		await form.getByRole('button', { name: 'Criar conta' }).click();
+
+		try {
+			await expect(page).not.toHaveURL(/\/register/, { timeout: 5000 });
+			return;
+		} catch (error) {
+			if (attempt === 2) throw error;
+		}
+	}
+}
+
+async function fillRegisterForm(form: Locator, input: { email: string; name: string }) {
+	const name = form.locator('input[name="name"]');
+	const email = form.locator('input[name="email"]');
+	const passwordInput = form.locator('input[name="password"]');
+	const passwordConfirmationInput = form.locator('input[name="passwordConfirmation"]');
+
+	await name.fill(input.name);
+	await email.fill(input.email);
+	await passwordInput.fill(password);
+	await passwordConfirmationInput.fill(password);
+	await expect(name).toHaveValue(input.name);
+	await expect(email).toHaveValue(input.email);
+	await expect(passwordInput).toHaveValue(password);
+	await expect(passwordConfirmationInput).toHaveValue(password);
 }
 
 async function browserDateLabel(page: Page, value: string, compact = false) {
@@ -40,14 +79,10 @@ async function browserMonthLabel(page: Page, value: string, compact = false) {
 }
 
 async function registerAndCreateWorkspace(page: Page) {
-	await page.goto('/register');
-	await page.getByLabel('Nome').fill('Report Tester');
-	await page.getByLabel('Email').fill(uniqueEmail('reports'));
-	await page.locator('input[name="password"]').fill(['test', 'password', '123'].join('-'));
-	await page
-		.locator('input[name="passwordConfirmation"]')
-		.fill(['test', 'password', '123'].join('-'));
-	await page.getByRole('button', { name: 'Criar conta' }).click();
+	await registerAccount(page, {
+		name: 'Report Tester',
+		email: uniqueEmail('reports')
+	});
 
 	await expect(page).toHaveURL(/\/app\/onboarding/);
 	await page.getByLabel('Nome').fill(workspaceName);
@@ -276,14 +311,11 @@ async function createPendingExpenseAsMember(ownerPage: Page, browser: Browser) {
 	});
 	try {
 		const memberPage = await memberContext.newPage();
-		await memberPage.goto(`/register?next=${encodeURIComponent(invitePath)}`);
-		await memberPage.getByLabel('Nome').fill('Report Member');
-		await memberPage.getByLabel('Email').fill(invitedEmail);
-		await memberPage.locator('input[name="password"]').fill(['test', 'password', '123'].join('-'));
-		await memberPage
-			.locator('input[name="passwordConfirmation"]')
-			.fill(['test', 'password', '123'].join('-'));
-		await memberPage.getByRole('button', { name: 'Criar conta' }).click();
+		await registerAccount(memberPage, {
+			name: 'Report Member',
+			email: invitedEmail,
+			next: invitePath
+		});
 		await expect(memberPage).toHaveURL(/\/invite\//);
 		await memberPage.getByRole('button', { name: 'Aceitar convite' }).click();
 		await expect(memberPage).toHaveURL(/\/app\/dashboard/);

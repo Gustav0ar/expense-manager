@@ -3,13 +3,16 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { emailVerificationThrottle, user } from '$lib/server/db/auth.schema';
 import {
 	auditEvent,
+	budgetAlertDelivery,
+	budgetAlertPreference,
 	category,
 	categoryBudget,
 	categoryRule,
+	emailDeliveryEvent,
 	expense,
 	expenseAttachment,
 	importBatch,
@@ -20,7 +23,8 @@ import {
 	workspaceInvitation,
 	workspaceMember
 } from '$lib/server/db/schema';
-import { db } from '$lib/server/db';
+import { client, db } from '$lib/server/db';
+import { sendBudgetAlertEmail } from '$lib/server/email';
 import { sha256 } from '$lib/server/utils/crypto';
 import { formatCents } from '$lib/utils/format';
 import { getAttachmentForDownload, maxAttachmentBytes, saveExpenseAttachment } from './attachments';
@@ -32,11 +36,15 @@ import {
 	matchCategoryRule,
 	matchCategoryRuleFromRules
 } from './category-rules';
+import { createCategory, listCategories, removeCategory, unarchiveCategory } from './categories';
 import {
 	deleteBudget,
+	getBudgetAlertPreference,
 	getBudgetSummary,
 	listBudgetStatus,
+	runAutomaticBudgetAlertScheduler,
 	sendBudgetAlerts,
+	setBudgetAlertPreference,
 	upsertBudget
 } from './budgets';
 import { acceptInvitation, getPendingInvitation } from './invitations';
@@ -60,7 +68,17 @@ import {
 	updateExpenseCatalogItem
 } from './expense-catalogs';
 import { importExpenses, listImportBatches } from './imports';
-import { createRecurringExpense, materializeDueRecurringExpenses } from './recurring';
+import {
+	parseMailjetWebhookPayload,
+	pruneEmailDeliveryEvents,
+	recordMailjetDeliveryEvents
+} from './email-delivery-events';
+import {
+	createRecurringExpense,
+	materializeDueRecurringExpenses,
+	runRecurringExpenseScheduler,
+	setRecurringExpenseStatus
+} from './recurring';
 import {
 	pruneExpiredUnverifiedRegistrations,
 	requestVerificationEmail
@@ -173,6 +191,28 @@ describe('server service integration', () => {
 		).resolves.toEqual({ deletedUsers: 1 });
 		await expect(findWorkspaceById(workspaceRow.id)).resolves.toBeNull();
 		await expect(findUserById(unverifiedUser.id)).resolves.toBeNull();
+	});
+
+	it('skips verification cleanup while another instance owns the advisory lock', async () => {
+		const reserved = await client.reserve();
+		try {
+			await reserved`
+				SELECT pg_advisory_lock(
+					hashtextextended('expense-manager:email-verification-cleanup:v1', 0)
+				)
+			`;
+			await expect(pruneExpiredUnverifiedRegistrations()).resolves.toEqual({
+				deletedUsers: 0,
+				skipped: true
+			});
+		} finally {
+			await reserved`
+				SELECT pg_advisory_unlock(
+					hashtextextended('expense-manager:email-verification-cleanup:v1', 0)
+				)
+			`;
+			reserved.release();
+		}
 	});
 
 	it('persists failed-only imports with batch counters and failed row details', async () => {
@@ -311,6 +351,24 @@ describe('server service integration', () => {
 		});
 		expect(batchImport.importedCount).toBe(2);
 		expect(batchImport.duplicateCount).toBe(0);
+	});
+
+	it('serializes concurrent imports in the same workspace', async () => {
+		const fixture = await createWorkspaceFixture();
+		const csv = 'Data;Descrição;Valor\n28/06/2026;Importação concorrente;12,50\n';
+
+		const results = await Promise.all(
+			['first.csv', 'second.csv'].map((name) =>
+				importExpenses(fixture.context, {
+					sourceType: 'csv',
+					defaultCategoryId: fixture.categoryId,
+					file: new File([csv], name, { type: 'text/csv' })
+				})
+			)
+		);
+
+		expect(results.reduce((total, result) => total + result.importedCount, 0)).toBe(1);
+		expect(results.reduce((total, result) => total + result.duplicateCount, 0)).toBe(1);
 	});
 
 	it('does not import positive OFX credits as expenses', async () => {
@@ -921,6 +979,65 @@ describe('server service integration', () => {
 		expect(dashboard.totalCents).toBe(6_000);
 	});
 
+	it('skips the recurring scheduler when another instance owns its lock', async () => {
+		const reserved = await client.reserve();
+		try {
+			await reserved`SELECT pg_advisory_lock(${7_273_299_171})`;
+			await expect(runRecurringExpenseScheduler()).resolves.toEqual({
+				processed: 0,
+				created: 0,
+				errors: 0,
+				skipped: true
+			});
+		} finally {
+			await reserved`SELECT pg_advisory_unlock(${7_273_299_171})`;
+			reserved.release();
+		}
+	});
+
+	it('does not reactivate a recurrence paused during materialization', async () => {
+		const fixture = await createWorkspaceFixture();
+		const schedule = await createRecurringExpense(fixture.context, {
+			categoryId: fixture.categoryId,
+			description: 'Pause race',
+			amount: '25.00',
+			frequency: 'monthly',
+			intervalCount: 1,
+			startDate: '2026-06-01'
+		});
+		let releaseMaterialization!: () => void;
+		let markSchedulesLocked!: () => void;
+		const schedulesLocked = new Promise<void>((resolve) => (markSchedulesLocked = resolve));
+		const materializationGate = new Promise<void>((resolve) => (releaseMaterialization = resolve));
+
+		const materialization = materializeDueRecurringExpenses(fixture.context, '2026-06-30', {
+			afterSchedulesLocked: async () => {
+				markSchedulesLocked();
+				await materializationGate;
+			}
+		});
+		await schedulesLocked;
+
+		let pauseResolved = false;
+		const pause = setRecurringExpenseStatus(fixture.context, schedule.id, 'paused').then(() => {
+			pauseResolved = true;
+		});
+		try {
+			await new Promise((resolve) => setTimeout(resolve, 40));
+			expect(pauseResolved).toBe(false);
+		} finally {
+			releaseMaterialization();
+		}
+		await expect(materialization).resolves.toEqual({ createdCount: 1 });
+		await pause;
+
+		const [storedSchedule] = await db
+			.select({ status: recurringExpense.status, nextRunDate: recurringExpense.nextRunDate })
+			.from(recurringExpense)
+			.where(eq(recurringExpense.id, schedule.id));
+		expect(storedSchedule).toEqual({ status: 'paused', nextRunDate: '2026-07-01' });
+	});
+
 	it('paginates installments and covers expense validation branches', async () => {
 		const fixture = await createWorkspaceFixture();
 		const viewerContext = await createMemberContext(fixture, 'viewer');
@@ -1284,6 +1401,55 @@ describe('server service integration', () => {
 		).rejects.toMatchObject({ status: 400 });
 	});
 
+	it('deletes unused categories, archives used categories and restores archived categories', async () => {
+		const fixture = await createWorkspaceFixture();
+		const unused = await createCategory(fixture.context, {
+			name: 'Sem uso',
+			color: '#2563eb',
+			icon: '💼'
+		});
+		const used = await createCategory(fixture.context, {
+			name: 'Com despesas',
+			color: '#dc2626',
+			icon: '🧮'
+		});
+
+		await expect(removeCategory(fixture.context, unused.id)).resolves.toMatchObject({
+			mode: 'deleted',
+			item: expect.objectContaining({ id: unused.id, associationCount: 0 })
+		});
+		await expect(
+			db.select({ id: category.id }).from(category).where(eq(category.id, unused.id))
+		).resolves.toEqual([]);
+
+		await createExpense(fixture.context, {
+			categoryId: used.id,
+			description: 'Imposto vinculado',
+			amount: '10,00',
+			expenseDate: '2026-06-10'
+		});
+
+		await expect(removeCategory(fixture.context, used.id)).resolves.toMatchObject({
+			mode: 'archived',
+			item: expect.objectContaining({ id: used.id, associationCount: 1, expenseCount: 1 })
+		});
+		await expect(listCategories(fixture.context)).resolves.not.toEqual(
+			expect.arrayContaining([expect.objectContaining({ id: used.id })])
+		);
+		await expect(listCategories(fixture.context, true)).resolves.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: used.id, isArchived: true, associationCount: 1 })
+			])
+		);
+
+		await unarchiveCategory(fixture.context, used.id);
+		await expect(listCategories(fixture.context)).resolves.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: used.id, isArchived: false, associationCount: 1 })
+			])
+		);
+	});
+
 	it('sends budget alerts from approved spending only', async () => {
 		const previousDeliveryMode = process.env.EMAIL_DELIVERY;
 		process.env.EMAIL_DELIVERY = 'log';
@@ -1315,13 +1481,19 @@ describe('server service integration', () => {
 				status: 403
 			});
 			await expect(
-				upsertBudget(fixture.context, {
-					categoryId: fixture.categoryId + 999_999,
-					periodMonth: '2026-06',
-					amount: '100,00',
-					warningThresholdPct: 80
-				})
-			).rejects.toMatchObject({ status: 400 });
+				upsertBudget(
+					{ ...fixture.context, locale: 'pt-BR' },
+					{
+						categoryId: fixture.categoryId + 999_999,
+						periodMonth: '2026-06',
+						amount: '100,00',
+						warningThresholdPct: 80
+					}
+				)
+			).rejects.toMatchObject({
+				status: 400,
+				body: { message: 'Categoria inválida.' }
+			});
 
 			await upsertBudget(fixture.context, {
 				categoryId: fixture.categoryId,
@@ -1423,6 +1595,356 @@ describe('server service integration', () => {
 			}
 			emailLog.mockRestore();
 		}
+	});
+
+	it('retries only failed budget-alert recipients after partial provider failure', async () => {
+		const fixture = await createWorkspaceFixture();
+		const adminContext = await createMemberContext(fixture, 'admin');
+		await seedWarningBudget(fixture);
+		const [owner, admin] = await Promise.all([
+			db.select({ email: user.email }).from(user).where(eq(user.id, fixture.context.userId)),
+			db.select({ email: user.email }).from(user).where(eq(user.id, adminContext.userId))
+		]);
+		const ownerEmail = owner[0].email;
+		const adminEmail = admin[0].email;
+		const providerError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const firstSend = vi.fn(async (to: string) => {
+			if (to === adminEmail) throw new Error('temporary provider failure');
+		});
+
+		try {
+			await expect(
+				sendBudgetAlerts(fixture.context, '2026-06', { send: firstSend })
+			).resolves.toMatchObject({ sentCount: 1, failedCount: 1, alreadySent: false });
+			expect(firstSend).toHaveBeenCalledTimes(2);
+
+			const retrySend = vi.fn(async () => {});
+			await expect(
+				sendBudgetAlerts(fixture.context, '2026-06', { send: retrySend })
+			).resolves.toMatchObject({ sentCount: 1, failedCount: 0, alreadySent: false });
+			expect(retrySend).toHaveBeenCalledTimes(1);
+			expect(retrySend).toHaveBeenCalledWith(
+				adminEmail,
+				expect.any(String),
+				'2026-06-01',
+				expect.any(Array),
+				'en',
+				expect.stringMatching(
+					/^budget-alert:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+				)
+			);
+			expect(retrySend).not.toHaveBeenCalledWith(
+				ownerEmail,
+				expect.anything(),
+				expect.anything(),
+				expect.anything(),
+				expect.anything(),
+				expect.anything()
+			);
+
+			const deliveries = await db
+				.select({
+					recipientEmail: budgetAlertDelivery.recipientEmail,
+					status: budgetAlertDelivery.status,
+					attemptCount: budgetAlertDelivery.attemptCount
+				})
+				.from(budgetAlertDelivery)
+				.where(eq(budgetAlertDelivery.workspaceId, fixture.context.workspaceId));
+			expect(deliveries).toEqual(
+				expect.arrayContaining([
+					{ recipientEmail: ownerEmail, status: 'sent', attemptCount: 1 },
+					{ recipientEmail: adminEmail, status: 'sent', attemptCount: 2 }
+				])
+			);
+
+			const completionEvents = await db
+				.select({ id: auditEvent.id })
+				.from(auditEvent)
+				.where(
+					and(
+						eq(auditEvent.workspaceId, fixture.context.workspaceId),
+						eq(auditEvent.action, 'budget.alerts_sent')
+					)
+				);
+			expect(completionEvents).toHaveLength(1);
+		} finally {
+			providerError.mockRestore();
+		}
+	});
+
+	it('reconciles replay-safe Mailjet feedback to the exact budget-alert delivery', async () => {
+		const fixture = await createWorkspaceFixture();
+		await seedWarningBudget(fixture);
+		const [owner] = await db
+			.select({ email: user.email })
+			.from(user)
+			.where(eq(user.id, fixture.context.userId));
+		let customId = '';
+		const send = vi.fn(async (...args: Parameters<typeof sendBudgetAlertEmail>) => {
+			customId = String(args[5]);
+			return {
+				provider: 'mailjet' as const,
+				messageId: '19421777835146490',
+				messageUuid: '1ab23cd4-e567-8901-2345-6789f0gh1i2j'
+			};
+		});
+
+		await expect(sendBudgetAlerts(fixture.context, '2026-06', { send })).resolves.toMatchObject({
+			sentCount: 1,
+			failedCount: 0
+		});
+		expect(customId).toMatch(/^budget-alert:[0-9a-f-]{36}$/);
+		await db
+			.update(budgetAlertDelivery)
+			.set({ status: 'failed', sentAt: null })
+			.where(eq(budgetAlertDelivery.workspaceId, fixture.context.workspaceId));
+
+		const eventPayload = {
+			event: 'sent',
+			time: 1_771_588_800,
+			email: owner.email,
+			CustomID: customId,
+			mj_message_id: '19421777835146490',
+			Message_GUID: '1ab23cd4-e567-8901-2345-6789f0gh1i2j'
+		};
+		const parsed = parseMailjetWebhookPayload(eventPayload, new Date('2026-02-20T12:05:00.000Z'));
+		await expect(recordMailjetDeliveryEvents(parsed)).resolves.toEqual({
+			accepted: 1,
+			duplicates: 0,
+			matched: 1
+		});
+		await expect(recordMailjetDeliveryEvents(parsed)).resolves.toEqual({
+			accepted: 0,
+			duplicates: 1,
+			matched: 0
+		});
+		const olderMatched = parseMailjetWebhookPayload(
+			[
+				{
+					event: 'bounce',
+					time: 1_771_585_200,
+					email: owner.email,
+					CustomID: customId
+				},
+				{
+					event: 'open',
+					time: 1_771_585_260,
+					email: owner.email,
+					CustomID: customId
+				},
+				{
+					event: 'click',
+					time: 1_771_585_320,
+					email: owner.email,
+					CustomID: customId
+				}
+			],
+			new Date('2026-02-20T12:05:00.000Z')
+		);
+		await expect(recordMailjetDeliveryEvents(olderMatched)).resolves.toEqual({
+			accepted: 3,
+			duplicates: 0,
+			matched: 3
+		});
+		const wrongRecipient = parseMailjetWebhookPayload(
+			{
+				event: 'blocked',
+				time: 1_771_585_380,
+				email: `other-${owner.email}`,
+				CustomID: customId
+			},
+			new Date('2026-02-20T12:05:00.000Z')
+		);
+		await expect(recordMailjetDeliveryEvents(wrongRecipient)).resolves.toEqual({
+			accepted: 1,
+			duplicates: 0,
+			matched: 0
+		});
+		const providerOnly = parseMailjetWebhookPayload(
+			{
+				event: 'unsub',
+				time: 1_771_585_440,
+				email: owner.email
+			},
+			new Date('2026-02-20T12:05:00.000Z')
+		);
+		await expect(recordMailjetDeliveryEvents(providerOnly)).resolves.toEqual({
+			accepted: 1,
+			duplicates: 0,
+			matched: 0
+		});
+
+		const [delivery] = await db
+			.select({
+				id: budgetAlertDelivery.id,
+				status: budgetAlertDelivery.status,
+				sentAt: budgetAlertDelivery.sentAt,
+				provider: budgetAlertDelivery.provider,
+				providerMessageId: budgetAlertDelivery.providerMessageId,
+				providerMessageUuid: budgetAlertDelivery.providerMessageUuid,
+				lastProviderEvent: budgetAlertDelivery.lastProviderEvent,
+				lastProviderEventAt: budgetAlertDelivery.lastProviderEventAt
+			})
+			.from(budgetAlertDelivery)
+			.where(eq(budgetAlertDelivery.workspaceId, fixture.context.workspaceId));
+		expect(delivery).toEqual({
+			id: expect.any(Number),
+			status: 'sent',
+			sentAt: new Date('2026-02-20T12:00:00.000Z'),
+			provider: 'mailjet',
+			providerMessageId: '19421777835146490',
+			providerMessageUuid: '1ab23cd4-e567-8901-2345-6789f0gh1i2j',
+			lastProviderEvent: 'sent',
+			lastProviderEventAt: new Date('2026-02-20T12:00:00.000Z')
+		});
+		await expect(
+			db
+				.select({ eventType: emailDeliveryEvent.eventType })
+				.from(emailDeliveryEvent)
+				.where(eq(emailDeliveryEvent.budgetAlertDeliveryId, delivery.id))
+		).resolves.toHaveLength(4);
+		const fingerprints = [...parsed, ...olderMatched, ...wrongRecipient, ...providerOnly].map(
+			(event) => event.fingerprint
+		);
+		await db
+			.update(emailDeliveryEvent)
+			.set({ receivedAt: new Date('2026-01-01T00:00:00.000Z') })
+			.where(inArray(emailDeliveryEvent.fingerprint, fingerprints));
+		await expect(pruneEmailDeliveryEvents(new Date('2026-04-02T00:00:00.000Z'))).resolves.toEqual({
+			deletedEvents: 6
+		});
+	});
+
+	it('skips email event retention while another instance owns its advisory lock', async () => {
+		const reserved = await client.reserve();
+		try {
+			await reserved`
+				SELECT pg_advisory_lock(
+					hashtextextended('expense-manager:email-delivery-event-cleanup:v1', 0)
+				)
+			`;
+			await expect(pruneEmailDeliveryEvents()).resolves.toEqual({
+				deletedEvents: 0,
+				skipped: true
+			});
+		} finally {
+			await reserved`
+				SELECT pg_advisory_unlock(
+					hashtextextended('expense-manager:email-delivery-event-cleanup:v1', 0)
+				)
+			`;
+			reserved.release();
+		}
+	});
+
+	it('runs automatic budget alerts only for opted-in workspaces', async () => {
+		const fixture = await createWorkspaceFixture();
+		const memberContext = await createMemberContext(fixture, 'member');
+		await seedWarningBudget(fixture);
+		await expect(getBudgetAlertPreference(fixture.context)).resolves.toEqual({
+			isEnabled: false,
+			locale: 'en'
+		});
+		await expect(setBudgetAlertPreference(memberContext, true)).rejects.toMatchObject({
+			status: 403
+		});
+
+		await setBudgetAlertPreference({ ...fixture.context, locale: 'pt-BR' }, true);
+		await expect(getBudgetAlertPreference(fixture.context)).resolves.toEqual({
+			isEnabled: true,
+			locale: 'pt-BR'
+		});
+		const [storedPreference] = await db
+			.select({
+				isEnabled: budgetAlertPreference.isEnabled,
+				locale: budgetAlertPreference.locale,
+				updatedByUserId: budgetAlertPreference.updatedByUserId
+			})
+			.from(budgetAlertPreference)
+			.where(eq(budgetAlertPreference.workspaceId, fixture.context.workspaceId));
+		expect(storedPreference).toEqual({
+			isEnabled: true,
+			locale: 'pt-BR',
+			updatedByUserId: fixture.context.userId
+		});
+
+		const send = vi.fn(async () => {});
+		const schedulerLog = vi.spyOn(console, 'info').mockImplementation(() => {});
+		try {
+			const firstCycle = await runAutomaticBudgetAlertScheduler({
+				now: new Date('2026-06-20T12:00:00.000Z'),
+				send
+			});
+			expect(firstCycle).toMatchObject({ sent: 1, failed: 0, errors: 0 });
+			expect(firstCycle.processed).toBeGreaterThanOrEqual(1);
+			expect(send).toHaveBeenCalledWith(
+				expect.stringContaining('@example.com'),
+				fixture.context.workspaceName,
+				'2026-06-01',
+				expect.any(Array),
+				'pt-BR',
+				expect.stringMatching(/^budget-alert:[0-9a-f-]{36}$/)
+			);
+
+			const secondCycle = await runAutomaticBudgetAlertScheduler({
+				now: new Date('2026-06-20T13:00:00.000Z'),
+				send
+			});
+			expect(secondCycle).toMatchObject({ sent: 0, failed: 0, errors: 0 });
+			expect(secondCycle.processed).toBeGreaterThanOrEqual(1);
+			expect(send).toHaveBeenCalledTimes(1);
+
+			await setBudgetAlertPreference(fixture.context, false);
+			await expect(
+				runAutomaticBudgetAlertScheduler({
+					now: new Date('2026-07-20T12:00:00.000Z'),
+					send
+				})
+			).resolves.toMatchObject({ sent: 0, failed: 0, errors: 0 });
+		} finally {
+			schedulerLog.mockRestore();
+		}
+	});
+
+	it('skips automatic budget alerts when another instance owns the scheduler lock', async () => {
+		const reserved = await client.reserve();
+		try {
+			await reserved`SELECT pg_advisory_lock(${7_273_299_172})`;
+			await expect(runAutomaticBudgetAlertScheduler()).resolves.toEqual({
+				processed: 0,
+				sent: 0,
+				failed: 0,
+				errors: 0,
+				skipped: true
+			});
+		} finally {
+			await reserved`SELECT pg_advisory_unlock(${7_273_299_172})`;
+			reserved.release();
+		}
+	});
+
+	it('atomically claims budget-alert recipients across concurrent requests', async () => {
+		const fixture = await createWorkspaceFixture();
+		await seedWarningBudget(fixture);
+		let releaseSend!: () => void;
+		let markSendStarted!: () => void;
+		const sendStarted = new Promise<void>((resolve) => (markSendStarted = resolve));
+		const sendGate = new Promise<void>((resolve) => (releaseSend = resolve));
+		const send = vi.fn(async () => {
+			markSendStarted();
+			await sendGate;
+		});
+
+		const first = sendBudgetAlerts(fixture.context, '2026-06', { send });
+		await sendStarted;
+		await expect(sendBudgetAlerts(fixture.context, '2026-06', { send })).resolves.toMatchObject({
+			sentCount: 0,
+			failedCount: 0,
+			inProgress: true
+		});
+		expect(send).toHaveBeenCalledTimes(1);
+		releaseSend();
+		await expect(first).resolves.toMatchObject({ sentCount: 1, failedCount: 0 });
 	});
 
 	it('accepts an invitation only once under repeated submission', async () => {
@@ -1654,6 +2176,10 @@ describe('server service integration', () => {
 		}
 	});
 
+	it('limits expense attachments to 2 MiB', () => {
+		expect(maxAttachmentBytes).toBe(2 * 1024 * 1024);
+	});
+
 	it('deletes attachments from DB and disk when expense is deleted', async () => {
 		const fixture = await createWorkspaceFixture();
 		const previousUploadDir = process.env.UPLOAD_DIR;
@@ -1721,6 +2247,70 @@ describe('server service integration', () => {
 		await expect(bulkReviewExpenses(fixture.context, [], 'approved')).rejects.toMatchObject({
 			status: 400
 		});
+	});
+
+	it('bulk-reject only affects pending, unpaid expenses', async () => {
+		const fixture = await createWorkspaceFixture();
+		const memberContext = await createMemberContext(fixture, 'member');
+
+		// Pending + unpaid — the only state bulk review can act on.
+		const ePending = await createExpense(memberContext, {
+			description: 'Pending unpaid',
+			amount: '20,00',
+			expenseDate: '2026-06-10',
+			categoryId: fixture.categoryId
+		});
+
+		// Approved + paid — outside bulk review's reviewStatus='pending' filter.
+		const eApprovedPaid = await createExpense(memberContext, {
+			description: 'Approved and paid',
+			amount: '50,00',
+			expenseDate: '2026-06-10',
+			categoryId: fixture.categoryId
+		});
+		await reviewExpense(fixture.context, eApprovedPaid.ids[0], { reviewStatus: 'approved' });
+		await updateExpensePaymentStatus(fixture.context, eApprovedPaid.ids[0], {
+			paymentStatus: 'paid'
+		});
+
+		// Defensive legacy state: the service layer does not create pending+paid
+		// rows, but the schema permits one and bulk review must not erase its payment.
+		const [ePendingPaid] = await db
+			.insert(expense)
+			.values({
+				workspaceId: fixture.context.workspaceId,
+				categoryId: fixture.categoryId,
+				createdByUserId: fixture.context.userId,
+				description: 'Pending but paid',
+				amountCents: 7500,
+				expenseDate: '2026-06-10',
+				reviewStatus: 'pending',
+				paymentStatus: 'paid',
+				paidAt: '2026-06-10'
+			})
+			.returning({ id: expense.id });
+
+		// Only the pending+unpaid expense is eligible.
+		const result = await bulkReviewExpenses(
+			fixture.context,
+			[ePending.ids[0], eApprovedPaid.ids[0], ePendingPaid.id],
+			'rejected'
+		);
+		expect(result.count).toBe(1);
+
+		const listed = await listExpenses(fixture.context, {});
+		const rejected = listed.items.find((e) => e.id === ePending.ids[0]);
+		expect(rejected?.reviewStatus).toBe('rejected');
+		expect(rejected?.paymentStatus).toBe('unpaid');
+
+		// The approved+paid expense is untouched: still approved, still paid.
+		const untouched = listed.items.find((e) => e.id === eApprovedPaid.ids[0]);
+		expect(untouched?.reviewStatus).toBe('approved');
+		expect(untouched?.paymentStatus).toBe('paid');
+
+		const protectedPayment = listed.items.find((e) => e.id === ePendingPaid.id);
+		expect(protectedPayment?.reviewStatus).toBe('pending');
+		expect(protectedPayment?.paymentStatus).toBe('paid');
 	});
 
 	it('rejects unsafe attachment inputs before writing files', async () => {
@@ -1861,6 +2451,21 @@ async function createExpenseCatalogs(
 		vendorId: vendorItem?.id,
 		costCenterId: costCenterItem?.id
 	};
+}
+
+async function seedWarningBudget(fixture: Awaited<ReturnType<typeof createWorkspaceFixture>>) {
+	await upsertBudget(fixture.context, {
+		categoryId: fixture.categoryId,
+		periodMonth: '2026-06',
+		amount: '100.00',
+		warningThresholdPct: 80
+	});
+	await createExpense(fixture.context, {
+		categoryId: fixture.categoryId,
+		description: `Budget alert ${randomUUID()}`,
+		amount: '90.00',
+		expenseDate: '2026-06-15'
+	});
 }
 
 async function createUser(prefix: string, options: { emailVerified?: boolean } = {}) {

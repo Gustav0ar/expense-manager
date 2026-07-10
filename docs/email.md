@@ -26,11 +26,58 @@ EMAIL_PROVIDER="mailjet"
 MAILJET_API_KEY="<mailjet-api-key>"
 MAILJET_SECRET_KEY="<mailjet-secret-key>"
 MAILJET_FROM="Expense Manager <no-reply@your-verified-domain.example>"
+MAILJET_WEBHOOK_USERNAME="<dedicated-random-username>"
+MAILJET_WEBHOOK_PASSWORD="<dedicated-random-password>"
 REQUIRE_EMAIL_VERIFICATION="true"
 ```
 
 The `MAILJET_FROM` domain must match a verified Mailjet domain. Do not use a
 personal mailbox as the production sender.
+
+Budget-alert delivery is tracked per workspace, month and recipient. Successful
+recipients are not sent the same monthly alert again, while failed recipients
+remain retryable. In-flight claims expire after ten minutes so an interrupted
+application process cannot leave delivery permanently stuck.
+
+Automatic budget alerts are opt-in per workspace. Owners and administrators can
+enable them from the Budget page; the preference stores the selected UI locale.
+The background coordinator checks enabled workspaces hourly and uses a Postgres
+advisory lock so only one application instance performs a cycle. The existing
+monthly recipient ledger makes repeated cycles idempotent and retries failed
+recipients without resending successful deliveries. Manual **Send alerts now**
+remains available independently of the automatic preference.
+
+## Mailjet Delivery Feedback
+
+The application accepts Mailjet Event API callbacks at:
+
+```text
+https://<username>:<password>@your-domain.example/api/webhooks/mailjet
+```
+
+Set `MAILJET_WEBHOOK_USERNAME` and `MAILJET_WEBHOOK_PASSWORD` to the same
+dedicated Basic Auth credential, then configure that HTTPS URL in Mailjet's
+Event Tracking settings. Generate URL-safe random values, do not reuse the
+Mailjet API secret, and enable grouped events (Event API version 2) to reduce
+callback volume.
+
+The endpoint accepts Mailjet's `sent`, `open`, `click`, `bounce`, `spam`,
+`blocked` and `unsub` events. It has a 256 KiB body limit, accepts at most 100
+grouped events, rejects timestamps outside a 48-hour replay window and stores a
+unique SHA-256 fingerprint for idempotency. Mailjet retries therefore return
+HTTP 200 without duplicating data.
+
+Budget-alert messages include an opaque per-recipient `CustomID`. Callbacks are
+matched using that value plus the normalized recipient address, and the ledger
+records the latest provider event in event-time order. The event table stores
+only the provider, event type, timestamps and provider identifiers; it does not
+persist callback IP addresses, user agents, clicked URLs, raw payloads or email
+addresses. A daily background job removes event rows after 90 days.
+
+If the webhook credential is absent, sending continues normally and the
+callback endpoint returns HTTP 503. This keeps the feedback integration
+optional for existing deployments while making a missing callback setup
+visible to Mailjet.
 
 SMTP fallback values, if API delivery cannot be used:
 
@@ -90,16 +137,14 @@ After real delivery is confirmed, move toward a stricter policy such as
    - password reset;
    - workspace invitation;
    - budget alert.
-6. Check Mailjet logs and confirm the messages are
-   delivered.
-7. Confirm SPF, DKIM and DMARC pass in the received email headers.
-
-Mailjet's Event API can be added later for real-time delivery, bounce, spam and
-open/click notifications. It is not required for sending verification emails.
+6. Configure the authenticated Event API callback and enable grouped events.
+7. Trigger a budget alert and confirm its ledger receives a `sent` event.
+8. Check Mailjet logs and confirm the messages are delivered.
+9. Confirm SPF, DKIM and DMARC pass in the received email headers.
 
 ## References
 
 - Mailjet Send API v3.1:
   https://dev.mailjet.com/email/guides/send-api-v31/
 - Mailjet Event API:
-  https://dev.mailjet.com/email/guides/#event-api-real-time-notifications
+  https://dev.mailjet.com/email/guides/webhooks/

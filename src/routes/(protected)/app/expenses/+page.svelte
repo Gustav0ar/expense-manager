@@ -1,164 +1,92 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
+	import { afterNavigate } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import './expenses.css';
 	import LocalizedDate from '$lib/components/LocalizedDate.svelte';
 	import SearchableSelect from '$lib/components/SearchableSelect.svelte';
 	import { translate } from '$lib/i18n';
 	import { formatCents } from '$lib/utils/format';
 	import { reviewLabel, reviewClass, paymentLabel, paymentClass } from '$lib/utils/status';
+	import AttachmentPanel from './AttachmentPanel.svelte';
+	import BulkReviewBar from './BulkReviewBar.svelte';
+	import DeleteExpenseDialog from './DeleteExpenseDialog.svelte';
+	import SupportCatalogDialog from './SupportCatalogDialog.svelte';
 	import {
 		CheckCircle2,
-		ChevronLeft,
-		ChevronRight,
+		ChevronDown,
 		CreditCard,
 		Paperclip,
-		Pencil,
 		Plus,
 		RotateCcw,
-		Search,
 		Save,
+		Search,
 		Trash2,
 		XCircle
 	} from '@lucide/svelte';
-	import type { Attachment } from 'svelte/attachments';
 	import { SvelteSet } from 'svelte/reactivity';
-	import type { SubmitFunction } from '@sveltejs/kit';
+	import { tick } from 'svelte';
 	import type { ActionData, PageData } from './$types';
-
-	type SupportCatalogKind = 'paymentMethod' | 'vendor' | 'costCenter';
-	type SupportCatalogItem = PageData['catalogs']['paymentMethods'][number];
-	type SupportCatalogNotice = { tone: 'success' | 'danger'; message: string };
-	type SupportCatalogActionData = {
-		message?: string;
-		catalogAction?: 'createCatalog';
-		catalogKind?: SupportCatalogKind;
-		catalogName?: string;
-		catalogMessage?: string;
-	};
 
 	let { data, form } = $props<{ data: PageData; form: ActionData }>();
 	const expensesPath = resolve('/app/expenses');
-	const supportCatalogPageSize = 8;
 	const currency = $derived(data.currentWorkspace?.currency ?? 'USD');
-	const supportCatalogTabs = $derived([
-		{
-			kind: 'paymentMethod',
-			label: t('Payments'),
-			singular: lower(t('Payment')),
-			createLabel: t('New payment'),
-			placeholder: t('Example payment'),
-			maxLength: 80,
-			empty: t('No payment method found.')
-		},
-		{
-			kind: 'vendor',
-			label: t('Vendors'),
-			singular: lower(t('Vendor')),
-			createLabel: t('New vendor'),
-			placeholder: t('Example vendor'),
-			maxLength: 120,
-			empty: t('No vendor found.')
-		},
-		{
-			kind: 'costCenter',
-			label: t('Cost centers'),
-			singular: lower(t('Cost center')),
-			createLabel: t('New cost center'),
-			placeholder: t('Example cost center'),
-			maxLength: 120,
-			empty: t('No cost center found.')
-		}
-	] satisfies Array<{
-		kind: SupportCatalogKind;
-		label: string;
-		singular: string;
-		createLabel: string;
-		placeholder: string;
-		maxLength: number;
-		empty: string;
-	}>);
+	const activeCategories = $derived(
+		data.categories.filter((c: PageData['categories'][number]) => !c.isArchived)
+	);
 
-	let deleteDialog: HTMLDialogElement | undefined = $state();
-	let supportCatalogDialog: HTMLDialogElement | undefined = $state();
-	let pendingDelete = $state<{ id: number; description: string; amount: string } | null>(null);
+	let deleteDialog: DeleteExpenseDialog | undefined = $state();
+	let supportCatalogDialog: SupportCatalogDialog | undefined = $state();
 	let preparedExpenseDetails = $state<number[]>([]);
-	let supportCatalogTab = $state<SupportCatalogKind>('paymentMethod');
-	let supportCatalogSearch = $state<Record<SupportCatalogKind, string>>({
-		paymentMethod: '',
-		vendor: '',
-		costCenter: ''
-	});
-	let supportCatalogNotice = $state<SupportCatalogNotice | null>(null);
-	let supportCatalogCreating = $state(false);
-	let supportCatalogPage = $state<Record<SupportCatalogKind, number>>({
-		paymentMethod: 1,
-		vendor: 1,
-		costCenter: 1
-	});
+	let expandedExpenseIds = new SvelteSet<number>();
 	let selectedIds = new SvelteSet<number>();
+
+	afterNavigate(({ from, to }) => {
+		if (from && to && from.url.href === to.url.href) return;
+		selectedIds.clear();
+		expandedExpenseIds.clear();
+		preparedExpenseDetails = [];
+	});
 
 	function toggleSelect(id: number) {
 		if (selectedIds.has(id)) selectedIds.delete(id);
 		else selectedIds.add(id);
 	}
 
-	function clearSelection() {
-		selectedIds.clear();
-	}
-	let activeCatalogMeta = $derived(
-		supportCatalogTabs.find((tab) => tab.kind === supportCatalogTab) ?? supportCatalogTabs[0]
-	);
-	let activeCatalogItems = $derived(catalogItems(supportCatalogTab));
-	let activeCatalogQuery = $derived(
-		supportCatalogSearch[supportCatalogTab].trim().toLocaleLowerCase(data.locale)
-	);
-	let filteredSupportCatalogItems = $derived.by(() => {
-		if (!activeCatalogQuery) return activeCatalogItems;
-		return activeCatalogItems.filter((item) =>
-			item.name.toLocaleLowerCase(data.locale).includes(activeCatalogQuery)
-		);
-	});
-	let supportCatalogPageCount = $derived(
-		Math.max(1, Math.ceil(filteredSupportCatalogItems.length / supportCatalogPageSize))
-	);
-	let activeSupportCatalogPage = $derived(
-		Math.min(supportCatalogPage[supportCatalogTab], supportCatalogPageCount)
-	);
-	let paginatedSupportCatalogItems = $derived(
-		filteredSupportCatalogItems.slice(
-			(activeSupportCatalogPage - 1) * supportCatalogPageSize,
-			activeSupportCatalogPage * supportCatalogPageSize
-		)
-	);
-	let supportCatalogResultStart = $derived(
-		filteredSupportCatalogItems.length === 0
-			? 0
-			: (activeSupportCatalogPage - 1) * supportCatalogPageSize + 1
-	);
-	let supportCatalogResultEnd = $derived(
-		Math.min(filteredSupportCatalogItems.length, activeSupportCatalogPage * supportCatalogPageSize)
-	);
-	const captureDeleteDialog: Attachment<HTMLDialogElement> = (element) => {
-		deleteDialog = element;
-		return () => {
-			if (deleteDialog === element) deleteDialog = undefined;
-		};
-	};
-	const captureSupportCatalogDialog: Attachment<HTMLDialogElement> = (element) => {
-		supportCatalogDialog = element;
-		return () => {
-			if (supportCatalogDialog === element) supportCatalogDialog = undefined;
-		};
-	};
-
-	function prepareExpenseDetails(id: number, event: Event) {
+	async function prepareExpenseDetails(id: number, event: Event) {
 		const details = event.currentTarget as HTMLDetailsElement;
-		if (!details.open || preparedExpenseDetails.includes(id)) return;
-		preparedExpenseDetails = [...preparedExpenseDetails, id];
+		if (!details.open) {
+			expandedExpenseIds.delete(id);
+			return;
+		}
+		expandedExpenseIds.add(id);
+		if (!preparedExpenseDetails.includes(id)) {
+			preparedExpenseDetails = [...preparedExpenseDetails, id];
+		}
+		await tick();
+		scrollExpenseActionsIntoView(details);
 	}
 
 	function hasPreparedExpenseDetails(id: number) {
 		return preparedExpenseDetails.includes(id);
+	}
+
+	function scrollExpenseActionsIntoView(details: HTMLDetailsElement) {
+		if (typeof window === 'undefined' || !window.matchMedia('(max-width: 640px)').matches) return;
+		const target = details.querySelector('.expense-workflow-panel') ?? details;
+		const bottomNav = document.querySelector('.sidebar');
+		const targetBox = target.getBoundingClientRect();
+		const navTop = bottomNav?.getBoundingClientRect().top ?? window.innerHeight;
+		const margin = 14;
+		const bottomOverlap = targetBox.bottom - (navTop - margin);
+
+		if (bottomOverlap > 0) {
+			window.scrollBy({ top: bottomOverlap, behavior: 'smooth' });
+			return;
+		}
+
+		if (targetBox.top < margin) {
+			window.scrollBy({ top: targetBox.top - margin, behavior: 'smooth' });
+		}
 	}
 
 	function amountInputValue(cents: number) {
@@ -194,30 +122,34 @@
 	}
 
 	function openDeleteDialog(expense: PageData['expenses']['items'][number]) {
-		pendingDelete = {
+		deleteDialog?.open({
 			id: expense.id,
 			description: expense.description,
 			amount: money(expense.amountCents)
-		};
-
-		if (!deleteDialog?.open) deleteDialog?.showModal();
-	}
-
-	function closeDeleteDialog() {
-		deleteDialog?.close();
+		});
 	}
 
 	function openSupportCatalogDialog() {
-		if (!supportCatalogDialog?.open) supportCatalogDialog?.showModal();
+		supportCatalogDialog?.open();
 	}
 
-	function closeSupportCatalogDialog() {
-		supportCatalogNotice = null;
-		supportCatalogDialog?.close();
+	function hasCatalogOption(items: { id: number }[], id?: number | null) {
+		return id ? items.some((item) => item.id === id) : false;
 	}
 
-	function clearDeleteDialog() {
-		pendingDelete = null;
+	function catalogOptions(items: { id: number; name: string }[]) {
+		return items.map((item) => ({ id: item.id, label: item.name }));
+	}
+
+	function catalogOptionsWithCurrent(
+		items: { id: number; name: string }[],
+		id?: number | null,
+		label?: string | null,
+		archivedLabel = 'Archived item'
+	) {
+		const options = catalogOptions(items);
+		if (!id || hasCatalogOption(items, id)) return options;
+		return [{ id, label: `${label ?? t(archivedLabel)} (${lower(t('Archived'))})` }, ...options];
 	}
 
 	function nextPageHref() {
@@ -241,126 +173,83 @@
 		const query = params.join('&');
 		return query ? `${expensesPath}?${query}` : expensesPath;
 	}
-
-	function closeDeleteDialogFromBackdrop(event: MouseEvent) {
-		if (event.target === deleteDialog) closeDeleteDialog();
-	}
-
-	function closeSupportCatalogDialogFromBackdrop(event: MouseEvent) {
-		if (event.target === supportCatalogDialog) closeSupportCatalogDialog();
-	}
-
-	function catalogUsageLabel(item: PageData['catalogs']['paymentMethods'][number]) {
-		const expensePart =
-			item.expenseCount === 1
-				? t('{count} expense', { count: item.expenseCount })
-				: t('{count} expenses', { count: item.expenseCount });
-		if (item.recurringCount === 0) return item.expenseCount === 0 ? t('No usage') : expensePart;
-
-		const recurringPart =
-			item.recurringCount === 1
-				? t('{count} recurrence', { count: item.recurringCount })
-				: t('{count} recurrences', { count: item.recurringCount });
-		return item.expenseCount === 0 ? recurringPart : `${expensePart} + ${recurringPart}`;
-	}
-
-	function catalogRemoveLabel(item: PageData['catalogs']['paymentMethods'][number]) {
-		return item.expenseCount > 0 ? t('Archive') : t('Delete');
-	}
-
-	function hasCatalogOption(items: { id: number }[], id?: number | null) {
-		return id ? items.some((item) => item.id === id) : false;
-	}
-
-	function catalogOptions(items: { id: number; name: string }[]) {
-		return items.map((item) => ({ id: item.id, label: item.name }));
-	}
-
-	function catalogOptionsWithCurrent(
-		items: { id: number; name: string }[],
-		id?: number | null,
-		label?: string | null,
-		archivedLabel = 'Archived item'
-	) {
-		const options = catalogOptions(items);
-		if (!id || hasCatalogOption(items, id)) return options;
-		return [{ id, label: `${label ?? t(archivedLabel)} (${lower(t('Archived'))})` }, ...options];
-	}
-
-	function catalogItems(kind: SupportCatalogKind): SupportCatalogItem[] {
-		if (kind === 'paymentMethod') return data.catalogs.paymentMethods;
-		if (kind === 'vendor') return data.catalogs.vendors;
-		return data.catalogs.costCenters;
-	}
-
-	function setSupportCatalogTab(kind: SupportCatalogKind) {
-		supportCatalogTab = kind;
-		supportCatalogNotice = null;
-	}
-
-	function updateSupportCatalogSearch(kind: SupportCatalogKind, value: string) {
-		supportCatalogSearch[kind] = value;
-		supportCatalogPage[kind] = 1;
-	}
-
-	function goToSupportCatalogPage(page: number) {
-		supportCatalogPage[supportCatalogTab] = Math.min(Math.max(page, 1), supportCatalogPageCount);
-	}
-
-	function supportCatalogActionData(value: unknown): SupportCatalogActionData | null {
-		if (typeof value !== 'object' || value == null) return null;
-		const data = value as SupportCatalogActionData;
-		return data.catalogAction === 'createCatalog' ? data : null;
-	}
-
-	const enhanceSupportCatalogCreate: SubmitFunction = () => {
-		supportCatalogCreating = true;
-		supportCatalogNotice = null;
-
-		return async ({ result, update }) => {
-			supportCatalogCreating = false;
-
-			if (result.type === 'success') {
-				const catalogData = supportCatalogActionData(result.data);
-				await update({ reset: true, invalidateAll: true });
-
-				if (catalogData?.catalogKind) {
-					supportCatalogTab = catalogData.catalogKind;
-					supportCatalogSearch[catalogData.catalogKind] = '';
-					supportCatalogPage[catalogData.catalogKind] = 1;
-				}
-
-				supportCatalogNotice = {
-					tone: 'success',
-					message: catalogData?.catalogMessage ?? t('Catalog item added successfully.')
-				};
-				return;
-			}
-
-			if (result.type === 'failure') {
-				const catalogData = supportCatalogActionData(result.data);
-				await update({ reset: false, invalidateAll: false });
-				supportCatalogNotice = {
-					tone: 'danger',
-					message:
-						catalogData?.catalogMessage ?? catalogData?.message ?? t('Check auxiliary catalog.')
-				};
-				return;
-			}
-
-			if (result.type === 'error') {
-				supportCatalogNotice = { tone: 'danger', message: t('Could not save the catalog.') };
-				return;
-			}
-
-			await update({ reset: false, invalidateAll: false });
-		};
-	};
 </script>
 
 <svelte:head>
 	<title>{t('Expenses')} | Expense Manager</title>
 </svelte:head>
+
+{#snippet expenseWorkflowPanel(expense: PageData['expenses']['items'][number])}
+	<div class="expense-workflow-panel">
+		<div class="workflow-summary">
+			<span class={reviewClass(expense.reviewStatus)}>
+				{reviewLabel(expense.reviewStatus, t)}
+			</span>
+			<span class={paymentClass(expense.paymentStatus)}>
+				{paymentLabel(expense.paymentStatus, t)}
+			</span>
+		</div>
+		{#if data.permissions.canReview}
+			<form method="post" action="?/review" class="workflow-form workflow-approve-form">
+				<input type="hidden" name="id" value={expense.id} />
+				<input type="hidden" name="returnTo" value={data.returnTo} />
+				<input type="hidden" name="reviewStatus" value="approved" />
+				<button
+					class="button review-approve"
+					type="submit"
+					disabled={expense.reviewStatus === 'approved'}
+				>
+					<CheckCircle2 size={16} />
+					<span>{t('Approve')}</span>
+				</button>
+			</form>
+			<form method="post" action="?/review" class="workflow-form reject-form">
+				<input type="hidden" name="id" value={expense.id} />
+				<input type="hidden" name="returnTo" value={data.returnTo} />
+				<input type="hidden" name="reviewStatus" value="rejected" />
+				<input
+					name="reason"
+					aria-label={t('Rejection reason')}
+					placeholder={t('Reason')}
+					maxlength="500"
+					required
+				/>
+				<button
+					class="button secondary danger"
+					type="submit"
+					disabled={expense.reviewStatus === 'rejected'}
+				>
+					<XCircle size={16} />
+					<span>{t('Reject')}</span>
+				</button>
+			</form>
+		{/if}
+
+		{#if data.permissions.canReconcile && expense.reviewStatus === 'approved'}
+			<form method="post" action="?/payment" class="workflow-form">
+				<input type="hidden" name="id" value={expense.id} />
+				<input type="hidden" name="returnTo" value={data.returnTo} />
+				<select name="paymentStatus" aria-label={t('Payment status')}>
+					<option value="unpaid" selected={expense.paymentStatus === 'unpaid'}>{t('Open')}</option>
+					<option value="paid" selected={expense.paymentStatus === 'paid'}>{t('Paid')}</option>
+					<option value="reconciled" selected={expense.paymentStatus === 'reconciled'}
+						>{t('Reconciled')}</option
+					>
+				</select>
+				<input
+					name="paidAt"
+					type="date"
+					value={expense.paidAt ?? ''}
+					aria-label={t('Payment date')}
+				/>
+				<button class="button secondary" type="submit">
+					<CreditCard size={16} />
+					<span>{t('Save payment')}</span>
+				</button>
+			</form>
+		{/if}
+	</div>
+{/snippet}
 
 <section class="page-section">
 	<div class="section-heading">
@@ -370,7 +259,7 @@
 		</div>
 	</div>
 
-	{#if form?.message && form.catalogAction !== 'createCatalog'}
+	{#if form?.message && !form.catalogAction && !form.categoryAction}
 		<p class="notice danger" role="alert">{form.message}</p>
 	{/if}
 
@@ -444,7 +333,7 @@
 					aria-describedby={form?.fieldErrors?.categoryId ? 'err-categoryId' : undefined}
 				>
 					<option value="">{t('Select')}</option>
-					{#each data.categories as category (category.id)}
+					{#each activeCategories as category (category.id)}
 						<option
 							value={category.id}
 							selected={category.id.toString() === (form?.values?.categoryId ?? '')}
@@ -523,208 +412,14 @@
 		</form>
 	</section>
 
-	<dialog
-		{@attach captureSupportCatalogDialog}
-		class="app-dialog support-catalog-dialog"
-		aria-labelledby="support-catalog-title"
-		onclick={closeSupportCatalogDialogFromBackdrop}
-	>
-		<div class="dialog-card support-catalog-card">
-			<div class="dialog-heading">
-				<span class="dialog-icon">
-					<Plus size={20} />
-				</span>
-				<div>
-					<h3 id="support-catalog-title">{t('Support catalogs')}</h3>
-					<p>{t('Add options for payment, vendor and cost center.')}</p>
-				</div>
-			</div>
-
-			<div class="support-catalog-summary" aria-label={t('Totals registered')}>
-				<span>{t('{count} payments', { count: data.catalogs.paymentMethods.length })}</span>
-				<span>{t('{count} vendors', { count: data.catalogs.vendors.length })}</span>
-				<span>{t('{count} cost centers', { count: data.catalogs.costCenters.length })}</span>
-			</div>
-
-			<div class="support-catalog-tabs" role="tablist" aria-label={t('Catalog type')}>
-				{#each supportCatalogTabs as tab (tab.kind)}
-					<button
-						class="support-catalog-tab"
-						type="button"
-						role="tab"
-						id={`support-catalog-tab-${tab.kind}`}
-						aria-selected={supportCatalogTab === tab.kind}
-						aria-controls={`support-catalog-panel-${tab.kind}`}
-						onclick={() => setSupportCatalogTab(tab.kind)}
-					>
-						<span>{tab.label}</span>
-						<strong>{catalogItems(tab.kind).length}</strong>
-					</button>
-				{/each}
-			</div>
-
-			<div
-				class="support-catalog-active-panel"
-				id={`support-catalog-panel-${supportCatalogTab}`}
-				role="tabpanel"
-				aria-labelledby={`support-catalog-tab-${supportCatalogTab}`}
-			>
-				<form
-					method="post"
-					action="?/createCatalog"
-					class="support-catalog-form support-catalog-create-form"
-					use:enhance={enhanceSupportCatalogCreate}
-				>
-					<input type="hidden" name="returnTo" value={data.returnTo} />
-					<input type="hidden" name="kind" value={supportCatalogTab} />
-					<label>
-						<span>{activeCatalogMeta.createLabel}</span>
-						<input
-							name="name"
-							required
-							minlength="2"
-							maxlength={activeCatalogMeta.maxLength}
-							placeholder={activeCatalogMeta.placeholder}
-						/>
-					</label>
-					<button class="button secondary" type="submit" disabled={supportCatalogCreating}>
-						<Plus size={16} />
-						<span>{t('Create')}</span>
-					</button>
-				</form>
-
-				{#if supportCatalogNotice}
-					<p
-						class={`notice ${supportCatalogNotice.tone}`}
-						role={supportCatalogNotice.tone === 'danger' ? 'alert' : 'status'}
-					>
-						{supportCatalogNotice.message}
-					</p>
-				{/if}
-
-				<div class="support-catalog-toolbar">
-					<label class="support-catalog-search">
-						<span>{t('Search {item}', { item: activeCatalogMeta.singular })}</span>
-						<div class="input-with-icon">
-							<Search size={16} />
-							<input
-								value={supportCatalogSearch[supportCatalogTab]}
-								placeholder={t('Search in {collection}', {
-									collection: lower(activeCatalogMeta.label)
-								})}
-								aria-label={t('Search {item}', { item: activeCatalogMeta.singular })}
-								oninput={(event) =>
-									updateSupportCatalogSearch(
-										supportCatalogTab,
-										(event.currentTarget as HTMLInputElement).value
-									)}
-							/>
-						</div>
-					</label>
-					<div class="support-catalog-page-size" aria-label={t('Items per page')}>
-						<span>{t('Display')}</span>
-						<strong>{t('{pageSize} per page', { pageSize: supportCatalogPageSize })}</strong>
-					</div>
-				</div>
-
-				<div class="support-catalog-list-heading">
-					<strong>{activeCatalogMeta.label}</strong>
-					<span>
-						{t('{start}-{end} of {total}', {
-							start: supportCatalogResultStart,
-							end: supportCatalogResultEnd,
-							total: filteredSupportCatalogItems.length
-						})}
-					</span>
-				</div>
-
-				<div class="support-catalog-list">
-					{#each paginatedSupportCatalogItems as item (item.id)}
-						<div class="support-catalog-row">
-							<form method="post" action="?/updateCatalog" class="support-catalog-edit-form">
-								<input type="hidden" name="returnTo" value={data.returnTo} />
-								<input type="hidden" name="kind" value={supportCatalogTab} />
-								<input type="hidden" name="id" value={item.id} />
-								<label>
-									<span>{catalogUsageLabel(item)}</span>
-									<input
-										name="name"
-										value={item.name}
-										required
-										minlength="2"
-										maxlength={activeCatalogMeta.maxLength}
-										aria-label={`${t('Edit')} ${activeCatalogMeta.singular} ${item.name}`}
-									/>
-								</label>
-								<button class="button secondary" type="submit">
-									<Save size={15} />
-									<span>{t('Save')}</span>
-								</button>
-							</form>
-							<form method="post" action="?/removeCatalog" class="support-catalog-remove-form">
-								<input type="hidden" name="returnTo" value={data.returnTo} />
-								<input type="hidden" name="kind" value={supportCatalogTab} />
-								<input type="hidden" name="id" value={item.id} />
-								<button
-									class="button secondary danger"
-									type="submit"
-									aria-label={`${catalogRemoveLabel(item)} ${activeCatalogMeta.singular} ${item.name}`}
-								>
-									<Trash2 size={15} />
-									<span>{catalogRemoveLabel(item)}</span>
-								</button>
-							</form>
-						</div>
-					{:else}
-						<p class="support-catalog-empty">
-							{activeCatalogQuery ? t('No search results.') : activeCatalogMeta.empty}
-						</p>
-					{/each}
-				</div>
-
-				{#if supportCatalogPageCount > 1}
-					<div class="support-catalog-pagination">
-						<button
-							class="button secondary"
-							type="button"
-							disabled={activeSupportCatalogPage === 1}
-							aria-label={t('Previous page of {items}', {
-								items: lower(activeCatalogMeta.label)
-							})}
-							onclick={() => goToSupportCatalogPage(activeSupportCatalogPage - 1)}
-						>
-							<ChevronLeft size={16} />
-							<span>{t('Previous')}</span>
-						</button>
-						<span>
-							{t('Page {page} of {count}', {
-								page: activeSupportCatalogPage,
-								count: supportCatalogPageCount
-							})}
-						</span>
-						<button
-							class="button secondary"
-							type="button"
-							disabled={activeSupportCatalogPage === supportCatalogPageCount}
-							aria-label={t('Next page of {items}', {
-								items: lower(activeCatalogMeta.label)
-							})}
-							onclick={() => goToSupportCatalogPage(activeSupportCatalogPage + 1)}
-						>
-							<span>{t('Next')}</span>
-							<ChevronRight size={16} />
-						</button>
-					</div>
-				{/if}
-			</div>
-
-			<div class="dialog-actions single">
-				<button class="button secondary" type="button" onclick={closeSupportCatalogDialog}>
-					{t('Close')}
-				</button>
-			</div>
-		</div>
-	</dialog>
+	<SupportCatalogDialog
+		bind:this={supportCatalogDialog}
+		catalogs={data.catalogs}
+		categories={data.categories}
+		returnTo={data.returnTo}
+		locale={data.locale}
+		{t}
+	/>
 
 	<section class="panel expense-list-panel">
 		<div class="expense-list-heading">
@@ -753,7 +448,7 @@
 				<span>{t('Category')}</span>
 				<select name="categoryId" aria-label={t('Category')}>
 					<option value="">{t('All categories')}</option>
-					{#each data.categories as category (category.id)}
+					{#each activeCategories as category (category.id)}
 						<option value={category.id} selected={data.filters.categoryId === category.id}
 							>{category.icon ?? '💼'} {category.name}</option
 						>
@@ -835,44 +530,110 @@
 		{#if data.expenses.items.length === 0}
 			<p class="empty">{t('No expense found.')}</p>
 		{:else}
-			<div class="expense-table" aria-label={t('Expenses registered')}>
-				<div class="expense-table-header" aria-hidden="true">
-					{#if data.permissions.canReview}<span></span>{/if}
-					<span>{t('Date')}</span>
-					<span>{t('Description')}</span>
-					<span>{t('Category')}</span>
-					<span>{t('Payment')}</span>
-					<span>{t('Notes')}</span>
-					<span>{t('Value')}</span>
-					<span>{t('Actions')}</span>
+			<div
+				class={['expense-table', data.permissions.canReview && 'with-select']}
+				role="table"
+				aria-label={t('Expenses registered')}
+				aria-colcount={data.permissions.canReview ? 8 : 7}
+			>
+				<div class="expense-table-header" role="row">
+					{#if data.permissions.canReview}
+						<span role="columnheader" aria-colindex="1"
+							><span class="sr-only">{t('Review')}</span></span
+						>
+					{/if}
+					<span role="columnheader" aria-colindex={data.permissions.canReview ? 2 : 1}
+						>{t('Date')}</span
+					>
+					<span role="columnheader" aria-colindex={data.permissions.canReview ? 3 : 2}
+						>{t('Description')}</span
+					>
+					<span role="columnheader" aria-colindex={data.permissions.canReview ? 4 : 3}
+						>{t('Category')}</span
+					>
+					<span role="columnheader" aria-colindex={data.permissions.canReview ? 5 : 4}
+						>{t('Payment')}</span
+					>
+					<span role="columnheader" aria-colindex={data.permissions.canReview ? 6 : 5}
+						>{t('Details')}</span
+					>
+					<span role="columnheader" aria-colindex={data.permissions.canReview ? 7 : 6}
+						>{t('Value')}</span
+					>
+					<span role="columnheader" aria-colindex={data.permissions.canReview ? 8 : 7}
+						>{t('Actions')}</span
+					>
 				</div>
 
 				{#each data.expenses.items as expense (expense.id)}
-					<article class="expense-table-item">
-						{#if data.permissions.canReview && expense.reviewStatus === 'pending'}
-							<label
-								class="expense-select-label"
-								aria-label={t('Select {description}', { description: expense.description })}
-							>
-								<input
-									type="checkbox"
-									class="expense-select-checkbox"
-									checked={selectedIds.has(expense.id)}
-									onchange={() => toggleSelect(expense.id)}
-								/>
-							</label>
-						{:else if data.permissions.canReview}
-							<span class="expense-select-placeholder"></span>
-						{/if}
+					<article
+						class={['expense-table-item', expense.reviewStatus === 'pending' && 'pending-review']}
+						role="rowgroup"
+					>
 						<details
 							class="expense-table-details"
+							role="presentation"
 							ontoggle={(event) => prepareExpenseDetails(expense.id, event)}
 						>
-							<summary class="expense-table-row">
-								<span class="expense-table-date">
+							<summary
+								class="expense-table-row"
+								role="row"
+								aria-expanded={expandedExpenseIds.has(expense.id)}
+							>
+								{#if data.permissions.canReview && expense.reviewStatus === 'pending'}
+									<span
+										class={['expense-select-label', selectedIds.has(expense.id) && 'selected']}
+										role="cell"
+										aria-colindex="1"
+										tabindex="-1"
+										onclick={(event) => {
+											if (event.target instanceof HTMLInputElement) {
+												event.stopPropagation();
+												return;
+											}
+											event.preventDefault();
+											event.stopPropagation();
+											toggleSelect(expense.id);
+										}}
+										onkeydown={(event) => {
+											if (event.target instanceof HTMLInputElement) {
+												event.stopPropagation();
+												return;
+											}
+											if (event.key !== ' ' && event.key !== 'Enter') return;
+											event.preventDefault();
+											event.stopPropagation();
+											toggleSelect(expense.id);
+										}}
+									>
+										<input
+											type="checkbox"
+											class="expense-select-checkbox"
+											checked={selectedIds.has(expense.id)}
+											onchange={() => toggleSelect(expense.id)}
+											aria-label={t('Select {description}', {
+												description: expense.description
+											})}
+										/>
+										<span class="expense-select-text">{t('Review')}</span>
+									</span>
+								{:else if data.permissions.canReview}
+									<span class="expense-select-placeholder" role="cell" aria-colindex="1">
+										<span class="sr-only">{reviewLabel(expense.reviewStatus, t)}</span>
+									</span>
+								{/if}
+								<span
+									class="expense-table-date"
+									role="cell"
+									aria-colindex={data.permissions.canReview ? 2 : 1}
+								>
 									<LocalizedDate value={expense.expenseDate} />
 								</span>
-								<span class="expense-table-description">
+								<span
+									class="expense-table-description"
+									role="cell"
+									aria-colindex={data.permissions.canReview ? 3 : 2}
+								>
 									<strong>{expense.description}</strong>
 									{#if expense.installmentsTotal}
 										<small>{expense.installmentNumber}/{expense.installmentsTotal}</small>
@@ -889,18 +650,28 @@
 								</span>
 								<span
 									class="expense-category expense-table-category"
+									role="cell"
+									aria-colindex={data.permissions.canReview ? 4 : 3}
 									style={`--category-color:${expense.categoryColor}`}
 								>
 									<span>{expense.categoryIcon ?? '💼'}</span>
 									{expense.categoryName}
 								</span>
-								<span class="expense-table-muted expense-table-payment">
+								<span
+									class="expense-table-muted expense-table-payment"
+									role="cell"
+									aria-colindex={data.permissions.canReview ? 5 : 4}
+								>
 									{expense.paymentMethod || '-'}
 									<span class={paymentClass(expense.paymentStatus)}
 										>{paymentLabel(expense.paymentStatus, t)}</span
 									>
 								</span>
-								<span class="expense-table-muted expense-table-note">
+								<span
+									class="expense-table-muted expense-table-note"
+									role="cell"
+									aria-colindex={data.permissions.canReview ? 6 : 5}
+								>
 									{expense.vendor || expense.costCenter || expense.notes || '-'}
 									{#if expense.vendor && expense.costCenter}
 										<small>{expense.costCenter}</small>
@@ -908,255 +679,167 @@
 										<small>{expense.reviewRejectionReason}</small>
 									{/if}
 								</span>
-								<span class="expense-table-amount">{money(expense.amountCents)}</span>
-								<span class="expense-table-action">
-									<Pencil size={15} />
-									{t('Edit')}
+								<span
+									class="expense-table-amount"
+									role="cell"
+									aria-colindex={data.permissions.canReview ? 7 : 6}
+									>{money(expense.amountCents)}</span
+								>
+								<span
+									class="expense-table-action"
+									role="cell"
+									aria-colindex={data.permissions.canReview ? 8 : 7}
+								>
+									<ChevronDown size={15} />
+									{t('Actions')}
+									<button
+										class="icon-button danger expense-table-delete"
+										type="button"
+										aria-label={`${t('Delete')} ${expense.description}`}
+										onclick={(event) => {
+											event.preventDefault();
+											event.stopPropagation();
+											openDeleteDialog(expense);
+										}}
+									>
+										<Trash2 size={17} />
+									</button>
 								</span>
 							</summary>
 
 							{#if hasPreparedExpenseDetails(expense.id)}
-								<form
-									method="post"
-									action="?/update"
-									class="expense-edit-form expense-edit-form-table"
-								>
-									<input type="hidden" name="id" value={expense.id} />
-									<input type="hidden" name="returnTo" value={data.returnTo} />
-									<label>
-										<span>{t('Description')}</span>
-										<input name="description" value={expense.description} required />
-									</label>
-									<label>
-										<span>{t('Value')}</span>
-										<input name="amount" value={amountInputValue(expense.amountCents)} required />
-									</label>
-									<label>
-										<span>{t('Date')}</span>
-										<input name="expenseDate" type="date" value={expense.expenseDate} required />
-									</label>
-									<label>
-										<span>{t('Category')}</span>
-										<select name="categoryId" required>
-											{#each data.categories as category (category.id)}
-												<option value={category.id} selected={category.id === expense.categoryId}
-													>{category.icon ?? '💼'} {category.name}</option
-												>
-											{/each}
-										</select>
-									</label>
-									<label>
-										<span>{t('Payment')}</span>
-										<select name="paymentMethodId">
-											<option value="">{t('Select')}</option>
-											{#if expense.paymentMethodId && !hasCatalogOption(data.catalogs.paymentMethods, expense.paymentMethodId)}
-												<option value={expense.paymentMethodId} selected
-													>{expense.paymentMethod ?? t('Archived payment method')} ({lower(
-														t('Archived')
-													)})</option
-												>
-											{/if}
-											{#each data.catalogs.paymentMethods as paymentMethod (paymentMethod.id)}
-												<option
-													value={paymentMethod.id}
-													selected={paymentMethod.id === expense.paymentMethodId}
-													>{paymentMethod.name}</option
-												>
-											{/each}
-										</select>
-									</label>
-									<SearchableSelect
-										id={`expense-edit-vendor-${expense.id}`}
-										name="vendorId"
-										label={t('Vendor')}
-										options={catalogOptionsWithCurrent(
-											data.catalogs.vendors,
-											expense.vendorId,
-											expense.vendor,
-											'Archived vendor'
-										)}
-										selectedId={expense.vendorId}
-										selectedLabel={expense.vendor}
-										placeholder={t('Select')}
-										empty={t('No vendor found.')}
-										locale={data.locale}
-									/>
-									<SearchableSelect
-										id={`expense-edit-cost-center-${expense.id}`}
-										name="costCenterId"
-										label={t('Cost center')}
-										options={catalogOptionsWithCurrent(
-											data.catalogs.costCenters,
-											expense.costCenterId,
-											expense.costCenter,
-											'Archived cost center'
-										)}
-										selectedId={expense.costCenterId}
-										selectedLabel={expense.costCenter}
-										placeholder={t('Select')}
-										empty={t('No cost center found.')}
-										locale={data.locale}
-									/>
-									<label>
-										<span>{t('Competency')}</span>
-										<input
-											name="competencyMonth"
-											type="month"
-											value={expense.competencyMonth?.slice(0, 7) ?? ''}
-										/>
-									</label>
-									<label class="edit-notes">
-										<span>{t('Notes')}</span>
-										<input name="notes" value={expense.notes ?? ''} />
-									</label>
-									<button class="button primary" type="submit">
-										<Save size={17} />
-										<span>{t('Update')}</span>
-									</button>
-								</form>
-
-								{#if data.permissions.canReview || data.permissions.canReconcile}
-									<div class="expense-workflow-panel">
-										<div class="workflow-summary">
-											<span class={reviewClass(expense.reviewStatus)}>
-												{reviewLabel(expense.reviewStatus, t)}
-											</span>
-											<span class={paymentClass(expense.paymentStatus)}>
-												{paymentLabel(expense.paymentStatus, t)}
-											</span>
-										</div>
-										{#if data.permissions.canReview}
-											<form method="post" action="?/review" class="workflow-form">
-												<input type="hidden" name="id" value={expense.id} />
-												<input type="hidden" name="returnTo" value={data.returnTo} />
-												<input type="hidden" name="reviewStatus" value="approved" />
-												<button
-													class="button secondary"
-													type="submit"
-													disabled={expense.reviewStatus === 'approved'}
-												>
-													<CheckCircle2 size={16} />
-													<span>{t('Approve')}</span>
-												</button>
-											</form>
-											<form method="post" action="?/review" class="workflow-form reject-form">
-												<input type="hidden" name="id" value={expense.id} />
-												<input type="hidden" name="returnTo" value={data.returnTo} />
-												<input type="hidden" name="reviewStatus" value="rejected" />
+								<div class="expense-details-body" role="row">
+									<div
+										class="expense-details-cell"
+										role="cell"
+										aria-colindex="1"
+										aria-colspan={data.permissions.canReview ? 8 : 7}
+									>
+										{#if data.permissions.canReview || data.permissions.canReconcile}
+											{@render expenseWorkflowPanel(expense)}
+										{/if}
+										<form
+											method="post"
+											action="?/update"
+											class="expense-edit-form expense-edit-form-table"
+										>
+											<input type="hidden" name="id" value={expense.id} />
+											<input type="hidden" name="returnTo" value={data.returnTo} />
+											<label class="expense-edit-description">
+												<span>{t('Description')}</span>
+												<input name="description" value={expense.description} required />
+											</label>
+											<label class="expense-edit-amount">
+												<span>{t('Value')}</span>
 												<input
-													name="reason"
-													aria-label={t('Rejection reason')}
-													placeholder={t('Reason')}
-													maxlength="500"
+													name="amount"
+													value={amountInputValue(expense.amountCents)}
 													required
 												/>
-												<button
-													class="button secondary danger"
-													type="submit"
-													disabled={expense.reviewStatus === 'rejected'}
-												>
-													<XCircle size={16} />
-													<span>{t('Reject')}</span>
-												</button>
-											</form>
-										{/if}
-
-										{#if data.permissions.canReconcile && expense.reviewStatus === 'approved'}
-											<form method="post" action="?/payment" class="workflow-form">
-												<input type="hidden" name="id" value={expense.id} />
-												<input type="hidden" name="returnTo" value={data.returnTo} />
-												<select name="paymentStatus" aria-label={t('Payment status')}>
-													<option value="unpaid" selected={expense.paymentStatus === 'unpaid'}
-														>{t('Open')}</option
-													>
-													<option value="paid" selected={expense.paymentStatus === 'paid'}
-														>{t('Paid')}</option
-													>
-													<option
-														value="reconciled"
-														selected={expense.paymentStatus === 'reconciled'}
-														>{t('Reconciled')}</option
-													>
-												</select>
+											</label>
+											<label class="expense-edit-date">
+												<span>{t('Date')}</span>
 												<input
-													name="paidAt"
+													name="expenseDate"
 													type="date"
-													value={expense.paidAt ?? ''}
-													aria-label={t('Payment date')}
+													value={expense.expenseDate}
+													required
 												/>
-												<button class="button secondary" type="submit">
-													<CreditCard size={16} />
-													<span>{t('Save payment')}</span>
-												</button>
-											</form>
-										{/if}
-									</div>
-								{/if}
+											</label>
+											<label class="expense-edit-category">
+												<span>{t('Category')}</span>
+												<select name="categoryId" required>
+													{#each activeCategories as category (category.id)}
+														<option
+															value={category.id}
+															selected={category.id === expense.categoryId}
+															>{category.icon ?? '💼'} {category.name}</option
+														>
+													{/each}
+												</select>
+											</label>
+											<label class="expense-edit-payment">
+												<span>{t('Payment')}</span>
+												<select name="paymentMethodId">
+													<option value="">{t('Select')}</option>
+													{#if expense.paymentMethodId && !hasCatalogOption(data.catalogs.paymentMethods, expense.paymentMethodId)}
+														<option value={expense.paymentMethodId} selected
+															>{expense.paymentMethod ?? t('Archived payment method')} ({lower(
+																t('Archived')
+															)})</option
+														>
+													{/if}
+													{#each data.catalogs.paymentMethods as paymentMethod (paymentMethod.id)}
+														<option
+															value={paymentMethod.id}
+															selected={paymentMethod.id === expense.paymentMethodId}
+															>{paymentMethod.name}</option
+														>
+													{/each}
+												</select>
+											</label>
+											<SearchableSelect
+												id={`expense-edit-vendor-${expense.id}`}
+												name="vendorId"
+												label={t('Vendor')}
+												options={catalogOptionsWithCurrent(
+													data.catalogs.vendors,
+													expense.vendorId,
+													expense.vendor,
+													'Archived vendor'
+												)}
+												selectedId={expense.vendorId}
+												selectedLabel={expense.vendor}
+												placeholder={t('Select')}
+												empty={t('No vendor found.')}
+												wrapperClass="expense-edit-vendor"
+												locale={data.locale}
+											/>
+											<SearchableSelect
+												id={`expense-edit-cost-center-${expense.id}`}
+												name="costCenterId"
+												label={t('Cost center')}
+												options={catalogOptionsWithCurrent(
+													data.catalogs.costCenters,
+													expense.costCenterId,
+													expense.costCenter,
+													'Archived cost center'
+												)}
+												selectedId={expense.costCenterId}
+												selectedLabel={expense.costCenter}
+												placeholder={t('Select')}
+												empty={t('No cost center found.')}
+												wrapperClass="expense-edit-cost-center"
+												locale={data.locale}
+											/>
+											<label class="expense-edit-competency">
+												<span>{t('Competency')}</span>
+												<input
+													name="competencyMonth"
+													type="month"
+													value={expense.competencyMonth?.slice(0, 7) ?? ''}
+												/>
+											</label>
+											<label class="edit-notes">
+												<span>{t('Notes')}</span>
+												<input name="notes" value={expense.notes ?? ''} />
+											</label>
+											<button class="button primary" type="submit">
+												<Save size={17} />
+												<span>{t('Update')}</span>
+											</button>
+										</form>
 
-								<div class="attachment-panel">
-									<div class="attachment-list">
-										{#each expense.attachments as attachment (attachment.id)}
-											<div class="attachment-chip-row">
-												<a
-													class="attachment-chip"
-													href={resolve(`/app/expenses/attachments/${attachment.id}`)}
-												>
-													<Paperclip size={15} />
-													<span>{attachment.originalName}</span>
-												</a>
-												<form
-													method="post"
-													action="?/deleteAttachment"
-													onsubmit={(e) => {
-														if (!window.confirm(t('Delete attachment?'))) e.preventDefault();
-													}}
-												>
-													<input type="hidden" name="id" value={attachment.id} />
-													<input type="hidden" name="returnTo" value={data.returnTo} />
-													<button
-														class="icon-button danger"
-														type="submit"
-														aria-label={`${t('Delete')} ${attachment.originalName}`}
-													>
-														<Trash2 size={14} />
-													</button>
-												</form>
-											</div>
-										{:else}
-											<span class="empty">{t('No attachments added.')}</span>
-										{/each}
-									</div>
-									<form
-										method="post"
-										action="?/attach"
-										enctype="multipart/form-data"
-										class="attachment-form"
-									>
-										<input type="hidden" name="id" value={expense.id} />
-										<input type="hidden" name="returnTo" value={data.returnTo} />
-										<input
-											name="attachment"
-											type="file"
-											accept="application/pdf,image/png,image/jpeg,image/webp,text/plain"
-											aria-label={t('Receipt')}
+										<AttachmentPanel
+											expenseId={expense.id}
+											attachments={expense.attachments}
+											returnTo={data.returnTo}
+											{t}
 										/>
-										<button class="button secondary" type="submit">
-											<Paperclip size={16} />
-											<span>{t('Attach')}</span>
-										</button>
-									</form>
+									</div>
 								</div>
 							{/if}
 						</details>
-
-						<button
-							class="icon-button danger expense-table-delete"
-							type="button"
-							aria-label={`${t('Delete')} ${expense.description}`}
-							onclick={() => openDeleteDialog(expense)}
-						>
-							<Trash2 size={17} />
-						</button>
 					</article>
 				{/each}
 			</div>
@@ -1168,75 +851,7 @@
 		{/if}
 	</section>
 
-	{#if selectedIds.size > 0}
-		<div class="bulk-action-bar" role="region" aria-label={t('Bulk actions')}>
-			<span class="bulk-action-count">{t('{count} selected', { count: selectedIds.size })}</span>
-			<form method="post" action="?/bulkReview" class="bulk-action-form">
-				<input type="hidden" name="returnTo" value={data.returnTo} />
-				<input type="hidden" name="decision" value="approved" />
-				{#each [...selectedIds] as id (id)}
-					<input type="hidden" name="id" value={id} />
-				{/each}
-				<button class="button secondary" type="submit">
-					<CheckCircle2 size={16} />
-					<span>{t('Approve')}</span>
-				</button>
-			</form>
-			<form method="post" action="?/bulkReview" class="bulk-action-form">
-				<input type="hidden" name="returnTo" value={data.returnTo} />
-				<input type="hidden" name="decision" value="rejected" />
-				{#each [...selectedIds] as id (id)}
-					<input type="hidden" name="id" value={id} />
-				{/each}
-				<button class="button secondary danger" type="submit">
-					<XCircle size={16} />
-					<span>{t('Reject')}</span>
-				</button>
-			</form>
-			<button class="button secondary" type="button" onclick={clearSelection}>
-				{t('Clear')}
-			</button>
-		</div>
-	{/if}
+	<BulkReviewBar {selectedIds} returnTo={data.returnTo} {t} />
 
-	<dialog
-		{@attach captureDeleteDialog}
-		class="app-dialog"
-		aria-labelledby="delete-expense-title"
-		onclick={closeDeleteDialogFromBackdrop}
-		onclose={clearDeleteDialog}
-	>
-		{#if pendingDelete}
-			<div class="dialog-card">
-				<div class="dialog-heading">
-					<span class="dialog-icon danger">
-						<Trash2 size={20} />
-					</span>
-					<div>
-						<h3 id="delete-expense-title">{t('Delete expense?')}</h3>
-						<p>
-							{pendingDelete.description}
-							<span>{pendingDelete.amount}</span>
-						</p>
-					</div>
-				</div>
-
-				<p class="dialog-muted">
-					{t('This action removes the entry and updates dashboards and reports.')}
-				</p>
-
-				<form method="post" action="?/delete" class="dialog-actions">
-					<input type="hidden" name="id" value={pendingDelete.id} />
-					<input type="hidden" name="returnTo" value={data.returnTo} />
-					<button class="button secondary" type="button" onclick={closeDeleteDialog}
-						>{t('Cancel')}</button
-					>
-					<button class="button danger" type="submit">
-						<Trash2 size={17} />
-						<span>{t('Delete')}</span>
-					</button>
-				</form>
-			</div>
-		{/if}
-	</dialog>
+	<DeleteExpenseDialog bind:this={deleteDialog} returnTo={data.returnTo} {t} />
 </section>

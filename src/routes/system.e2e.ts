@@ -77,6 +77,79 @@ function expenseRow(page: Page, description: string) {
 	return page.locator('.expense-table-item').filter({ hasText: description });
 }
 
+test('authenticates and deduplicates grouped Mailjet delivery events', async ({
+	page,
+	playwright
+}) => {
+	const endpoint = '/api/webhooks/mailjet';
+	const unauthorized = await page.request.post(endpoint, {
+		data: { event: 'sent', time: Math.floor(Date.now() / 1000), email: 'admin@example.com' }
+	});
+	expect(unauthorized.status()).toBe(401);
+	expect(unauthorized.headers()['www-authenticate']).toContain('Basic');
+
+	const authorization = `Basic ${Buffer.from('mailjet-e2e:mailjet-e2e-password').toString('base64')}`;
+	const payload = [
+		{
+			event: 'sent',
+			time: Math.floor(Date.now() / 1000),
+			email: 'admin@example.com',
+			Message_GUID: randomWebhookId(),
+			CustomID: `budget-alert:${randomWebhookId()}`
+		},
+		{
+			event: 'open',
+			time: Math.floor(Date.now() / 1000),
+			email: 'admin@example.com',
+			Message_GUID: randomWebhookId()
+		}
+	];
+	const accepted = await page.request.post(endpoint, {
+		headers: { Authorization: authorization },
+		data: payload
+	});
+	await expect(accepted).toBeOK();
+	expect(await accepted.json()).toEqual({ accepted: 2, duplicates: 0, matched: 0 });
+
+	const replay = await page.request.post(endpoint, {
+		headers: { Authorization: authorization },
+		data: payload
+	});
+	await expect(replay).toBeOK();
+	expect(await replay.json()).toEqual({ accepted: 0, duplicates: 2, matched: 0 });
+
+	const stale = await page.request.post(endpoint, {
+		headers: { Authorization: authorization },
+		data: { event: 'sent', time: 1, email: 'admin@example.com' }
+	});
+	expect(stale.status()).toBe(400);
+
+	const oversizedClient = await playwright.request.newContext({
+		baseURL: 'http://localhost:4173'
+	});
+	try {
+		const oversized = await oversizedClient.post(endpoint, {
+			headers: { Authorization: authorization },
+			data: {
+				event: 'sent',
+				time: Math.floor(Date.now() / 1000),
+				email: 'admin@example.com',
+				Payload: 'x'.repeat(257 * 1024)
+			}
+		});
+		expect(oversized.status()).toBe(413);
+	} finally {
+		await oversizedClient.dispose();
+	}
+});
+
+function randomWebhookId() {
+	return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (character) => {
+		const value = Math.floor(Math.random() * 16);
+		return (character === 'x' ? value : (value & 0x3) | 0x8).toString(16);
+	});
+}
+
 test('covers root redirects, health check, onboarding validation and explicit logout', async ({
 	page
 }) => {
@@ -144,6 +217,12 @@ test('covers planning bad paths and budget deletion', async ({ page }) => {
 			form: { periodMonth: '2026-13' }
 		}),
 		'Mês inválido para alertas.'
+	);
+	await expectActionMessage(
+		await page.request.post('/app/planning?/setBudgetAlertPreference', {
+			form: { enabled: 'yes' }
+		}),
+		'Preferência de alertas de orçamento inválida.'
 	);
 	await expectActionMessage(
 		await page.request.post('/app/planning?/deleteBudget', {

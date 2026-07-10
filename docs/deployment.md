@@ -24,7 +24,8 @@ local production-like testing or for a standalone Caddy deployment.
 - `APP_DOMAIN`
 - `ORIGIN`
 - `BETTER_AUTH_SECRET`
-- `ALLOW_REGISTRATION`: set to `false` to disable public self-service account registration.
+- `ALLOW_REGISTRATION`: set to `false` to disable public self-service account registration. Both
+  the Caddy and Traefik Compose deployments pass this value into the application container.
 - `POSTGRES_DB`
 - `POSTGRES_USER`
 - `POSTGRES_PASSWORD`
@@ -34,8 +35,14 @@ local production-like testing or for a standalone Caddy deployment.
 ## Recommended Variables
 
 - `UPLOAD_DIR`: attachment path inside the container. The compose file uses `/app/uploads` by default.
-- `DB_POOL_MAX`: maximum application connection pool size.
-- `TRUST_PROXY_HEADERS`: use `true` only when the app is not directly exposed and only receives traffic through a trusted reverse proxy. The default `docker-compose.yml` sets it to `true` because Caddy is the only published service.
+- `DB_POOL_MAX`: maximum application query-pool size. Each app process may open one additional dedicated connection while holding a scheduler advisory lock.
+- `TRUST_PROXY_HEADERS`: use `true` only when the app is not directly exposed and only receives traffic through a trusted reverse proxy.
+- `TRUSTED_PROXY_CIDR`: immediate reverse proxy subnet allowed to supply forwarded client addresses. It is required when `TRUST_PROXY_HEADERS=true` and accepts comma-separated IPv4/IPv6 CIDRs. There is intentionally no broad private-network default: configure the narrowest deployment-specific CIDR and place the app and proxy on a dedicated network whenever possible.
+
+Before upgrading an existing deployment, set `TRUSTED_PROXY_CIDR` explicitly if
+`TRUST_PROXY_HEADERS=true`; production startup now rejects missing, empty or
+malformed CIDR lists instead of silently collapsing rate-limit identities.
+
 - `TRUSTED_ORIGINS`: comma-separated extra origins for alternate URLs, VPN or Tailscale access. Use complete origins such as `https://finance.example.com` or `http://100.x.y.z:5173`.
 - `RESTIC_KEEP_DAILY`, `RESTIC_KEEP_WEEKLY`, `RESTIC_KEEP_MONTHLY`: remote retention policy. The default keeps 7 daily, 4 weekly and 12 monthly snapshots.
 - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`: required only for S3-compatible restic repositories.
