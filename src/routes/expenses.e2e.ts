@@ -258,6 +258,22 @@ async function categoryIdByLabel(page: Page, label: string) {
 	return value!;
 }
 
+async function catalogIdByLabel(
+	page: Page,
+	kind: 'paymentMethod' | 'vendor' | 'costCenter',
+	label: string
+) {
+	await page.goto('/app/expenses');
+	const fieldName =
+		kind === 'paymentMethod' ? 'paymentMethodId' : kind === 'vendor' ? 'vendorId' : 'costCenterId';
+	const option = page
+		.locator(`form.expense-create-form select[name="${fieldName}"] option`)
+		.filter({ hasText: label });
+	const value = await option.getAttribute('value');
+	expect(value).toBeTruthy();
+	return value!;
+}
+
 async function applyExpenseFilter(page: Page, configure: (filterForm: Locator) => Promise<void>) {
 	await page.goto('/app/expenses');
 	const filterForm = page.locator('form.expense-filter-form');
@@ -602,8 +618,12 @@ test('keeps mobile expense cards and review actions aligned above navigation', a
 	await expect(bulkActionBar.getByRole('button', { name: 'Aprovar' })).toHaveClass(
 		/review-approve/
 	);
-	await bulkActionBar.getByRole('button', { name: 'Limpar' }).click();
+	const filterForm = page.locator('form.expense-filter-form');
+	await filterForm.getByLabel('Busca').fill('Mobile revisão baixa');
+	await filterForm.getByRole('button', { name: 'Filtrar' }).click();
+	await expect(page).toHaveURL(/q=Mobile/);
 	await expect(bulkActionBar).toBeHidden();
+	await expect(selectCheckbox).not.toBeChecked();
 
 	await row.locator('summary').click();
 	const workflowPanel = row.locator('.expense-workflow-panel');
@@ -640,14 +660,54 @@ test('manages support catalogs from expenses', async ({ page }) => {
 	const paymentEdit = page.getByLabel('Editar pagamento Cartão corporativo');
 	await paymentEdit.fill('Cartão central');
 	await paymentEdit.locator('xpath=ancestor::form').getByRole('button', { name: 'Salvar' }).click();
+	const paymentDialog = page.getByRole('dialog', { name: 'Cadastros de apoio' });
+	await expect(paymentDialog).toBeVisible();
+	await expect(paymentDialog.getByRole('status')).toHaveText('Item atualizado com sucesso.');
 	await expect(
 		page.locator('form.expense-create-form select[name="paymentMethodId"]')
 	).toContainText('Cartão central');
+	await page.keyboard.press('Escape');
+	await expect(paymentDialog).toBeHidden();
+	await openCatalogDialog(page, 'paymentMethod');
+	await expect(
+		page.getByRole('dialog', { name: 'Cadastros de apoio' }).getByRole('status')
+	).toHaveCount(0);
+	await page.keyboard.press('Escape');
+
+	await createCatalogFromDialog(page, 'paymentMethod', 'Pagamento recorrente');
+	const recurringCategoryId = await categoryIdByLabel(page, 'Operacional');
+	const recurringPaymentId = await catalogIdByLabel(page, 'paymentMethod', 'Pagamento recorrente');
+	const recurringResponse = await page.request.post('/app/planning?/createRecurring', {
+		form: {
+			categoryId: recurringCategoryId,
+			description: 'Recorrência com catálogo exclusivo',
+			amount: '25,00',
+			frequency: 'monthly',
+			intervalCount: '1',
+			startDate: '2099-01-01',
+			endDate: '',
+			paymentMethodId: recurringPaymentId,
+			notes: '',
+			returnTo: '/app/planning'
+		}
+	});
+	await expect(recurringResponse).toBeOK();
+	const recurringDialog = await openCatalogDialog(page, 'paymentMethod');
+	await expect(
+		recurringDialog.getByRole('button', {
+			name: 'Arquivar pagamento Pagamento recorrente'
+		})
+	).toBeVisible();
+	await recurringDialog.getByRole('button', { name: 'Fechar' }).click();
 
 	await createCatalogFromDialog(page, 'vendor', 'Fornecedor temporário');
 	await openCatalogDialog(page, 'vendor');
 	await page.getByRole('button', { name: 'Excluir fornecedor Fornecedor temporário' }).click();
-	await page.goto('/app/expenses');
+	const vendorDialog = page.getByRole('dialog', { name: 'Cadastros de apoio' });
+	await expect(vendorDialog).toBeVisible();
+	await expect(vendorDialog.getByRole('status')).toHaveText('Item excluído com sucesso.');
+	await expect(vendorDialog.getByLabel('Editar fornecedor Fornecedor temporário')).toHaveCount(0);
+	await vendorDialog.getByRole('button', { name: 'Fechar' }).click();
 	await page
 		.locator('form.expense-create-form')
 		.getByRole('combobox', { name: 'Fornecedor' })
@@ -670,7 +730,14 @@ test('manages support catalogs from expenses', async ({ page }) => {
 
 	await openCatalogDialog(page, 'vendor');
 	await page.getByRole('button', { name: 'Arquivar fornecedor ACME Serviços' }).click();
-	await page.goto('/app/expenses');
+	await expect(page.getByRole('dialog', { name: 'Cadastros de apoio' })).toBeVisible();
+	await expect(
+		page.getByRole('dialog', { name: 'Cadastros de apoio' }).getByRole('status')
+	).toHaveText('Item arquivado com sucesso.');
+	await page
+		.getByRole('dialog', { name: 'Cadastros de apoio' })
+		.getByRole('button', { name: 'Fechar' })
+		.click();
 	await expect(expenseRow(page, 'Despesa com fornecedor usado')).toContainText('ACME Serviços');
 	const archivedVendorRow = expenseRow(page, 'Despesa com fornecedor usado');
 	await archivedVendorRow.locator('summary').click();
@@ -703,9 +770,8 @@ test('manages categories from the expenses support dialog', async ({ page }) => 
 	await expect(dialog.getByLabel('Editar categoria Categoria Sem Uso')).toBeVisible();
 	await dialog.getByRole('button', { name: 'Excluir categoria Categoria Sem Uso' }).click();
 
-	await expect(page).toHaveURL(/\/app\/expenses$/);
-	dialog = await openSupportCatalogDialog(page);
-	await dialog.getByRole('tab', { name: /Categorias/ }).click();
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('status')).toHaveText('Categoria excluída com sucesso.');
 	await expect(dialog.getByLabel('Editar categoria Categoria Sem Uso')).toHaveCount(0);
 
 	const categoryCreateForm = dialog.locator('form.support-catalog-category-form');
@@ -729,13 +795,15 @@ test('manages categories from the expenses support dialog', async ({ page }) => 
 	await editForm.getByLabel('Emoji Categoria Dialog').selectOption('🧰');
 	await editForm.getByRole('button', { name: 'Salvar' }).click();
 
-	await expect(page).toHaveURL(/\/app\/expenses$/);
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('status')).toHaveText('Categoria atualizada com sucesso.');
 	await expect(page.locator('form.expense-create-form select[name="categoryId"]')).toContainText(
 		'Categoria Revisada'
 	);
 	await expect(
 		page.locator('form.expense-create-form select[name="categoryId"]')
 	).not.toContainText('Categoria Dialog');
+	await dialog.getByRole('button', { name: 'Fechar' }).click();
 
 	await createExpenseFromForm(page, {
 		description: 'Categoria vinculada',
@@ -749,19 +817,19 @@ test('manages categories from the expenses support dialog', async ({ page }) => 
 	await expect(dialog.getByLabel('Editar categoria Categoria Revisada')).toBeVisible();
 	await dialog.getByRole('button', { name: 'Arquivar categoria Categoria Revisada' }).click();
 
-	await expect(page).toHaveURL(/\/app\/expenses$/);
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('status')).toHaveText('Categoria arquivada com sucesso.');
 	await expect(
 		page.locator('form.expense-create-form select[name="categoryId"]')
 	).not.toContainText('Categoria Revisada');
 
-	dialog = await openSupportCatalogDialog(page);
-	await dialog.getByRole('tab', { name: /Categorias/ }).click();
 	await expect(dialog.getByLabel('Editar categoria Categoria Revisada')).toHaveCount(0);
 	await dialog.getByRole('button', { name: /Categorias arquivadas/ }).click();
 	await expect(dialog.getByLabel('Editar categoria Categoria Revisada')).toBeVisible();
 	await dialog.getByRole('button', { name: 'Restaurar categoria Categoria Revisada' }).click();
 
-	await expect(page).toHaveURL(/\/app\/expenses$/);
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('status')).toHaveText('Categoria restaurada com sucesso.');
 	await expect(page.locator('form.expense-create-form select[name="categoryId"]')).toContainText(
 		'Categoria Revisada'
 	);
@@ -1214,7 +1282,8 @@ test('keeps the page stable on update and attachment errors', async ({ page }) =
 		buffer: Buffer.from('')
 	});
 	await row.getByRole('button', { name: 'Anexar' }).click();
-	await expect(page.getByText('Anexo inválido.')).toBeVisible();
+	await expect(page.getByText('Anexo inválido.')).toHaveCount(1);
+	await expect(row.getByText('Anexo inválido.')).toBeVisible();
 	await expect(page).toHaveURL(/\/app\/expenses/);
 	await expect(expenseRow(page, 'Despesa com erros')).toBeVisible();
 });

@@ -5,10 +5,12 @@ import { actions } from './+page.server';
 const mocks = vi.hoisted(() => ({
 	createCategory: vi.fn(),
 	createExpenseCatalogItem: vi.fn(),
+	removeExpenseCatalogItem: vi.fn(),
 	removeCategory: vi.fn(),
 	requireWorkspaceContext: vi.fn(),
 	saveExpenseAttachment: vi.fn(),
 	unarchiveCategory: vi.fn(),
+	updateExpenseCatalogItem: vi.fn(),
 	updateCategory: vi.fn(),
 	context: {
 		workspaceId: 12,
@@ -29,8 +31,8 @@ vi.mock('$lib/server/services/categories', () => ({
 vi.mock('$lib/server/services/expense-catalogs', () => ({
 	createExpenseCatalogItem: mocks.createExpenseCatalogItem,
 	listExpenseCatalogs: vi.fn(),
-	removeExpenseCatalogItem: vi.fn(),
-	updateExpenseCatalogItem: vi.fn()
+	removeExpenseCatalogItem: mocks.removeExpenseCatalogItem,
+	updateExpenseCatalogItem: mocks.updateExpenseCatalogItem
 }));
 
 vi.mock('$lib/server/services/expenses', () => ({
@@ -101,6 +103,24 @@ async function removeCategory(fields: Record<string, string>, locale = 'pt-BR', 
 	const action = actions.removeCategory;
 	if (!action) throw new Error('removeCategory action is not registered');
 	return action(createEvent(fields, locale, enhanced, 'removeCategory'));
+}
+
+async function updateCategory(fields: Record<string, string>, locale = 'pt-BR', enhanced = true) {
+	const action = actions.updateCategory;
+	if (!action) throw new Error('updateCategory action is not registered');
+	return action(createEvent(fields, locale, enhanced, 'updateCategory'));
+}
+
+async function updateCatalog(fields: Record<string, string>, locale = 'pt-BR', enhanced = true) {
+	const action = actions.updateCatalog;
+	if (!action) throw new Error('updateCatalog action is not registered');
+	return action(createEvent(fields, locale, enhanced, 'updateCatalog'));
+}
+
+async function removeCatalog(fields: Record<string, string>, locale = 'pt-BR', enhanced = true) {
+	const action = actions.removeCatalog;
+	if (!action) throw new Error('removeCatalog action is not registered');
+	return action(createEvent(fields, locale, enhanced, 'removeCatalog'));
 }
 
 async function unarchiveCategory(
@@ -336,43 +356,75 @@ describe('expenses page category management actions', () => {
 		mocks.requireWorkspaceContext.mockResolvedValue(mocks.context);
 	});
 
-	it('removes categories through the service and redirects back to expenses', async () => {
+	it('keeps enhanced category deletion inside the dialog', async () => {
 		mocks.removeCategory.mockResolvedValue({
 			mode: 'deleted',
 			item: { id: 77, name: 'Sem uso' }
 		});
 
+		const result = await removeCategory({
+			id: '77',
+			returnTo: '/app/expenses?categoryId=3'
+		});
+
+		expect(mocks.removeCategory).toHaveBeenCalledWith(mocks.context, 77);
+		expect(result).toEqual({
+			categoryAction: 'removeCategory',
+			categoryMessage: 'Categoria excluída com sucesso.'
+		});
+	});
+
+	it('keeps enhanced category restoration inside the dialog', async () => {
+		mocks.unarchiveCategory.mockResolvedValue(undefined);
+
+		const result = await unarchiveCategory({
+			id: '88',
+			returnTo: '/app/expenses'
+		});
+
+		expect(mocks.unarchiveCategory).toHaveBeenCalledWith(mocks.context, 88);
+		expect(result).toEqual({
+			categoryAction: 'unarchiveCategory',
+			categoryMessage: 'Categoria restaurada com sucesso.'
+		});
+	});
+
+	it('updates categories without closing the enhanced dialog', async () => {
+		mocks.updateCategory.mockResolvedValue(undefined);
+
+		const result = await updateCategory({
+			id: '91',
+			name: 'Categoria revisada',
+			color: '#2563eb',
+			icon: '🧰',
+			returnTo: '/app/expenses'
+		});
+
+		expect(mocks.updateCategory).toHaveBeenCalledWith(mocks.context, 91, {
+			name: 'Categoria revisada',
+			color: '#2563eb',
+			icon: '🧰'
+		});
+		expect(result).toEqual({
+			categoryAction: 'updateCategory',
+			categoryMessage: 'Categoria atualizada com sucesso.'
+		});
+	});
+
+	it('retains redirects for native category mutation forms', async () => {
+		mocks.removeCategory.mockResolvedValue({
+			mode: 'archived',
+			item: { id: 77, name: 'Em uso' }
+		});
+
 		try {
-			await removeCategory({
-				id: '77',
-				returnTo: '/app/expenses?categoryId=3'
-			});
+			await removeCategory({ id: '77', returnTo: '/app/expenses?categoryId=3' }, 'pt-BR', false);
 			throw new Error('Expected removeCategory to redirect');
 		} catch (redirectError) {
-			expect(mocks.removeCategory).toHaveBeenCalledWith(mocks.context, 77);
 			expect(isRedirect(redirectError)).toBe(true);
 			expect(redirectError).toMatchObject({
 				status: 303,
 				location: '/app/expenses?categoryId=3'
-			});
-		}
-	});
-
-	it('restores archived categories and redirects back to expenses', async () => {
-		mocks.unarchiveCategory.mockResolvedValue(undefined);
-
-		try {
-			await unarchiveCategory({
-				id: '88',
-				returnTo: '/app/expenses'
-			});
-			throw new Error('Expected unarchiveCategory to redirect');
-		} catch (redirectError) {
-			expect(mocks.unarchiveCategory).toHaveBeenCalledWith(mocks.context, 88);
-			expect(isRedirect(redirectError)).toBe(true);
-			expect(redirectError).toMatchObject({
-				status: 303,
-				location: '/app/expenses'
 			});
 		}
 	});
@@ -388,8 +440,57 @@ describe('expenses page category management actions', () => {
 		expect(result).toMatchObject({
 			status: 400,
 			data: {
-				message: 'Categoria já existe.'
+				message: 'Categoria já existe.',
+				categoryAction: 'unarchiveCategory'
 			}
+		});
+	});
+});
+
+describe('expenses page catalog management actions', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mocks.requireWorkspaceContext.mockResolvedValue(mocks.context);
+	});
+
+	it('updates catalog items without closing the enhanced dialog', async () => {
+		mocks.updateExpenseCatalogItem.mockResolvedValue({ id: 21, name: 'Fornecedor novo' });
+
+		const result = await updateCatalog({
+			kind: 'vendor',
+			id: '21',
+			name: 'Fornecedor novo',
+			returnTo: '/app/expenses'
+		});
+
+		expect(mocks.updateExpenseCatalogItem).toHaveBeenCalledWith(mocks.context, {
+			kind: 'vendor',
+			id: 21,
+			name: 'Fornecedor novo'
+		});
+		expect(result).toEqual({
+			catalogAction: 'updateCatalog',
+			catalogKind: 'vendor',
+			catalogMessage: 'Item atualizado com sucesso.'
+		});
+	});
+
+	it.each([
+		['archived', 'Item arquivado com sucesso.'],
+		['deleted', 'Item excluído com sucesso.']
+	] as const)('reports enhanced catalog %s results inside the dialog', async (mode, message) => {
+		mocks.removeExpenseCatalogItem.mockResolvedValue({ mode, item: { id: 21 } });
+
+		const result = await removeCatalog({
+			kind: 'vendor',
+			id: '21',
+			returnTo: '/app/expenses'
+		});
+
+		expect(result).toEqual({
+			catalogAction: 'removeCatalog',
+			catalogKind: 'vendor',
+			catalogMessage: message
 		});
 	});
 });
