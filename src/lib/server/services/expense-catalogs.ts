@@ -283,6 +283,34 @@ export async function getOrCreateCatalogItem(
 	return item;
 }
 
+export async function getOrCreateCatalogItems(
+	executor: CatalogExecutor,
+	workspaceId: number,
+	kind: ExpenseCatalogKind,
+	names: string[],
+	locale: string = 'en'
+) {
+	if (names.length === 0) return [];
+
+	const normalizedByKey = new Map<string, string>();
+	for (const name of names) {
+		const normalized = normalizeCatalogName(name);
+		assertCatalogName(kind, normalized, locale);
+		normalizedByKey.set(catalogLookupKey(normalized), normalized);
+	}
+
+	const rows = await executeCatalogRows(
+		executor,
+		upsertCatalogBatchSql(kind, workspaceId, [...normalizedByKey.values()])
+	);
+	const items = rows.map(toCatalogItem).filter((item) => item !== null);
+	if (items.length !== normalizedByKey.size) {
+		throw error(500, translate(locale, 'Could not save the catalog.'));
+	}
+
+	return items;
+}
+
 export function normalizeCatalogName(name: string) {
 	return name.trim().replace(/\s+/g, ' ');
 }
@@ -447,6 +475,41 @@ function upsertCatalogSql(kind: ExpenseCatalogKind, workspaceId: number, name: s
 	return sql`
 		insert into cost_center (workspace_id, name, is_archived)
 		values (${workspaceId}, ${name}, false)
+		on conflict (workspace_id, lower(name))
+		do update set name = excluded.name, is_archived = false, updated_at = now()
+		returning id, name, is_archived, created_at
+	`;
+}
+
+function upsertCatalogBatchSql(kind: ExpenseCatalogKind, workspaceId: number, names: string[]) {
+	const values = sql.join(
+		names.map((name) => sql`(${workspaceId}, ${name}, false)`),
+		sql`, `
+	);
+
+	if (kind === 'paymentMethod') {
+		return sql`
+			insert into payment_method (workspace_id, name, is_archived)
+			values ${values}
+			on conflict (workspace_id, lower(name))
+			do update set name = excluded.name, is_archived = false, updated_at = now()
+			returning id, name, is_archived, created_at
+		`;
+	}
+
+	if (kind === 'vendor') {
+		return sql`
+			insert into vendor (workspace_id, name, is_archived)
+			values ${values}
+			on conflict (workspace_id, lower(name))
+			do update set name = excluded.name, is_archived = false, updated_at = now()
+			returning id, name, is_archived, created_at
+		`;
+	}
+
+	return sql`
+		insert into cost_center (workspace_id, name, is_archived)
+		values ${values}
 		on conflict (workspace_id, lower(name))
 		do update set name = excluded.name, is_archived = false, updated_at = now()
 		returning id, name, is_archived, created_at

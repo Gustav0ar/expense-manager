@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import {
 	auditEvent,
@@ -22,11 +22,20 @@ import {
 	assertCatalogName,
 	catalogKindLabel,
 	catalogLookupKey,
-	getOrCreateCatalogItem,
+	getOrCreateCatalogItems,
 	normalizeCatalogName,
 	type ExpenseCatalogItem,
 	type ExpenseCatalogKind
 } from './expense-catalogs';
+import {
+	chunkImportValues,
+	classifyImportExpenseRows,
+	importCatalogUpsertChunkSize,
+	importDuplicateLookupChunkSize,
+	importInsertChunkSize,
+	uniqueImportExpenseIdentities,
+	type ImportExpenseIdentity
+} from './import-batching';
 
 const maxImportBytes = 1 * 1024 * 1024;
 const maxImportRows = 500;
@@ -216,53 +225,65 @@ export async function importExpenses(context: WorkspaceContext, input: ImportExp
 				)
 			]);
 
-			const seenInBatch = new Set<string>();
+			const preparedRows = validRows.map((row) => ({
+				...row,
+				amountCents: parseCurrencyToCents(row.amount)
+			}));
+			const existingRows: ImportExpenseIdentity[] = [];
+			const uniqueIdentities = uniqueImportExpenseIdentities(preparedRows);
 
-			for (const row of validRows) {
-				const amountCents = parseCurrencyToCents(row.amount);
-				const fp = `${amountCents}|${row.expenseDate}|${row.description}`;
-
-				// Only check the DB for the first occurrence of a fingerprint in this batch.
-				// Rows with the same fingerprint already inserted in this batch bypass the DB
-				// check so that legitimately identical transactions within one import are all
-				// kept (the DB SELECT runs inside the transaction and would otherwise see rows
-				// we just inserted, silently dropping genuine duplicates).
-				if (!seenInBatch.has(fp)) {
-					// Only check the DB for the first occurrence of a fingerprint in this
-					// batch. Concurrent imports of the same workspace are serialized by the
-					// transaction-level advisory lock taken at the top of this transaction,
-					// so this SELECT-then-INSERT is race-safe: no other import can insert a
-					// matching row between this check and the insert below.
-					const [duplicate] = await tx
-						.select({ id: expense.id })
-						.from(expense)
-						.where(
-							and(
-								eq(expense.workspaceId, context.workspaceId),
-								eq(expense.amountCents, amountCents),
-								eq(expense.expenseDate, row.expenseDate),
-								eq(expense.description, row.description),
-								isNull(expense.deletedAt)
+			// Each chunk uses at most 301 bind parameters (workspace plus three per
+			// identity), comfortably below PostgreSQL's parameter limit. DISTINCT and
+			// LIMIT bound the result to one exact triple per requested identity even if
+			// historical data itself contains duplicates.
+			for (const identityChunk of chunkImportValues(
+				uniqueIdentities,
+				importDuplicateLookupChunkSize
+			)) {
+				const candidates = await tx
+					.selectDistinct({
+						amountCents: expense.amountCents,
+						expenseDate: expense.expenseDate,
+						description: expense.description
+					})
+					.from(expense)
+					.where(
+						and(
+							eq(expense.workspaceId, context.workspaceId),
+							isNull(expense.deletedAt),
+							or(
+								...identityChunk.map((identity) =>
+									and(
+										eq(expense.amountCents, identity.amountCents),
+										eq(expense.expenseDate, identity.expenseDate),
+										eq(expense.description, identity.description)
+									)
+								)
 							)
 						)
-						.limit(1);
+					)
+					.limit(identityChunk.length);
+				existingRows.push(...candidates);
+			}
 
-					if (duplicate) {
-						duplicateCount++;
-						continue;
-					}
-				}
+			// Compare every occurrence against the snapshot taken after acquiring the
+			// workspace lock. Thus a pre-existing triple skips every matching file row,
+			// while repeated rows that are new in this file are all retained.
+			const classification = classifyImportExpenseRows(preparedRows, existingRows);
+			duplicateCount = classification.duplicateCount;
+			const expenseValues: Array<typeof expense.$inferInsert> = [];
 
+			for (const row of classification.acceptedRows) {
 				const importedPaymentMethod = lookupCatalogItem(paymentMethods, row.paymentMethod);
 				const importedVendor = lookupCatalogItem(vendors, row.vendor);
 				const importedCostCenter = lookupCatalogItem(costCenters, row.costCenter);
 
-				await tx.insert(expense).values({
+				expenseValues.push({
 					workspaceId: context.workspaceId,
 					categoryId: row.categoryId,
 					createdByUserId: context.userId,
 					description: row.description,
-					amountCents,
+					amountCents: row.amountCents,
 					currency: context.currency,
 					expenseDate: row.expenseDate,
 					paymentMethodId: importedPaymentMethod?.id ?? null,
@@ -277,9 +298,14 @@ export async function importExpenses(context: WorkspaceContext, input: ImportExp
 					reviewedByUserId,
 					reviewedAt
 				});
-				seenInBatch.add(fp);
-				insertedCount++;
 			}
+
+			// At the current 18 populated columns this binds at most 1,800 values per
+			// statement, keeping query text and parameters predictably bounded.
+			for (const insertChunk of chunkImportValues(expenseValues, importInsertChunkSize)) {
+				await tx.insert(expense).values(insertChunk);
+			}
+			insertedCount = expenseValues.length;
 
 			// Update the batch with the real imported count now that we know it.
 			await tx
@@ -331,18 +357,24 @@ function normalizeOptionalImportedCatalogName(kind: ExpenseCatalogKind, value?: 
 }
 
 async function buildCatalogLookup(
-	executor: Parameters<typeof getOrCreateCatalogItem>[0],
+	executor: Parameters<typeof getOrCreateCatalogItems>[0],
 	workspaceId: number,
 	kind: ExpenseCatalogKind,
 	names: Array<string | undefined>,
 	locale: string = 'en'
 ) {
 	const lookup = new Map<string, ExpenseCatalogItem>();
-	const uniqueNames = Array.from(new Set(names.filter(Boolean) as string[]));
+	const uniqueNamesByKey = new Map<string, string>();
+	for (const name of names) {
+		if (name) uniqueNamesByKey.set(catalogLookupKey(name), name);
+	}
 
-	for (const name of uniqueNames) {
-		const item = await getOrCreateCatalogItem(executor, workspaceId, kind, name, locale);
-		lookup.set(catalogLookupKey(name), item);
+	for (const nameChunk of chunkImportValues(
+		[...uniqueNamesByKey.values()],
+		importCatalogUpsertChunkSize
+	)) {
+		const items = await getOrCreateCatalogItems(executor, workspaceId, kind, nameChunk, locale);
+		for (const item of items) lookup.set(catalogLookupKey(item.name), item);
 	}
 
 	return lookup;
