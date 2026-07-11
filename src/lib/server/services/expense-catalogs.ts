@@ -3,7 +3,7 @@ import { sql, type SQL } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { canWriteExpenses } from '$lib/server/security/roles';
 import type { WorkspaceContext } from './workspaces';
-import { writeAuditEvent } from './audit';
+import { insertAuditEvent } from './audit';
 import { translate } from '$lib/i18n';
 
 export type ExpenseCatalogKind = 'paymentMethod' | 'vendor' | 'costCenter';
@@ -57,21 +57,25 @@ export async function createExpenseCatalogItem(
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
-	const item = await getOrCreateCatalogItem(
-		db,
-		context.workspaceId,
-		input.kind,
-		input.name,
-		context.locale
-	);
+	const item = await db.transaction(async (tx) => {
+		const saved = await getOrCreateCatalogItem(
+			tx,
+			context.workspaceId,
+			input.kind,
+			input.name,
+			context.locale
+		);
 
-	await writeAuditEvent({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: 'expense_catalog.upserted',
-		entityType: input.kind,
-		entityId: item.id,
-		metadata: { name: item.name }
+		await insertAuditEvent(tx, {
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: 'expense_catalog.upserted',
+			entityType: input.kind,
+			entityId: saved.id,
+			metadata: { name: saved.name }
+		});
+
+		return saved;
 	});
 
 	return item;
@@ -103,6 +107,14 @@ export async function updateExpenseCatalogItem(
 				);
 
 			await tx.execute(syncCatalogNameSql(input.kind, context.workspaceId, input.id, normalized));
+			await insertAuditEvent(tx, {
+				workspaceId: context.workspaceId,
+				actorUserId: context.userId,
+				action: 'expense_catalog.updated',
+				entityType: input.kind,
+				entityId: updated.id,
+				metadata: { name: updated.name }
+			});
 			return updated;
 		} catch (catalogError) {
 			if (isUniqueViolation(catalogError)) {
@@ -116,16 +128,6 @@ export async function updateExpenseCatalogItem(
 			throw catalogError;
 		}
 	});
-
-	await writeAuditEvent({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: 'expense_catalog.updated',
-		entityType: input.kind,
-		entityId: item.id,
-		metadata: { name: item.name }
-	});
-
 	return item;
 }
 
@@ -166,7 +168,7 @@ export async function removeExpenseCatalogItem(
 				})
 			);
 
-		return {
+		const result = {
 			item: {
 				...item,
 				expenseCount,
@@ -174,19 +176,21 @@ export async function removeExpenseCatalogItem(
 			},
 			mode: expenseCount > 0 || recurringCount > 0 ? ('archived' as const) : ('deleted' as const)
 		};
-	});
 
-	await writeAuditEvent({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: `expense_catalog.${removed.mode}`,
-		entityType: input.kind,
-		entityId: removed.item.id,
-		metadata: {
-			name: removed.item.name,
-			expenseCount: removed.item.expenseCount,
-			recurringCount: removed.item.recurringCount
-		}
+		await insertAuditEvent(tx, {
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: `expense_catalog.${result.mode}`,
+			entityType: input.kind,
+			entityId: result.item.id,
+			metadata: {
+				name: result.item.name,
+				expenseCount: result.item.expenseCount,
+				recurringCount: result.item.recurringCount
+			}
+		});
+
+		return result;
 	});
 
 	return removed;

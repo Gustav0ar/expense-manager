@@ -3,7 +3,7 @@ import { db } from '$lib/server/db';
 import { and, desc, eq, lt, type SQL } from 'drizzle-orm';
 import type { WorkspaceContext } from './workspaces';
 
-type AuditInput = {
+export type AuditInput = {
 	workspaceId?: number | null;
 	actorUserId?: string | null;
 	action: string;
@@ -12,8 +12,10 @@ type AuditInput = {
 	metadata?: Record<string, unknown>;
 };
 
-export async function writeAuditEvent(input: AuditInput) {
-	await db.insert(auditEvent).values({
+type AuditExecutor = Pick<typeof db, 'insert'>;
+
+export async function insertAuditEvent(executor: AuditExecutor, input: AuditInput) {
+	await executor.insert(auditEvent).values({
 		workspaceId: input.workspaceId ?? null,
 		actorUserId: input.actorUserId ?? null,
 		action: input.action,
@@ -21,6 +23,11 @@ export async function writeAuditEvent(input: AuditInput) {
 		entityId: input.entityId == null ? null : String(input.entityId),
 		metadata: input.metadata ?? null
 	});
+}
+
+// Reserved for audit events that are not paired with a database mutation.
+export async function writeAuditEvent(input: AuditInput) {
+	await insertAuditEvent(db, input);
 }
 
 export type AuditFilters = {

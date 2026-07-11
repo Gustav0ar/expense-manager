@@ -13,7 +13,7 @@ import type { Role } from '$lib/server/security/roles';
 import { canManageMembers, canManageWorkspace } from '$lib/server/security/roles';
 import { randomToken, sha256 } from '$lib/server/utils/crypto';
 import { sendInvitationEmail } from '$lib/server/email';
-import { writeAuditEvent } from './audit';
+import { insertAuditEvent } from './audit';
 import { env } from '$env/dynamic/private';
 import type { SupportedLocale } from '$lib/i18n';
 import { translate } from '$lib/i18n';
@@ -162,22 +162,26 @@ export async function updateWorkspace(
 		}
 	}
 
-	const [updated] = await db
-		.update(workspace)
-		.set({
-			name: input.name,
-			weekStartsOn: input.weekStartsOn,
-			currency: input.currency
-		})
-		.where(eq(workspace.id, context.workspaceId))
-		.returning({ id: workspace.id, name: workspace.name });
+	const updated = await db.transaction(async (tx) => {
+		const [row] = await tx
+			.update(workspace)
+			.set({
+				name: input.name,
+				weekStartsOn: input.weekStartsOn,
+				currency: input.currency
+			})
+			.where(eq(workspace.id, context.workspaceId))
+			.returning({ id: workspace.id, name: workspace.name });
 
-	await writeAuditEvent({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: 'workspace.updated',
-		entityType: 'workspace',
-		entityId: context.workspaceId
+		await insertAuditEvent(tx, {
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: 'workspace.updated',
+			entityType: 'workspace',
+			entityId: context.workspaceId
+		});
+
+		return row;
 	});
 
 	return updated;
@@ -297,18 +301,33 @@ export async function changeMemberRole(
 	if (!canManageMembers(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
-	const [member] = await db
-		.update(workspaceMember)
-		.set({ role })
-		.where(
-			and(
-				eq(workspaceMember.id, memberId),
-				eq(workspaceMember.workspaceId, context.workspaceId),
-				ne(workspaceMember.role, 'owner'),
-				ne(workspaceMember.userId, context.userId)
+	const member = await db.transaction(async (tx) => {
+		const [updated] = await tx
+			.update(workspaceMember)
+			.set({ role })
+			.where(
+				and(
+					eq(workspaceMember.id, memberId),
+					eq(workspaceMember.workspaceId, context.workspaceId),
+					ne(workspaceMember.role, 'owner'),
+					ne(workspaceMember.userId, context.userId)
+				)
 			)
-		)
-		.returning({ id: workspaceMember.id, userId: workspaceMember.userId });
+			.returning({ id: workspaceMember.id, userId: workspaceMember.userId });
+
+		if (updated) {
+			await insertAuditEvent(tx, {
+				workspaceId: context.workspaceId,
+				actorUserId: context.userId,
+				action: 'workspace_member.role_changed',
+				entityType: 'workspace_member',
+				entityId: updated.id,
+				metadata: { role }
+			});
+		}
+
+		return updated;
+	});
 
 	if (!member) {
 		// Check whether the update failed because the actor targeted their own
@@ -328,33 +347,38 @@ export async function changeMemberRole(
 		if (self) throw error(403, translate(context.locale, 'You cannot change your own role.'));
 		throw error(404, translate(context.locale, 'Member not found.'));
 	}
-
-	await writeAuditEvent({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: 'workspace_member.role_changed',
-		entityType: 'workspace_member',
-		entityId: member.id,
-		metadata: { role }
-	});
 }
 
 export async function removeMember(context: WorkspaceContext, memberId: number) {
 	if (!canManageMembers(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
-	const [member] = await db
-		.update(workspaceMember)
-		.set({ status: 'disabled' })
-		.where(
-			and(
-				eq(workspaceMember.id, memberId),
-				eq(workspaceMember.workspaceId, context.workspaceId),
-				ne(workspaceMember.role, 'owner'),
-				ne(workspaceMember.userId, context.userId)
+	const member = await db.transaction(async (tx) => {
+		const [updated] = await tx
+			.update(workspaceMember)
+			.set({ status: 'disabled' })
+			.where(
+				and(
+					eq(workspaceMember.id, memberId),
+					eq(workspaceMember.workspaceId, context.workspaceId),
+					ne(workspaceMember.role, 'owner'),
+					ne(workspaceMember.userId, context.userId)
+				)
 			)
-		)
-		.returning({ id: workspaceMember.id });
+			.returning({ id: workspaceMember.id });
+
+		if (updated) {
+			await insertAuditEvent(tx, {
+				workspaceId: context.workspaceId,
+				actorUserId: context.userId,
+				action: 'workspace_member.disabled',
+				entityType: 'workspace_member',
+				entityId: updated.id
+			});
+		}
+
+		return updated;
+	});
 
 	if (!member) {
 		const [self] = await db
@@ -371,12 +395,4 @@ export async function removeMember(context: WorkspaceContext, memberId: number) 
 		if (self) throw error(403, translate(context.locale, 'You cannot remove yourself.'));
 		throw error(404, translate(context.locale, 'Member not found.'));
 	}
-
-	await writeAuditEvent({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: 'workspace_member.disabled',
-		entityType: 'workspace_member',
-		entityId: member.id
-	});
 }

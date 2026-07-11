@@ -19,6 +19,7 @@ import { formatCents } from '$lib/utils/format';
 import { assertCategoryInWorkspace } from '$lib/server/utils/category';
 import { isSupportedLocale, translate, type SupportedLocale } from '$lib/i18n';
 import type { WorkspaceContext } from './workspaces';
+import { insertAuditEvent, writeAuditEvent } from './audit';
 
 export type BudgetInput = {
 	categoryId: number;
@@ -225,20 +226,22 @@ export async function deleteBudget(context: WorkspaceContext, id: number) {
 	if (!canManageBudgets(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
-	const [deleted] = await db
-		.delete(categoryBudget)
-		.where(and(eq(categoryBudget.id, id), eq(categoryBudget.workspaceId, context.workspaceId)))
-		.returning({ id: categoryBudget.id, categoryId: categoryBudget.categoryId });
+	await db.transaction(async (tx) => {
+		const [deleted] = await tx
+			.delete(categoryBudget)
+			.where(and(eq(categoryBudget.id, id), eq(categoryBudget.workspaceId, context.workspaceId)))
+			.returning({ id: categoryBudget.id, categoryId: categoryBudget.categoryId });
 
-	if (!deleted) throw error(404, translate(context.locale, 'Budget not found.'));
+		if (!deleted) throw error(404, translate(context.locale, 'Budget not found.'));
 
-	await db.insert(auditEvent).values({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: 'budget.deleted',
-		entityType: 'category_budget',
-		entityId: String(id),
-		metadata: { categoryId: deleted.categoryId }
+		await insertAuditEvent(tx, {
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: 'budget.deleted',
+			entityType: 'category_budget',
+			entityId: id,
+			metadata: { categoryId: deleted.categoryId }
+		});
 	});
 }
 
@@ -560,12 +563,14 @@ export async function sendBudgetAlerts(
 		statuses.length === recipientEmails.length &&
 		statuses.every((row) => row.status === 'sent')
 	) {
-		await db.insert(auditEvent).values({
+		// Email delivery is an external side effect and cannot share a database
+		// transaction with this summary event. Plan 009 owns that delivery boundary.
+		await writeAuditEvent({
 			workspaceId: context.workspaceId,
 			actorUserId: context.userId,
 			action: 'budget.alerts_sent',
 			entityType: 'budget',
-			entityId: String(context.workspaceId),
+			entityId: context.workspaceId,
 			metadata: {
 				periodMonth: month,
 				alertCount: alertItems.length,

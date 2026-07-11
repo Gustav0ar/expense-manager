@@ -1,11 +1,12 @@
 import { error } from '@sveltejs/kit';
 import { and, asc, eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { auditEvent, category, categoryRule } from '$lib/server/db/schema';
+import { category, categoryRule } from '$lib/server/db/schema';
 import { canManageCategories } from '$lib/server/security/roles';
 import { assertCategoryInWorkspace } from '$lib/server/utils/category';
 import type { WorkspaceContext } from './workspaces';
 import { translate } from '$lib/i18n';
+import { insertAuditEvent } from './audit';
 
 export type CategoryRuleInput = {
 	name: string;
@@ -46,26 +47,30 @@ export async function createCategoryRule(context: WorkspaceContext, input: Categ
 		throw error(403, translate(context.locale, 'Permission denied.'));
 	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
 
-	const [created] = await db
-		.insert(categoryRule)
-		.values({
-			workspaceId: context.workspaceId,
-			categoryId: input.categoryId,
-			createdByUserId: context.userId,
-			name: input.name,
-			matchTarget: input.matchTarget,
-			pattern: input.pattern,
-			priority: input.priority
-		})
-		.returning({ id: categoryRule.id });
+	const created = await db.transaction(async (tx) => {
+		const [row] = await tx
+			.insert(categoryRule)
+			.values({
+				workspaceId: context.workspaceId,
+				categoryId: input.categoryId,
+				createdByUserId: context.userId,
+				name: input.name,
+				matchTarget: input.matchTarget,
+				pattern: input.pattern,
+				priority: input.priority
+			})
+			.returning({ id: categoryRule.id });
 
-	await db.insert(auditEvent).values({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: 'category_rule.created',
-		entityType: 'category_rule',
-		entityId: String(created.id),
-		metadata: { categoryId: input.categoryId, matchTarget: input.matchTarget }
+		await insertAuditEvent(tx, {
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: 'category_rule.created',
+			entityType: 'category_rule',
+			entityId: row.id,
+			metadata: { categoryId: input.categoryId, matchTarget: input.matchTarget }
+		});
+
+		return row;
 	});
 
 	return created;
@@ -75,20 +80,22 @@ export async function archiveCategoryRule(context: WorkspaceContext, id: number)
 	if (!canManageCategories(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
-	const [updated] = await db
-		.update(categoryRule)
-		.set({ isActive: false })
-		.where(and(eq(categoryRule.id, id), eq(categoryRule.workspaceId, context.workspaceId)))
-		.returning({ id: categoryRule.id });
+	await db.transaction(async (tx) => {
+		const [updated] = await tx
+			.update(categoryRule)
+			.set({ isActive: false })
+			.where(and(eq(categoryRule.id, id), eq(categoryRule.workspaceId, context.workspaceId)))
+			.returning({ id: categoryRule.id });
 
-	if (!updated) throw error(404, translate(context.locale, 'Rule not found.'));
+		if (!updated) throw error(404, translate(context.locale, 'Rule not found.'));
 
-	await db.insert(auditEvent).values({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: 'category_rule.archived',
-		entityType: 'category_rule',
-		entityId: String(id)
+		await insertAuditEvent(tx, {
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: 'category_rule.archived',
+			entityType: 'category_rule',
+			entityId: id
+		});
 	});
 }
 

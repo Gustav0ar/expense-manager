@@ -41,7 +41,7 @@ import {
 	startOfMonth,
 	todayIso
 } from '$lib/server/utils/date';
-import { writeAuditEvent } from './audit';
+import { insertAuditEvent } from './audit';
 import { getBudgetSummary } from './budgets';
 import { randomToken } from '$lib/server/utils/crypto';
 import { resolveExpenseCatalogSelection } from './expense-catalogs';
@@ -382,57 +382,59 @@ export async function updateExpense(context: WorkspaceContext, id: number, input
 	});
 	const shouldResetReview = !canReviewExpenses(context.role);
 
-	const [updated] = await db
-		.update(expense)
-		.set({
-			categoryId: input.categoryId,
-			description: input.description,
-			amountCents: parseCurrencyToCents(input.amount),
-			currency: context.currency,
-			expenseDate: input.expenseDate,
-			paymentMethodId: catalogSelection.paymentMethodId,
-			paymentMethod: catalogSelection.paymentMethodName,
-			vendorId: catalogSelection.vendorId,
-			vendor: catalogSelection.vendorName,
-			costCenterId: catalogSelection.costCenterId,
-			costCenter: catalogSelection.costCenterName,
-			competencyMonth: input.competencyMonth ? startOfMonth(input.competencyMonth) : null,
-			notes: input.notes || null,
-			...(shouldResetReview
-				? {
-						reviewStatus: 'pending' as const,
-						reviewedByUserId: null,
-						reviewedAt: null,
-						reviewRejectionReason: null,
-						paymentStatus: 'unpaid' as const,
-						paidAt: null,
-						reconciledAt: null,
-						reconciledByUserId: null
-					}
-				: {})
-		})
-		.where(
-			and(
-				eq(expense.id, id),
-				eq(expense.workspaceId, context.workspaceId),
-				isNull(expense.deletedAt),
-				// Re-assert the payment status we checked above so a concurrent
-				// reconciliation between the SELECT and this UPDATE is detected.
-				shouldResetReview ? eq(expense.paymentStatus, 'unpaid') : sql`true`
+	await db.transaction(async (tx) => {
+		const [updated] = await tx
+			.update(expense)
+			.set({
+				categoryId: input.categoryId,
+				description: input.description,
+				amountCents: parseCurrencyToCents(input.amount),
+				currency: context.currency,
+				expenseDate: input.expenseDate,
+				paymentMethodId: catalogSelection.paymentMethodId,
+				paymentMethod: catalogSelection.paymentMethodName,
+				vendorId: catalogSelection.vendorId,
+				vendor: catalogSelection.vendorName,
+				costCenterId: catalogSelection.costCenterId,
+				costCenter: catalogSelection.costCenterName,
+				competencyMonth: input.competencyMonth ? startOfMonth(input.competencyMonth) : null,
+				notes: input.notes || null,
+				...(shouldResetReview
+					? {
+							reviewStatus: 'pending' as const,
+							reviewedByUserId: null,
+							reviewedAt: null,
+							reviewRejectionReason: null,
+							paymentStatus: 'unpaid' as const,
+							paidAt: null,
+							reconciledAt: null,
+							reconciledByUserId: null
+						}
+					: {})
+			})
+			.where(
+				and(
+					eq(expense.id, id),
+					eq(expense.workspaceId, context.workspaceId),
+					isNull(expense.deletedAt),
+					// Re-assert the payment status we checked above so a concurrent
+					// reconciliation between the SELECT and this UPDATE is detected.
+					shouldResetReview ? eq(expense.paymentStatus, 'unpaid') : sql`true`
+				)
 			)
-		)
-		.returning({ id: expense.id });
+			.returning({ id: expense.id });
 
-	if (!updated)
-		throw error(409, translate(context.locale, 'Expense was modified. Reload and try again.'));
+		if (!updated)
+			throw error(409, translate(context.locale, 'Expense was modified. Reload and try again.'));
 
-	await writeAuditEvent({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: 'expense.updated',
-		entityType: 'expense',
-		entityId: id,
-		metadata: shouldResetReview ? { reviewStatus: 'pending' } : undefined
+		await insertAuditEvent(tx, {
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: 'expense.updated',
+			entityType: 'expense',
+			entityId: id,
+			metadata: shouldResetReview ? { reviewStatus: 'pending' } : undefined
+		});
 	});
 }
 
@@ -492,29 +494,34 @@ export async function reviewExpense(
 				};
 
 	// Re-assert the reviewStatus we read to detect concurrent changes (409).
-	const [updated] = await db
-		.update(expense)
-		.set(reviewUpdate)
-		.where(
-			and(
-				eq(expense.id, id),
-				eq(expense.workspaceId, context.workspaceId),
-				eq(expense.reviewStatus, current.reviewStatus),
-				isNull(expense.deletedAt)
+	await db.transaction(async (tx) => {
+		const [updated] = await tx
+			.update(expense)
+			.set(reviewUpdate)
+			.where(
+				and(
+					eq(expense.id, id),
+					eq(expense.workspaceId, context.workspaceId),
+					eq(expense.reviewStatus, current.reviewStatus),
+					isNull(expense.deletedAt)
+				)
 			)
-		)
-		.returning({ id: expense.id });
+			.returning({ id: expense.id });
 
-	if (!updated)
-		throw error(409, translate(context.locale, 'Review status has changed. Reload and try again.'));
+		if (!updated)
+			throw error(
+				409,
+				translate(context.locale, 'Review status has changed. Reload and try again.')
+			);
 
-	await writeAuditEvent({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: `expense.${input.reviewStatus}`,
-		entityType: 'expense',
-		entityId: id,
-		metadata: input.reason ? { reason: input.reason } : undefined
+		await insertAuditEvent(tx, {
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: `expense.${input.reviewStatus}`,
+			entityType: 'expense',
+			entityId: id,
+			metadata: input.reason ? { reason: input.reason } : undefined
+		});
 	});
 }
 
@@ -559,35 +566,37 @@ export async function updateExpensePaymentStatus(
 		input.paymentStatus === 'unpaid' ? null : (input.paidAt ?? current.paidAt ?? todayIso());
 
 	// Re-assert current paymentStatus to detect concurrent changes (409).
-	const [updated] = await db
-		.update(expense)
-		.set({
-			paymentStatus: input.paymentStatus,
-			paidAt,
-			reconciledAt: input.paymentStatus === 'reconciled' ? new Date() : null,
-			reconciledByUserId: input.paymentStatus === 'reconciled' ? context.userId : null
-		})
-		.where(
-			and(
-				eq(expense.id, id),
-				eq(expense.workspaceId, context.workspaceId),
-				eq(expense.reviewStatus, 'approved'),
-				eq(expense.paymentStatus, current.paymentStatus),
-				isNull(expense.deletedAt)
+	await db.transaction(async (tx) => {
+		const [updated] = await tx
+			.update(expense)
+			.set({
+				paymentStatus: input.paymentStatus,
+				paidAt,
+				reconciledAt: input.paymentStatus === 'reconciled' ? new Date() : null,
+				reconciledByUserId: input.paymentStatus === 'reconciled' ? context.userId : null
+			})
+			.where(
+				and(
+					eq(expense.id, id),
+					eq(expense.workspaceId, context.workspaceId),
+					eq(expense.reviewStatus, 'approved'),
+					eq(expense.paymentStatus, current.paymentStatus),
+					isNull(expense.deletedAt)
+				)
 			)
-		)
-		.returning({ id: expense.id });
+			.returning({ id: expense.id });
 
-	if (!updated)
-		throw error(409, translate(context.locale, 'Expense was modified. Reload and try again.'));
+		if (!updated)
+			throw error(409, translate(context.locale, 'Expense was modified. Reload and try again.'));
 
-	await writeAuditEvent({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: `expense.payment_${input.paymentStatus}`,
-		entityType: 'expense',
-		entityId: id,
-		metadata: { paidAt }
+		await insertAuditEvent(tx, {
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: `expense.payment_${input.paymentStatus}`,
+			entityType: 'expense',
+			entityId: id,
+			metadata: { paidAt }
+		});
 	});
 }
 
@@ -618,44 +627,42 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 		throw error(403, translate(context.locale, 'Permission denied.'));
 	}
 
-	const [deleted] = await db
-		.update(expense)
-		.set({ deletedAt: new Date() })
-		.where(
-			and(
-				eq(expense.id, id),
-				eq(expense.workspaceId, context.workspaceId),
-				isNull(expense.deletedAt),
-				// Re-assert the statuses we checked above so a concurrent approval
-				// or payment between the SELECT and this UPDATE is detected.
-				canReviewExpenses(context.role)
-					? sql`true`
-					: eq(expense.reviewStatus, current.reviewStatus),
-				canReconcileExpenses(context.role)
-					? sql`true`
-					: eq(expense.paymentStatus, current.paymentStatus)
+	const attachments = await db.transaction(async (tx) => {
+		const [deleted] = await tx
+			.update(expense)
+			.set({ deletedAt: new Date() })
+			.where(
+				and(
+					eq(expense.id, id),
+					eq(expense.workspaceId, context.workspaceId),
+					isNull(expense.deletedAt),
+					// Re-assert the statuses we checked above so a concurrent approval
+					// or payment between the SELECT and this UPDATE is detected.
+					canReviewExpenses(context.role)
+						? sql`true`
+						: eq(expense.reviewStatus, current.reviewStatus),
+					canReconcileExpenses(context.role)
+						? sql`true`
+						: eq(expense.paymentStatus, current.paymentStatus)
+				)
 			)
-		)
-		.returning({ id: expense.id });
+			.returning({ id: expense.id });
 
-	if (!deleted)
-		throw error(409, translate(context.locale, 'Expense was modified. Reload and try again.'));
+		if (!deleted)
+			throw error(409, translate(context.locale, 'Expense was modified. Reload and try again.'));
 
-	// Fetch and clean up all attachments for the soft-deleted expense.
-	// The expense_attachment FK has onDelete:'cascade' but that only fires on a
-	// hard DELETE; soft-deletes (setting deletedAt) leave attachment rows behind.
-	const attachments = await db
-		.select({ id: expenseAttachment.id, storageKey: expenseAttachment.storageKey })
-		.from(expenseAttachment)
-		.where(eq(expenseAttachment.expenseId, id));
+		// The attachment FK cascade only applies to hard deletes, so remove the
+		// rows with the soft delete and all related audit events in one commit.
+		const rows = await tx
+			.select({ id: expenseAttachment.id, storageKey: expenseAttachment.storageKey })
+			.from(expenseAttachment)
+			.where(eq(expenseAttachment.expenseId, id));
 
-	if (attachments.length > 0) {
-		const uploadDir = getUploadDir();
-		await db.transaction(async (tx) => {
+		if (rows.length > 0) {
 			await tx.delete(expenseAttachment).where(eq(expenseAttachment.expenseId, id));
 
 			await tx.insert(auditEvent).values(
-				attachments.map((att) => ({
+				rows.map((att) => ({
 					workspaceId: context.workspaceId,
 					actorUserId: context.userId,
 					action: 'expense_attachment.deleted' as const,
@@ -664,8 +671,21 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 					metadata: { expenseId: id, reason: 'expense_deleted' }
 				}))
 			);
+		}
+
+		await insertAuditEvent(tx, {
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: 'expense.deleted',
+			entityType: 'expense',
+			entityId: id
 		});
 
+		return rows;
+	});
+
+	if (attachments.length > 0) {
+		const uploadDir = getUploadDir();
 		// Remove files from disk after the DB transaction succeeds.
 		// Failures here leave orphaned files but won't corrupt DB state.
 		for (const att of attachments) {
@@ -677,14 +697,6 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 			}
 		}
 	}
-
-	await writeAuditEvent({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: 'expense.deleted',
-		entityType: 'expense',
-		entityId: id
-	});
 }
 
 export async function bulkReviewExpenses(
@@ -703,44 +715,48 @@ export async function bulkReviewExpenses(
 	// combination, so skip it defensively regardless of the actor's permissions.
 	const paymentGuard = decision === 'rejected' ? eq(expense.paymentStatus, 'unpaid') : sql`true`;
 
-	const updated = await db
-		.update(expense)
-		.set({
-			reviewStatus: decision,
-			reviewedByUserId: context.userId,
-			reviewedAt,
-			reviewRejectionReason: null,
-			...(decision === 'rejected'
-				? {
-						paymentStatus: 'unpaid' as const,
-						paidAt: null,
-						reconciledAt: null,
-						reconciledByUserId: null
-					}
-				: {})
-		})
-		.where(
-			and(
-				inArray(expense.id, ids),
-				eq(expense.workspaceId, context.workspaceId),
-				eq(expense.status, 'posted'),
-				eq(expense.reviewStatus, 'pending'),
-				paymentGuard,
-				isNull(expense.deletedAt)
+	const updated = await db.transaction(async (tx) => {
+		const rows = await tx
+			.update(expense)
+			.set({
+				reviewStatus: decision,
+				reviewedByUserId: context.userId,
+				reviewedAt,
+				reviewRejectionReason: null,
+				...(decision === 'rejected'
+					? {
+							paymentStatus: 'unpaid' as const,
+							paidAt: null,
+							reconciledAt: null,
+							reconciledByUserId: null
+						}
+					: {})
+			})
+			.where(
+				and(
+					inArray(expense.id, ids),
+					eq(expense.workspaceId, context.workspaceId),
+					eq(expense.status, 'posted'),
+					eq(expense.reviewStatus, 'pending'),
+					paymentGuard,
+					isNull(expense.deletedAt)
+				)
 			)
-		)
-		.returning({ id: expense.id });
+			.returning({ id: expense.id });
 
-	if (updated.length > 0) {
-		await writeAuditEvent({
-			workspaceId: context.workspaceId,
-			actorUserId: context.userId,
-			action: `expense.bulk_${decision}`,
-			entityType: 'expense',
-			entityId: updated[0].id,
-			metadata: { ids: updated.map((r) => r.id), count: updated.length, decision }
-		});
-	}
+		if (rows.length > 0) {
+			await insertAuditEvent(tx, {
+				workspaceId: context.workspaceId,
+				actorUserId: context.userId,
+				action: `expense.bulk_${decision}`,
+				entityType: 'expense',
+				entityId: rows[0].id,
+				metadata: { ids: rows.map((row) => row.id), count: rows.length, decision }
+			});
+		}
+
+		return rows;
+	});
 
 	return { count: updated.length };
 }
