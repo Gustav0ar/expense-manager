@@ -16,7 +16,7 @@ vi.mock('$env/dynamic/private', () => ({
 	env: privateEnv
 }));
 
-import { getDatabaseUrl, getPrivateSecret } from './config';
+import { getDatabaseUrl, getPrivateEnv, getPrivateSecret } from './config';
 
 const tempDirs: string[] = [];
 const processEnvKeys = [
@@ -74,6 +74,35 @@ describe('private server configuration', () => {
 		expect(getDatabaseUrl()).toBe(
 			'postgresql://expense_manager:p%40ss%20word%2Fwith%3Asymbols@postgres:5432/expense_manager'
 		);
+	});
+
+	it('uses direct and process environment values before split database settings', () => {
+		privateEnv.DATABASE_URL = 'postgres://direct.example/app';
+		expect(getDatabaseUrl()).toBe('postgres://direct.example/app');
+		delete privateEnv.DATABASE_URL;
+		process.env.DATABASE_URL = 'postgres://process.example/app';
+		expect(getPrivateEnv('DATABASE_URL')).toBe('postgres://process.example/app');
+		expect(getPrivateSecret('DATABASE_URL')).toBe('postgres://process.example/app');
+	});
+
+	it('requires complete split credentials and applies host and port defaults', () => {
+		expect(getDatabaseUrl()).toBe('');
+		privateEnv.POSTGRES_DB = 'expense_manager';
+		expect(getDatabaseUrl()).toBe('');
+		privateEnv.POSTGRES_USER = 'expense_manager';
+		expect(getDatabaseUrl()).toBe('');
+		privateEnv.POSTGRES_PASSWORD = 'password';
+		expect(getDatabaseUrl()).toBe(
+			'postgresql://expense_manager:password@postgres:5432/expense_manager'
+		);
+	});
+
+	it('caches empty secret files and falls back to a direct secret', () => {
+		const secretFile = writeTempSecret('empty-password', '');
+		privateEnv.POSTGRES_PASSWORD_FILE = secretFile;
+		privateEnv.POSTGRES_PASSWORD = 'direct-secret';
+		expect(getPrivateSecret('POSTGRES_PASSWORD')).toBe('direct-secret');
+		expect(getPrivateSecret('POSTGRES_PASSWORD')).toBe('direct-secret');
 	});
 });
 

@@ -54,29 +54,17 @@ export default defineConfig({
 		coverage: {
 			provider: 'v8',
 			reporter: ['text', 'lcov'],
-			include: [
-				'src/lib/category-emojis.ts',
-				'src/lib/server/background-jobs.ts',
-				'src/lib/server/email.ts',
-				'src/lib/server/registration.ts',
-				'src/lib/server/security/client-ip.ts',
-				'src/lib/server/security/origin.ts',
-				'src/lib/server/security/roles.ts',
-				'src/lib/server/theme.ts',
-				'src/lib/server/services/budgets.ts',
-				'src/lib/server/services/category-rules.ts',
-				'src/lib/server/services/email-delivery-events.ts',
-				'src/lib/server/services/expenses.ts',
-				'src/lib/server/services/imports.ts',
-				'src/lib/server/services/invitations.ts',
-				'src/lib/server/utils/*.ts',
-				'src/lib/server/utils/import.ts',
-				'src/lib/server/utils/totp.ts',
-				'src/lib/server/validation.ts',
-				'src/lib/utils/date-format.ts',
-				'src/lib/utils/format.ts'
+			include: ['src/lib/server/**/*.ts', 'src/lib/category-emojis.ts', 'src/lib/utils/**/*.ts'],
+			exclude: [
+				// Tests verify production modules but are not themselves product behavior.
+				'src/**/*.{test,spec}.ts',
+				// Declarative Drizzle schemas contain table metadata rather than executable behavior.
+				'src/lib/server/db/*.schema.ts',
+				'src/lib/server/db/schema.ts',
+				// Database and authentication bootstraps are framework composition entry points.
+				'src/lib/server/db/index.ts',
+				'src/lib/server/auth.ts'
 			],
-			exclude: ['src/**/*.test.ts'],
 			thresholds: {
 				lines: 90,
 				functions: 90,
