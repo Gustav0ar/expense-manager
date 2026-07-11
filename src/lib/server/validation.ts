@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { categoryEmojiValues } from '$lib/category-emojis';
 import { defaultCurrency, isValidCurrencyCode } from '$lib/i18n';
-import { parseCurrencyToCents } from '$lib/server/utils/money';
+import { amountExceedsMaximumMessage, parseCurrencyToCents } from '$lib/server/utils/money';
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const maxRangeDays = 3660;
@@ -13,6 +13,24 @@ const optionalIdSchema = z.preprocess(
 );
 const optionalTrimmedText = (max: number) =>
 	z.string().trim().max(max).optional().or(z.literal(''));
+const moneyAmountSchema = z
+	.string()
+	.trim()
+	.min(1, { message: 'Amount is required.' })
+	.max(32, { message: 'Amount is invalid.' })
+	.superRefine((value, context) => {
+		try {
+			parseCurrencyToCents(value);
+		} catch (moneyError) {
+			context.addIssue({
+				code: 'custom',
+				message:
+					moneyError instanceof Error && moneyError.message === amountExceedsMaximumMessage
+						? amountExceedsMaximumMessage
+						: 'Amount is invalid.'
+			});
+		}
+	});
 const normalizedCatalogName = z
 	.string()
 	.trim()
@@ -157,22 +175,7 @@ export const expenseCatalogArchiveSchema = z.object({
 export const expenseSchema = z.object({
 	categoryId: idSchema,
 	description: z.string().trim().min(2).max(160),
-	amount: z
-		.string()
-		.trim()
-		.min(1)
-		.max(32)
-		.refine(
-			(value) => {
-				try {
-					parseCurrencyToCents(value);
-					return true;
-				} catch {
-					return false;
-				}
-			},
-			{ message: 'Amount is invalid.' }
-		),
+	amount: moneyAmountSchema,
 	expenseDate: isoDateSchema,
 	paymentMethodId: optionalIdSchema,
 	vendorId: optionalIdSchema,
@@ -229,22 +232,7 @@ export const planningFilterSchema = z.object({
 export const budgetSchema = z.object({
 	categoryId: idSchema,
 	periodMonth: monthSchema,
-	amount: z
-		.string()
-		.trim()
-		.min(1)
-		.max(32)
-		.refine(
-			(value) => {
-				try {
-					parseCurrencyToCents(value);
-					return true;
-				} catch {
-					return false;
-				}
-			},
-			{ message: 'Amount is invalid.' }
-		),
+	amount: moneyAmountSchema,
 	warningThresholdPct: z.coerce.number().int().min(1).max(100).default(80)
 });
 
@@ -252,22 +240,7 @@ export const recurringExpenseSchema = z
 	.object({
 		categoryId: idSchema,
 		description: z.string().trim().min(2).max(160),
-		amount: z
-			.string()
-			.trim()
-			.min(1)
-			.max(32)
-			.refine(
-				(value) => {
-					try {
-						parseCurrencyToCents(value);
-						return true;
-					} catch {
-						return false;
-					}
-				},
-				{ message: 'Amount is invalid.' }
-			),
+		amount: moneyAmountSchema,
 		frequency: z.enum(['weekly', 'monthly', 'yearly']).default('monthly'),
 		intervalCount: z.coerce.number().int().min(1).max(24).default(1),
 		startDate: isoDateSchema,

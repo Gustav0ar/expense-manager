@@ -86,6 +86,43 @@ describe('validation schemas', () => {
 		expect(expenseSchema.safeParse({ ...valid, expenseDate: '25/06/2026' }).success).toBe(false);
 	});
 
+	it('enforces one stable money ceiling for expenses, budgets and recurrences', () => {
+		const expenseInput = {
+			categoryId: '7',
+			description: 'Boundary expense',
+			amount: '1.000.000.000,00',
+			expenseDate: '2026-06-25'
+		};
+		const budgetInput = {
+			categoryId: '7',
+			periodMonth: '2026-06',
+			amount: '1,000,000,000.00'
+		};
+		const recurringInput = {
+			categoryId: '7',
+			description: 'Boundary recurrence',
+			amount: '1000000000.00',
+			startDate: '2026-06-25'
+		};
+
+		expect(expenseSchema.safeParse(expenseInput).success).toBe(true);
+		expect(budgetSchema.safeParse(budgetInput).success).toBe(true);
+		expect(recurringExpenseSchema.safeParse(recurringInput).success).toBe(true);
+
+		for (const result of [
+			expenseSchema.safeParse({ ...expenseInput, amount: '1.000.000.000,01' }),
+			budgetSchema.safeParse({ ...budgetInput, amount: '1,000,000,000.01' }),
+			recurringExpenseSchema.safeParse({ ...recurringInput, amount: '1000000000.01' })
+		]) {
+			expect(result.success).toBe(false);
+			if (!result.success) {
+				expect(result.error.flatten().fieldErrors.amount).toContain(
+					'Amount exceeds the maximum allowed.'
+				);
+			}
+		}
+	});
+
 	it('validates expense filters and report filters', () => {
 		expect(isValidIsoDate('2026-02-28')).toBe(true);
 		expect(isValidIsoDate('2026-02-31')).toBe(false);

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { formatCents, parseBrlToCents, parseCurrencyToCents } from './money';
+import {
+	amountExceedsMaximumMessage,
+	formatCents,
+	maxMoneyCents,
+	parseBrlToCents,
+	parseCurrencyToCents
+} from './money';
 
 describe('parseBrlToCents', () => {
 	it('parses Brazilian currency formats', () => {
@@ -31,6 +37,19 @@ describe('parseBrlToCents', () => {
 });
 
 describe('parseCurrencyToCents – integer arithmetic (no float drift)', () => {
+	it('accepts the exact product maximum in supported locale formats', () => {
+		expect(parseCurrencyToCents('1,000,000,000.00')).toBe(maxMoneyCents);
+		expect(parseCurrencyToCents('1.000.000.000,00')).toBe(maxMoneyCents);
+		expect(parseCurrencyToCents('000001000000000.00')).toBe(maxMoneyCents);
+		expect(Number.isSafeInteger(maxMoneyCents)).toBe(true);
+	});
+
+	it('rejects one cent above the product maximum and arbitrarily large digit strings', () => {
+		for (const value of ['1,000,000,000.01', '1.000.000.000,01', '9'.repeat(10_000)]) {
+			expect(() => parseCurrencyToCents(value)).toThrow(amountExceedsMaximumMessage);
+		}
+	});
+
 	it('parses two-decimal amounts without rounding errors', () => {
 		// These specific values are known to be well-behaved under integer parsing.
 		// The old Math.round(n * 100) code was susceptible to IEEE 754 drift for values

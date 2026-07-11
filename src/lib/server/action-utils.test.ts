@@ -1,6 +1,12 @@
 import { error, isActionFailure } from '@sveltejs/kit';
 import { describe, expect, it } from 'vitest';
-import { expenseFormValues, handleServiceError } from './action-utils';
+import { z } from 'zod';
+import {
+	budgetFormValues,
+	expenseFormValues,
+	handleServiceError,
+	localizedFormFieldErrors
+} from './action-utils';
 
 describe('server action utilities', () => {
 	it('maps handled client errors to action failures with preserved values', () => {
@@ -65,6 +71,34 @@ describe('server action utilities', () => {
 			installments: '1',
 			notes: ''
 		});
+	});
+
+	it('preserves budget fields and localizes validation errors', () => {
+		const populated = new FormData();
+		populated.set('categoryId', '4');
+		populated.set('amount', '1000000000.01');
+		populated.set('warningThresholdPct', '73');
+		populated.set('unexpected', 'secret');
+		expect(budgetFormValues(populated)).toEqual({
+			categoryId: '4',
+			amount: '1000000000.01',
+			warningThresholdPct: '73'
+		});
+		expect(budgetFormValues(new FormData())).toEqual({
+			categoryId: '',
+			amount: '',
+			warningThresholdPct: '80'
+		});
+
+		const parsed = z
+			.object({ amount: z.string().refine(() => false, 'Amount exceeds the maximum allowed.') })
+			.safeParse({ amount: 'too-high' });
+		expect(parsed.success).toBe(false);
+		if (!parsed.success) {
+			expect(localizedFormFieldErrors(parsed.error, 'pt-BR')).toEqual({
+				amount: 'Valor excede o máximo permitido.'
+			});
+		}
 	});
 });
 

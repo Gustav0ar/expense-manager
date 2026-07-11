@@ -113,6 +113,13 @@
       "when": 1783987200000,
       "tag": "0015_repair_skipped_mfa_migration",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1784073600000,
+      "tag": "0016_safe_money_boundaries",
+      "breakpoints": true
     }
   ]
 }

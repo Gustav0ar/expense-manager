@@ -26,6 +26,7 @@ import {
 import { client, db } from '$lib/server/db';
 import { sendBudgetAlertEmail } from '$lib/server/email';
 import { sha256 } from '$lib/server/utils/crypto';
+import { maxMoneyCents } from '$lib/server/utils/money';
 import { formatCents } from '$lib/utils/format';
 import { getAttachmentForDownload, maxAttachmentBytes, saveExpenseAttachment } from './attachments';
 import {
@@ -2178,6 +2179,75 @@ describe('server service integration', () => {
 
 	it('limits expense attachments to 2 MiB', () => {
 		expect(maxAttachmentBytes).toBe(2 * 1024 * 1024);
+	});
+
+	it('enforces the same direct-insert money boundary on every money table', async () => {
+		const fixture = await createWorkspaceFixture();
+		const commonExpense = {
+			workspaceId: fixture.context.workspaceId,
+			categoryId: fixture.categoryId,
+			createdByUserId: fixture.context.userId,
+			currency: fixture.context.currency
+		};
+
+		await expect(
+			db.insert(expense).values({
+				...commonExpense,
+				description: 'Maximum direct expense',
+				amountCents: maxMoneyCents,
+				expenseDate: '2026-06-01'
+			})
+		).resolves.toBeDefined();
+		await expect(
+			db.insert(expense).values({
+				...commonExpense,
+				description: 'Oversized direct expense',
+				amountCents: maxMoneyCents + 1,
+				expenseDate: '2026-06-02'
+			})
+		).rejects.toThrow();
+
+		await expect(
+			db.insert(categoryBudget).values({
+				workspaceId: fixture.context.workspaceId,
+				categoryId: fixture.categoryId,
+				periodMonth: '2026-06-01',
+				amountCents: maxMoneyCents,
+				createdByUserId: fixture.context.userId
+			})
+		).resolves.toBeDefined();
+		await expect(
+			db.insert(categoryBudget).values({
+				workspaceId: fixture.context.workspaceId,
+				categoryId: fixture.categoryId,
+				periodMonth: '2026-07-01',
+				amountCents: maxMoneyCents + 1,
+				createdByUserId: fixture.context.userId
+			})
+		).rejects.toThrow();
+
+		await expect(
+			db.insert(recurringExpense).values({
+				...commonExpense,
+				description: 'Maximum direct recurrence',
+				amountCents: maxMoneyCents,
+				frequency: 'monthly',
+				intervalCount: 1,
+				startDate: '2026-06-01',
+				nextRunDate: '2026-06-01'
+			})
+		).resolves.toBeDefined();
+		await expect(
+			db.insert(recurringExpense).values({
+				...commonExpense,
+				description: 'Oversized direct recurrence',
+				amountCents: maxMoneyCents + 1,
+				frequency: 'monthly',
+				intervalCount: 1,
+				startDate: '2026-07-01',
+				nextRunDate: '2026-07-01'
+			})
+		).rejects.toThrow();
 	});
 
 	it('deletes attachments from DB and disk when expense is deleted', async () => {

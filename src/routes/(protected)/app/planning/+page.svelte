@@ -9,6 +9,11 @@
 	let { data, form } = $props<{ data: PageData; form: ActionData }>();
 	const currency = $derived(data.currentWorkspace?.currency ?? 'USD');
 	const amountPlaceholder = $derived(data.locale === 'pt-BR' ? '0,00' : '0.00');
+	const actionSucceeded = $derived(
+		form?.tone === 'success' ||
+			(form?.importResult?.importedCount ?? 0) > 0 ||
+			(form?.importResult?.duplicateCount ?? 0) > 0
+	);
 
 	function amountInputValue(cents: number | null) {
 		return cents == null ? '' : (cents / 100).toFixed(2).replace('.', ',');
@@ -63,19 +68,10 @@
 
 	{#if form?.message}
 		<p
-			class:success={form.tone === 'success' ||
-				(form.importResult?.importedCount ?? 0) > 0 ||
-				(form.importResult?.duplicateCount ?? 0) > 0}
-			class:danger={form.tone === 'danger' ||
-				(form.tone !== 'success' &&
-					!form.importResult?.importedCount &&
-					!form.importResult?.duplicateCount)}
+			class:success={actionSucceeded}
+			class:danger={form.tone === 'danger' || !actionSucceeded}
 			class="notice"
-			role={form.tone === 'success' ||
-			(form.importResult?.importedCount ?? 0) > 0 ||
-			(form.importResult?.duplicateCount ?? 0) > 0
-				? 'status'
-				: 'alert'}
+			role={actionSucceeded ? 'status' : 'alert'}
 		>
 			{form.message}
 		</p>
@@ -123,17 +119,34 @@
 					<span>{t('Category')}</span>
 					<select name="categoryId" required>
 						{#each data.categories as category (category.id)}
-							<option value={category.id}>{category.icon ?? '💼'} {category.name}</option>
+							<option
+								value={category.id}
+								selected={category.id.toString() === form?.budgetValues?.categoryId}
+								>{category.icon ?? '💼'} {category.name}</option
+							>
 						{/each}
 					</select>
 				</label>
 				<label>
 					<span>{t('Value')}</span>
-					<input name="amount" inputmode="decimal" placeholder={amountPlaceholder} required />
+					<input
+						name="amount"
+						inputmode="decimal"
+						placeholder={amountPlaceholder}
+						required
+						value={form?.budgetValues?.amount}
+					/>
 				</label>
 				<label>
 					<span>{t('Alert')} (%)</span>
-					<input name="warningThresholdPct" type="number" min="1" max="100" value="80" required />
+					<input
+						name="warningThresholdPct"
+						type="number"
+						min="1"
+						max="100"
+						value={form?.budgetValues?.warningThresholdPct ?? '80'}
+						required
+					/>
 				</label>
 				<button class="button primary align-end" type="submit">{t('Save')}</button>
 			</form>

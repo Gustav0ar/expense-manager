@@ -54,6 +54,30 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+assert_money_constraints() {
+	local target_url="$1"
+	local target_label="$2"
+	local constraint_count
+	constraint_count="$(
+		psql "${target_url}" -v ON_ERROR_STOP=1 -Atqc \
+			"SELECT count(*)
+			 FROM pg_constraint
+			 WHERE conname IN (
+			   'category_budget_amount_cents_check',
+			   'expense_amount_cents_check',
+			   'recurring_expense_amount_cents_check'
+			 )
+			 AND contype = 'c'
+			 AND convalidated
+			 AND position('> 0' in pg_get_constraintdef(oid)) > 0
+			 AND position('100000000000' in pg_get_constraintdef(oid)) > 0"
+	)"
+	if [ "${constraint_count}" != "3" ]; then
+		echo "${target_label} does not have all three validated money boundaries." >&2
+		exit 1
+	fi
+}
+
 mkdir -p "${legacy_migrations}/meta"
 cp "${repo_root}"/drizzle/000[0-8]_*.sql "${legacy_migrations}/"
 
@@ -113,6 +137,7 @@ fi
 
 echo "Reapplying the complete migration set to verify idempotency."
 DATABASE_URL="${upgrade_database_url}" pnpm exec drizzle-kit migrate --config "${repo_root}/drizzle.config.ts"
+assert_money_constraints "${upgrade_database_url}" "Upgraded database"
 
 fresh_database_created=true
 createdb --maintenance-db="${maintenance_url}" "${fresh_database}"
@@ -131,6 +156,7 @@ fi
 
 echo "Reapplying the complete migration set to the fresh database."
 DATABASE_URL="${fresh_database_url}" pnpm exec drizzle-kit migrate --config "${repo_root}/drizzle.config.ts"
+assert_money_constraints "${fresh_database_url}" "Fresh database"
 
 cleanup
 trap - EXIT INT TERM

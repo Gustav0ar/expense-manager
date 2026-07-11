@@ -992,6 +992,14 @@ test('creates installment expenses, uses searchable combos and applies filters',
 	await createForm.getByRole('button', { name: 'Adicionar' }).click();
 	await expect(page.getByText('Confira os dados da despesa.')).toBeVisible();
 
+	await createForm.getByLabel('Valor da parcela').fill('1.000.000.000,01');
+	await createForm.getByRole('button', { name: 'Adicionar' }).click();
+	await expect(createForm.locator('#err-amount')).toHaveText('Valor excede o máximo permitido.');
+	await expect(createForm.getByLabel('Descrição')).toHaveValue('Valor inválido');
+	await expect(createForm.getByLabel('Valor da parcela')).toHaveValue('1.000.000.000,01');
+	await expect(createForm.getByLabel('Data', { exact: true })).toHaveValue('2026-01-15');
+	await expect(createForm.getByLabel('Categoria')).toHaveValue(/\d+/);
+
 	await createExpenseFromForm(page, {
 		description: 'Compra parcelada',
 		amount: '100,00',

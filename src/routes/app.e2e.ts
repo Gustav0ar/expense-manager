@@ -1047,9 +1047,14 @@ test('covers planning, imports, attachments and audit flows', async ({ page }) =
 
 	await page.goto('/app/planning?periodMonth=2026-06-01');
 	const budgetForm = page.locator('form[action="?/upsertBudget"]').first();
-	await budgetForm.getByLabel('Valor').fill('abc');
+	await budgetForm.getByLabel('Categoria').selectOption({ label: '🧼 Limpeza' });
+	await budgetForm.getByLabel('Valor').fill('1.000.000.000,01');
+	await budgetForm.getByLabel('Alerta (%)').fill('73');
 	await budgetForm.getByRole('button', { name: 'Salvar' }).click();
-	await expect(page.getByText('Confira os dados do orçamento.')).toBeVisible();
+	await expect(page.locator('.notice')).toHaveText('Valor excede o máximo permitido.');
+	await expect(budgetForm.getByLabel('Categoria')).toHaveValue(/\d+/);
+	await expect(budgetForm.getByLabel('Valor')).toHaveValue('1.000.000.000,01');
+	await expect(budgetForm.getByLabel('Alerta (%)')).toHaveValue('73');
 
 	await page.goto('/app/planning?periodMonth=2026-06-01');
 	await budgetForm.getByLabel('Categoria').selectOption({ label: '🧼 Limpeza' });

@@ -461,6 +461,7 @@ export const ptBrMessages = {
 	'Too many attempts. Try again after {time}.': 'Muitas tentativas. Tente novamente após {time}.',
 	'Amount is required.': 'Valor obrigatório.',
 	'Amount is invalid.': 'Valor inválido.',
+	'Amount exceeds the maximum allowed.': 'Valor excede o máximo permitido.',
 	'Amount must be greater than zero.': 'Valor deve ser maior que zero.',
 	'End date must be greater than or equal to start date.':
 		'Data final deve ser maior ou igual a data inicial.',

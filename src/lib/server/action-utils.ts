@@ -1,4 +1,6 @@
 import { fail, isHttpError } from '@sveltejs/kit';
+import { translate, type SupportedLocale } from '$lib/i18n';
+import type { ZodError } from 'zod';
 
 /**
  * Handles an HttpError thrown from a service call by converting it into a
@@ -45,4 +47,23 @@ export function expenseFormValues(formData: FormData) {
 		installments: (formData.get('installments') as string) ?? '1',
 		notes: (formData.get('notes') as string) ?? ''
 	};
+}
+
+export function budgetFormValues(formData: FormData) {
+	return {
+		categoryId: (formData.get('categoryId') as string) ?? '',
+		amount: (formData.get('amount') as string) ?? '',
+		warningThresholdPct: (formData.get('warningThresholdPct') as string) ?? '80'
+	};
+}
+
+export function localizedFormFieldErrors(error: ZodError, locale: SupportedLocale | string) {
+	const fieldErrors: Record<string, string> = {};
+	for (const issue of error.issues) {
+		const pathHead = issue.path[0];
+		if (typeof pathHead !== 'string' && typeof pathHead !== 'number') continue;
+		const field = String(pathHead);
+		fieldErrors[field] ??= translate(locale, issue.message);
+	}
+	return fieldErrors;
 }

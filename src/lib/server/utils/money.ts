@@ -1,4 +1,7 @@
 import { defaultCurrency, defaultLocale, formatCurrency } from '$lib/i18n';
+import { amountExceedsMaximumMessage, maxMoneyCents } from '$lib/money-limits';
+
+export { amountExceedsMaximumMessage, maxMoneyCents } from '$lib/money-limits';
 
 export function parseCurrencyToCents(input: string): number {
 	const value = input.trim();
@@ -12,12 +15,22 @@ export function parseCurrencyToCents(input: string): number {
 
 	const isNegative = normalized.startsWith('-');
 	const unsigned = normalized.replace(/^-/, '');
+	if (isNegative) throw new Error('Amount must be greater than zero.');
 	const dotIdx = unsigned.indexOf('.');
 	const intStr = dotIdx === -1 ? unsigned : unsigned.slice(0, dotIdx);
 	const fracStr = dotIdx === -1 ? '' : unsigned.slice(dotIdx + 1);
-	const cents =
-		parseInt(intStr || '0', 10) * 100 + parseInt(fracStr.padEnd(2, '0').slice(0, 2), 10);
-	if (isNegative || cents <= 0) throw new Error('Amount must be greater than zero.');
+	const centsDigits = `${intStr}${fracStr.padEnd(2, '0')}`.replace(/^0+/, '') || '0';
+	const maximumDigits = String(maxMoneyCents);
+
+	if (
+		centsDigits.length > maximumDigits.length ||
+		(centsDigits.length === maximumDigits.length && centsDigits > maximumDigits)
+	) {
+		throw new Error(amountExceedsMaximumMessage);
+	}
+
+	const cents = Number(centsDigits);
+	if (cents === 0) throw new Error('Amount must be greater than zero.');
 	return cents;
 }
 

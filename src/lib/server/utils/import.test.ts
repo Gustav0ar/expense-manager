@@ -76,6 +76,20 @@ describe('expense import parser', () => {
 		expect(ofxResult.errors).toEqual(['OFX transaction 1: date or amount is invalid.']);
 	});
 
+	it('rejects malformed signs while accepting one leading negative sign', () => {
+		const result = parseCsvImport(
+			'date,description,amount\n2026-01-05,Embedded sign,1-2\n2026-01-06,Double sign,--1\n2026-01-07,Valid negative,-12.30\n'
+		);
+
+		expect(result.rows).toEqual([
+			expect.objectContaining({ description: 'Valid negative', amount: '12,30' })
+		]);
+		expect(result.errors).toEqual([
+			'Line 2: date, description or amount is invalid.',
+			'Line 3: date, description or amount is invalid.'
+		]);
+	});
+
 	it('returns explicit errors for empty CSV and invalid OFX transaction rows', () => {
 		expect(parseCsvImport('').errors).toEqual(['CSV file is empty.']);
 		expect(parseOfxImport('<STMTTRN><DTPOSTED>bad<TRNAMT>0<NAME>Bad</STMTTRN>').errors).toEqual([
@@ -88,6 +102,25 @@ describe('expense import parser', () => {
 		expect(parseCsvImport('date,description,amount\nbad,,abc\n', 'pt-BR').errors).toEqual([
 			'Linha 2: data, descrição ou valor inválido.'
 		]);
+	});
+
+	it('accepts the money maximum and rejects larger imported amounts in each locale', () => {
+		const english = parseCsvImport(
+			'date,description,amount\n2026-01-01,Maximum,"1,000,000,000.00"\n2026-01-02,Too large,1000000000.01\n'
+		);
+		expect(english.rows).toEqual([
+			expect.objectContaining({ description: 'Maximum', amount: '1000000000,00' })
+		]);
+		expect(english.errors).toEqual(['Line 3: date, description or amount is invalid.']);
+
+		const portuguese = parseCsvImport(
+			'Data;Descrição;Valor\n01/01/2026;Máximo;1.000.000.000,00\n02/01/2026;Acima;1.000.000.000,01\n',
+			'pt-BR'
+		);
+		expect(portuguese.rows).toEqual([
+			expect.objectContaining({ description: 'Máximo', amount: '1000000000,00' })
+		]);
+		expect(portuguese.errors).toEqual(['Linha 3: data, descrição ou valor inválido.']);
 	});
 
 	it('rejects CSV without required headers', () => {
