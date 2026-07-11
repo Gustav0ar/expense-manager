@@ -55,6 +55,12 @@ async function main() {
 					`budget-alert history did not use its cursor index: ${budgetAlertHistoryIndexes.join(', ')}`
 				);
 			}
+			const expenseTrashIndexes = await explainIndexes(tx, expenseTrashPageSql, workspaceId);
+			if (!expenseTrashIndexes.includes('expense_workspace_trash_idx')) {
+				throw new Error(
+					`expense-trash pagination did not use its cursor index: ${expenseTrashIndexes.join(', ')}`
+				);
+			}
 
 			report = {
 				fixture: {
@@ -67,7 +73,8 @@ async function main() {
 				},
 				category: { baseline: categoryBaseline.metrics, optimized: categoryOptimized.metrics },
 				paymentMethod: { baseline: paymentBaseline.metrics, optimized: paymentOptimized.metrics },
-				budgetAlertHistory: { indexes: budgetAlertHistoryIndexes }
+				budgetAlertHistory: { indexes: budgetAlertHistoryIndexes },
+				expenseTrash: { indexes: expenseTrashIndexes }
 			};
 
 			throw rollbackSentinel;
@@ -82,7 +89,7 @@ async function main() {
 
 	console.log(JSON.stringify(report, null, 2));
 	console.log(
-		'Usage-count queries eliminate multiplicative intermediates and budget-alert history uses its cursor index.'
+		'Usage-count queries eliminate multiplicative intermediates; budget-alert history and expense trash use their cursor indexes.'
 	);
 }
 
@@ -110,11 +117,13 @@ async function seedFixture(tx, workspaceId, userId) {
 	await tx`
 		insert into expense (
 			workspace_id, category_id, created_by_user_id, description,
-			amount_cents, expense_date, payment_method_id, payment_method, deleted_at
+			amount_cents, expense_date, payment_method_id, payment_method, deleted_at,
+			trash_expires_at
 		)
 		select ${workspaceId}, parent.id, ${userId},
 			'Expense ' || expense_series, 100, date '2026-07-01',
 			${paymentMethod.id}, 'Fixture card',
+			case when expense_series <= 5 then timestamptz '2026-07-02 00:00:00+00' end,
 			case when expense_series <= 5 then timestamptz '2026-07-02 00:00:00+00' end
 		from category parent
 		cross join generate_series(1, 250) expense_series
@@ -323,7 +332,6 @@ const paymentMethodBaselineSql = `
 	left join expense e
 		on e.workspace_id = pm.workspace_id
 		and e.payment_method_id = pm.id
-		and e.deleted_at is null
 	left join recurring_expense re
 		on re.workspace_id = pm.workspace_id
 		and re.payment_method_id = pm.id
@@ -336,7 +344,7 @@ const paymentMethodOptimizedSql = `
 	with expense_usage as (
 		select payment_method_id, count(*)::int as expense_count
 		from expense
-		where workspace_id = $1 and deleted_at is null and payment_method_id is not null
+		where workspace_id = $1 and payment_method_id is not null
 		group by payment_method_id
 	), recurring_usage as (
 		select payment_method_id, count(*)::int as recurring_count
@@ -363,6 +371,23 @@ const budgetAlertHistorySql = `
 	where workspace_id = $1 and id < 9223372036854775807
 	order by id desc
 	limit 21
+`;
+
+const expenseTrashPageSql = `
+	select e.id, e.deleted_at, c.name
+	from expense e
+	join category c on c.id = e.category_id
+	where e.workspace_id = $1
+		and e.deleted_at is not null
+		and (
+			e.deleted_at < timestamptz '9999-12-31 23:59:59+00'
+			or (
+				e.deleted_at = timestamptz '9999-12-31 23:59:59+00'
+				and e.id < 9223372036854775807
+			)
+		)
+	order by e.deleted_at desc, e.id desc
+	limit 101
 `;
 
 await main();

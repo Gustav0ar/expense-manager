@@ -743,7 +743,8 @@ export const expense = pgTable(
 			.notNull()
 			.defaultNow()
 			.$onUpdate(() => new Date()),
-		deletedAt: timestamp('deleted_at', { withTimezone: true })
+		deletedAt: timestamp('deleted_at', { withTimezone: true }),
+		trashExpiresAt: timestamp('trash_expires_at', { withTimezone: true })
 	},
 	(table) => [
 		check('expense_amount_cents_check', validMoneyAmount(table.amountCents)),
@@ -767,6 +768,10 @@ export const expense = pgTable(
 		check(
 			'expense_installment_numbers_check',
 			sql`(${table.installmentNumber} is null and ${table.installmentsTotal} is null) or (${table.installmentNumber} between 1 and ${table.installmentsTotal} and ${table.installmentsTotal} between 2 and 120)`
+		),
+		check(
+			'expense_trash_timestamp_pair_check',
+			sql`(${table.deletedAt} is null and ${table.trashExpiresAt} is null) or (${table.deletedAt} is not null and ${table.trashExpiresAt} is not null)`
 		),
 		index('expense_workspace_date_idx')
 			.on(table.workspaceId, table.expenseDate, table.id)
@@ -805,7 +810,13 @@ export const expense = pgTable(
 		index('expense_category_idx').on(table.categoryId),
 		index('expense_created_by_idx').on(table.createdByUserId),
 		index('expense_reviewed_by_idx').on(table.reviewedByUserId),
-		index('expense_reconciled_by_idx').on(table.reconciledByUserId)
+		index('expense_reconciled_by_idx').on(table.reconciledByUserId),
+		index('expense_workspace_trash_idx')
+			.on(table.workspaceId, table.deletedAt, table.id)
+			.where(sql`${table.deletedAt} is not null`),
+		index('expense_trash_expiry_idx')
+			.on(table.trashExpiresAt, table.id)
+			.where(sql`${table.deletedAt} is not null`)
 	]
 );
 
@@ -913,6 +924,7 @@ export const attachmentDeletion = pgTable(
 		sizeBytes: integer('size_bytes').notNull(),
 		sha256: text('sha256').notNull(),
 		status: text('status').notNull().default('pending'),
+		reason: text('reason').notNull().default('attachment_deleted'),
 		notBefore: timestamp('not_before', { withTimezone: true }).notNull(),
 		nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull(),
 		attemptCount: integer('attempt_count').notNull().default(0),
@@ -931,6 +943,10 @@ export const attachmentDeletion = pgTable(
 		check(
 			'attachment_deletion_status_check',
 			sql`${table.status} in ('pending', 'processing', 'completed', 'failed')`
+		),
+		check(
+			'attachment_deletion_reason_check',
+			sql`${table.reason} in ('attachment_deleted', 'expense_trash')`
 		),
 		check('attachment_deletion_attempt_count_check', sql`${table.attemptCount} >= 0`),
 		check('attachment_deletion_size_bytes_check', sql`${table.sizeBytes} between 1 and 2097152`),

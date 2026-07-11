@@ -149,6 +149,7 @@ export const ptBrMessages = {
 	Failures: 'Falhas',
 	Field: 'Campo',
 	Filter: 'Filtrar',
+	'First page': 'Primeira página',
 	File: 'Arquivo',
 	Format: 'Formato',
 	Frequency: 'Frequência',
@@ -254,6 +255,7 @@ export const ptBrMessages = {
 	Owner: 'Owner',
 	Page: 'Página',
 	Paid: 'Paga',
+	Pagination: 'Paginação',
 	Password: 'Senha',
 	Payment: 'Pagamento',
 	'Payment date': 'Data de pagamento',
@@ -694,8 +696,8 @@ export const ptBrMessages = {
 	'Select {description}': 'Selecionar {description}',
 	'You cannot change your own role.': 'Você não pode alterar seu próprio papel.',
 	'You cannot remove yourself.': 'Você não pode remover a si mesmo.',
-	'Cannot change currency: this workspace has {count} expense(s). Delete all expenses first.':
-		'Não é possível alterar a moeda: este workspace tem {count} despesa(s). Exclua todas as despesas primeiro.',
+	'Cannot change currency: this workspace has {count} live or retained expense(s). Remove them permanently first.':
+		'Não é possível alterar a moeda: este workspace tem {count} despesa(s) ativa(s) ou retida(s). Remova-as permanentemente primeiro.',
 	'Bank ledger': 'Livro bancário',
 	'Bank transaction ignored.': 'Lançamento bancário ignorado.',
 	'Bank transaction currency does not match the workspace currency.':
@@ -737,5 +739,42 @@ export const ptBrMessages = {
 	'{count} transactions shown': '{count} lançamentos exibidos',
 	'{score}% description overlap': '{score}% de semelhança na descrição',
 	'{stagedCount} bank transactions staged; {duplicateCount} duplicates and {failedCount} failures.':
-		'{stagedCount} lançamentos bancários preparados; {duplicateCount} duplicatas e {failedCount} falhas.'
+		'{stagedCount} lançamentos bancários preparados; {duplicateCount} duplicatas e {failedCount} falhas.',
+	'A newer recurring expense already exists for this date.':
+		'Já existe uma despesa recorrente mais recente para esta data.',
+	'An attachment is corrupted and cannot be restored.':
+		'Um comprovante está corrompido e não pode ser restaurado.',
+	'An attachment is no longer available for restore.':
+		'Um comprovante não está mais disponível para restauração.',
+	'Back to expenses': 'Voltar para despesas',
+	'Delete expense permanently?': 'Excluir despesa permanentemente?',
+	'Delete permanently': 'Excluir permanentemente',
+	'Deleted expenses': 'Despesas excluídas',
+	'Deleted expenses remain recoverable for 30 days.':
+		'Despesas excluídas permanecem recuperáveis por 30 dias.',
+	'Deleted expenses will appear here during their recovery period.':
+		'Despesas excluídas aparecerão aqui durante o período de recuperação.',
+	'Deleted {date}': 'Excluída em {date}',
+	'Expense trash': 'Lixeira de despesas',
+	'Permanent deletion {date}': 'Exclusão permanente em {date}',
+	'Only workspace managers can recover this expense.':
+		'Somente gestores do workspace podem recuperar esta despesa.',
+	Recovery: 'Recuperação',
+	'Recovery period expired': 'Período de recuperação expirado',
+	'Restore the expense category before restoring this expense.':
+		'Restaure a categoria da despesa antes de restaurar esta despesa.',
+	'Restore the referenced {kind} before restoring this expense.':
+		'Restaure {kind} antes de restaurar esta despesa.',
+	'The expense will move to trash and remain recoverable for 30 days.':
+		'A despesa será movida para a lixeira e poderá ser recuperada por 30 dias.',
+	'The workspace currency changed, so this expense cannot be restored.':
+		'A moeda do workspace mudou, portanto esta despesa não pode ser restaurada.',
+	'This action cannot be undone.': 'Esta ação não pode ser desfeita.',
+	'This expense can no longer be restored.': 'Esta despesa não pode mais ser restaurada.',
+	'This expense is still within its recovery period.':
+		'Esta despesa ainda está no período de recuperação.',
+	'Trash cursor is invalid.': 'O cursor da lixeira é inválido.',
+	'Trash is empty': 'A lixeira está vazia',
+	'Trashed expense not found.': 'Despesa na lixeira não encontrada.',
+	'View trash': 'Ver lixeira'
 } as const;

@@ -371,7 +371,7 @@ async function listVendors(workspaceId: number, includeArchived: boolean) {
 			count(distinct e.id)::int as expense_count,
 			0::int as recurring_count
 		from vendor v
-		left join expense e on e.workspace_id = v.workspace_id and e.vendor_id = v.id and e.deleted_at is null
+		left join expense e on e.workspace_id = v.workspace_id and e.vendor_id = v.id
 		where v.workspace_id = ${workspaceId}
 			${includeArchived ? sql`` : sql`and v.is_archived = false`}
 		group by v.id, v.name, v.is_archived, v.created_at
@@ -390,7 +390,7 @@ async function listCostCenters(workspaceId: number, includeArchived: boolean) {
 			count(distinct e.id)::int as expense_count,
 			0::int as recurring_count
 		from cost_center cc
-		left join expense e on e.workspace_id = cc.workspace_id and e.cost_center_id = cc.id and e.deleted_at is null
+		left join expense e on e.workspace_id = cc.workspace_id and e.cost_center_id = cc.id
 		where cc.workspace_id = ${workspaceId}
 			${includeArchived ? sql`` : sql`and cc.is_archived = false`}
 		group by cc.id, cc.name, cc.is_archived, cc.created_at
@@ -643,7 +643,7 @@ function selectCatalogUsageSql(kind: ExpenseCatalogKind, workspaceId: number, id
 				count(distinct e.id)::int as expense_count,
 				0::int as recurring_count
 			from vendor v
-			left join expense e on e.workspace_id = v.workspace_id and e.vendor_id = v.id and e.deleted_at is null
+			left join expense e on e.workspace_id = v.workspace_id and e.vendor_id = v.id
 			where v.workspace_id = ${workspaceId} and v.id = ${id}
 			group by v.id, v.name, v.is_archived, v.created_at
 			limit 1
@@ -658,7 +658,7 @@ function selectCatalogUsageSql(kind: ExpenseCatalogKind, workspaceId: number, id
 			count(distinct e.id)::int as expense_count,
 			0::int as recurring_count
 		from cost_center cc
-		left join expense e on e.workspace_id = cc.workspace_id and e.cost_center_id = cc.id and e.deleted_at is null
+		left join expense e on e.workspace_id = cc.workspace_id and e.cost_center_id = cc.id
 		where cc.workspace_id = ${workspaceId} and cc.id = ${id}
 		group by cc.id, cc.name, cc.is_archived, cc.created_at
 		limit 1
@@ -677,7 +677,6 @@ function paymentMethodUsageSql(
 			select payment_method_id, count(*)::int as expense_count
 			from expense
 			where workspace_id = ${workspaceId}
-				and deleted_at is null
 				and payment_method_id is not null
 				${paymentMethodIdFilter}
 			group by payment_method_id

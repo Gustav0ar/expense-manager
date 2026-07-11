@@ -257,6 +257,10 @@
 			<span class="eyebrow">{t('Entries')}</span>
 			<h2>{t('Expenses')}</h2>
 		</div>
+		<a class="button secondary" href={resolve('/app/expenses/trash')}>
+			<Trash2 size={16} />
+			<span>{t('View trash')}</span>
+		</a>
 	</div>
 
 	{#if form?.message && !form.catalogAction && !form.categoryAction}

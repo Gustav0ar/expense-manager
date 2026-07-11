@@ -805,7 +805,7 @@ satisfy this fixture; record production-like `EXPLAIN` evidence before proposing
 ## Background Job Freshness
 
 `/api/health` reports the recurring-expense scheduler, automatic budget-alert
-scheduler, durable invitation-delivery scheduler, email-delivery event retention and expired-registration cleanup
+scheduler, durable invitation-delivery scheduler, expense-trash purge, email-delivery event retention and expired-registration cleanup
 under `backgroundJobs`. Each job
 exposes its attempt count, advisory-lock skip count, last
 attempt/completion/success/error timestamps, last duration, cumulative failed
@@ -826,6 +826,14 @@ terminal deletion failure or a storage scan failure degrades health. Pending
 deletions are expected during the 48-hour backup grace. Unknown disk files are
 reported but are never automatically deleted; investigate the matching audit
 and backup history before taking any manual action.
+
+`expenseTrashPurgeScheduler` runs every five minutes. It takes a distinct
+session advisory lock and removes only rows whose 30-day recovery period has
+expired, in deterministic batches of 25 with `FOR UPDATE SKIP LOCKED`. Before
+hard-deleting attachment metadata it creates any missing durable deletion
+intent. Physical files remain protected until the expiry time plus the existing
+48-hour backup grace and are removed only by `attachmentDeletionScheduler`.
+Repeated or concurrent purge cycles are safe and audit each purged expense.
 
 Production shutdown stops the interval coordinator first, then flushes tracing
 and closes both database clients with a bounded timeout. A clean `SIGTERM` should

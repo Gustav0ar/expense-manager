@@ -99,6 +99,16 @@ File upload creates a short-lived, user- and workspace-owned preview and must no
 
 Imported expenses store a baseline hash of their material fields. Batch undo locks the batch and its expenses and soft-deletes only rows that are still unpaid, unreconciled, active and baseline-identical. Edited or financially protected rows are counted as skipped. Attachment tombstones, durable deletion intents, expense changes, batch counters and audit events belong to the same transaction; never hard-delete imported expenses during undo.
 
+Delete and import undo both move expenses into a 30-day recoverable trash.
+Deduplication intentionally ignores trash, so reimporting an equivalent row can
+create a new live expense; restoring the older imported expense does not rewind
+the import batch's undo counters. A restore revalidates current category,
+catalog, currency, review, payment and reconciliation permissions and verifies
+every trash-owned attachment's path, size and SHA-256 while holding the global
+attachment storage lock. Independently deleted attachments are never restored.
+Legacy soft-deleted rows are migrated as already expired because their files
+may have been removed before durable attachment retention existed.
+
 OFX uploads follow a separate reconciliation contract. The server parses the
 original file, fingerprints the source account, and stages signed transactions
 using FITID when available or a deterministic checksum plus occurrence number

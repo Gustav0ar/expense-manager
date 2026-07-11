@@ -62,7 +62,7 @@
 			</div>
 
 			<p class="dialog-muted">
-				{t('This action removes the entry and updates dashboards and reports.')}
+				{t('The expense will move to trash and remain recoverable for 30 days.')}
 			</p>
 
 			<form method="post" action="?/delete" class="dialog-actions">

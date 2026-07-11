@@ -46,7 +46,8 @@ import { getBudgetSummary } from './budgets';
 import { randomToken } from '$lib/server/utils/crypto';
 import { resolveExpenseCatalogSelection } from './expense-catalogs';
 import { translate } from '$lib/i18n';
-import { buildAttachmentDeletionRows } from './attachment-deletion';
+import { attachmentDeletionGraceMs, buildAttachmentDeletionRows } from './attachment-deletion';
+import { expenseTrashDates } from './expense-trash';
 
 export type ExpenseInput = {
 	categoryId: number;
@@ -630,10 +631,11 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 		throw error(403, translate(context.locale, 'Permission denied.'));
 	}
 
+	const { deletedAt, trashExpiresAt } = expenseTrashDates();
 	await db.transaction(async (tx) => {
 		const [deleted] = await tx
 			.update(expense)
-			.set({ deletedAt: new Date() })
+			.set({ deletedAt, trashExpiresAt })
 			.where(
 				and(
 					eq(expense.id, id),
@@ -654,7 +656,6 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 		if (!deleted)
 			throw error(409, translate(context.locale, 'Expense was modified. Reload and try again.'));
 
-		const deletedAt = new Date();
 		const rows = await tx
 			.update(expenseAttachment)
 			.set({ deletedAt })
@@ -669,7 +670,12 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 			});
 
 		if (rows.length > 0) {
-			await tx.insert(attachmentDeletion).values(buildAttachmentDeletionRows(rows, deletedAt));
+			await tx.insert(attachmentDeletion).values(
+				buildAttachmentDeletionRows(rows, deletedAt, {
+					reason: 'expense_trash',
+					notBefore: new Date(trashExpiresAt.getTime() + attachmentDeletionGraceMs)
+				})
+			);
 
 			await tx.insert(auditEvent).values(
 				rows.map((att) => ({

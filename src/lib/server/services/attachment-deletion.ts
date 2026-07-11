@@ -38,8 +38,15 @@ type AttachmentDeletionWorkerOptions = {
 	workspaceId?: number;
 };
 
-export function buildAttachmentDeletionRows(rows: DeletionSource[], deletedAt = new Date()) {
-	const notBefore = new Date(deletedAt.getTime() + attachmentDeletionGraceMs);
+export function buildAttachmentDeletionRows(
+	rows: DeletionSource[],
+	deletedAt = new Date(),
+	options: {
+		reason?: 'attachment_deleted' | 'expense_trash';
+		notBefore?: Date;
+	} = {}
+) {
+	const notBefore = options.notBefore ?? new Date(deletedAt.getTime() + attachmentDeletionGraceMs);
 	return rows.map((row) => ({
 		attachmentId: row.id,
 		workspaceId: row.workspaceId,
@@ -50,6 +57,7 @@ export function buildAttachmentDeletionRows(rows: DeletionSource[], deletedAt = 
 		sizeBytes: row.sizeBytes,
 		sha256: row.sha256,
 		status: 'pending',
+		reason: options.reason ?? 'attachment_deleted',
 		notBefore,
 		nextAttemptAt: notBefore,
 		createdAt: deletedAt,
