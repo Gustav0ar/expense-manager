@@ -327,21 +327,9 @@ function canUseArchivedCatalog(id?: number | null, allowedId?: number | null) {
 }
 
 async function listPaymentMethods(workspaceId: number, includeArchived: boolean) {
-	const rows = await db.execute<CatalogRow>(sql`
-		select pm.id,
-			pm.name,
-			pm.is_archived,
-			pm.created_at,
-			count(distinct e.id)::int as expense_count,
-			count(distinct re.id)::int as recurring_count
-		from payment_method pm
-		left join expense e on e.workspace_id = pm.workspace_id and e.payment_method_id = pm.id and e.deleted_at is null
-		left join recurring_expense re on re.workspace_id = pm.workspace_id and re.payment_method_id = pm.id
-		where pm.workspace_id = ${workspaceId}
-			${includeArchived ? sql`` : sql`and pm.is_archived = false`}
-		group by pm.id, pm.name, pm.is_archived, pm.created_at
-		order by pm.name asc, pm.id asc
-	`);
+	const rows = await db.execute<CatalogRow>(
+		paymentMethodUsageSql(workspaceId, { includeArchived })
+	);
 
 	return rows.map((row) => toCatalogItem(row)!);
 }
@@ -580,20 +568,7 @@ function deleteCatalogSql(kind: ExpenseCatalogKind, workspaceId: number, id: num
 
 function selectCatalogUsageSql(kind: ExpenseCatalogKind, workspaceId: number, id: number) {
 	if (kind === 'paymentMethod') {
-		return sql`
-			select pm.id,
-				pm.name,
-				pm.is_archived,
-				pm.created_at,
-				count(distinct e.id)::int as expense_count,
-				count(distinct re.id)::int as recurring_count
-			from payment_method pm
-			left join expense e on e.workspace_id = pm.workspace_id and e.payment_method_id = pm.id and e.deleted_at is null
-			left join recurring_expense re on re.workspace_id = pm.workspace_id and re.payment_method_id = pm.id
-			where pm.workspace_id = ${workspaceId} and pm.id = ${id}
-			group by pm.id, pm.name, pm.is_archived, pm.created_at
-			limit 1
-		`;
+		return paymentMethodUsageSql(workspaceId, { id });
 	}
 
 	if (kind === 'vendor') {
@@ -624,6 +599,46 @@ function selectCatalogUsageSql(kind: ExpenseCatalogKind, workspaceId: number, id
 		where cc.workspace_id = ${workspaceId} and cc.id = ${id}
 		group by cc.id, cc.name, cc.is_archived, cc.created_at
 		limit 1
+	`;
+}
+
+function paymentMethodUsageSql(
+	workspaceId: number,
+	options: { id?: number; includeArchived?: boolean } = {}
+) {
+	const paymentMethodIdFilter =
+		options.id == null ? sql`` : sql`and payment_method_id = ${options.id}`;
+
+	return sql`
+		with expense_usage as (
+			select payment_method_id, count(*)::int as expense_count
+			from expense
+			where workspace_id = ${workspaceId}
+				and deleted_at is null
+				and payment_method_id is not null
+				${paymentMethodIdFilter}
+			group by payment_method_id
+		), recurring_usage as (
+			select payment_method_id, count(*)::int as recurring_count
+			from recurring_expense
+			where workspace_id = ${workspaceId}
+				and payment_method_id is not null
+				${paymentMethodIdFilter}
+			group by payment_method_id
+		)
+		select pm.id,
+			pm.name,
+			pm.is_archived,
+			pm.created_at,
+			coalesce(eu.expense_count, 0)::int as expense_count,
+			coalesce(ru.recurring_count, 0)::int as recurring_count
+		from payment_method pm
+		left join expense_usage eu on eu.payment_method_id = pm.id
+		left join recurring_usage ru on ru.payment_method_id = pm.id
+		where pm.workspace_id = ${workspaceId}
+			${options.id == null ? sql`` : sql`and pm.id = ${options.id}`}
+			${options.id != null || options.includeArchived ? sql`` : sql`and pm.is_archived = false`}
+		${options.id == null ? sql`order by pm.name asc, pm.id asc` : sql`limit 1`}
 	`;
 }
 

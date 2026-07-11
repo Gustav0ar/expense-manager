@@ -749,6 +749,40 @@ select ...
 
 before and after in a database copy or an operational maintenance window.
 
+### Usage-count query plan regression
+
+Category and payment-method usage counts must aggregate every independent association before
+joining the results to the catalog row. Adding a new association directly to the final usage query
+can multiply intermediate rows and make `count(distinct ...)` spill to disk.
+
+Run the deterministic regression fixture inside the development container:
+
+```bash
+pnpm test:query-plans
+```
+
+The fixture creates 20 parent categories, 80 children, 5,000 expenses, 80 recurrences, 80 budgets
+and 80 rules in a transaction that is always rolled back. It checks exact result equality between
+the historical and preaggregated queries, then compares `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`
+plan rows. The assertion uses intermediate row counts rather than an unstable wall-clock limit.
+An advisory transaction lock prevents concurrent fixture runs from colliding.
+
+A representative PostgreSQL 18 development-container run on 2026-07-11 produced:
+
+| Query          | Shape          | Maximum intermediate rows | Execution time (observed) | Shared hits | Temp read / written |
+| -------------- | -------------- | ------------------------- | ------------------------- | ----------- | ------------------- |
+| Categories     | Multiplicative | 1,280,080                 | 553.185 ms                | 265         | 30,693 / 30,733     |
+| Categories     | Preaggregated  | 5,000                     | 0.795 ms                  | 265         | 0 / 0               |
+| Payment method | Multiplicative | 392,000                   | 231.552 ms                | 9,766       | 3,363 / 3,373       |
+| Payment method | Preaggregated  | 4,900                     | 0.663 ms                  | 249         | 0 / 0               |
+
+Execution time is evidence from that run, not a test threshold. The regression assertion uses the
+deterministic intermediate-row reduction and exact result equality.
+
+When extending category or catalog usage, add a separate workspace-scoped aggregate for the new
+association and join that one-row-per-ID result into the final query. Do not add an index solely to
+satisfy this fixture; record production-like `EXPLAIN` evidence before proposing one.
+
 ## Background Job Freshness
 
 `/api/health` reports the recurring-expense scheduler, automatic budget-alert

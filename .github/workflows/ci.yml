@@ -101,7 +101,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [visual, performance, infrastructure, smoke]
+        suite: [visual, performance, query-plans, infrastructure, smoke]
     services:
       postgres:
         image: postgres:18-alpine
@@ -146,7 +146,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:migrate
       - name: Install Chromium
-        if: matrix.suite != 'infrastructure'
+        if: matrix.suite != 'infrastructure' && matrix.suite != 'query-plans'
         run: pnpm exec playwright install --with-deps chromium
       - name: Run ${{ matrix.suite }} quality gate
         run: pnpm test:${{ matrix.suite }}
