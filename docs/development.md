@@ -145,6 +145,14 @@ podman compose -f .devcontainer/compose.yml exec app pnpm test:quality
 
 `pnpm test:quality` includes all four Playwright quality suites plus Prometheus rule scenarios. Rebuild the development container after changing `.devcontainer/Containerfile` so `promtool` is available. CI runs the Playwright suites as a parallel matrix and Prometheus rules as a separate required job, while functional E2E remains in the main verification job.
 
+The client asset budgets are measured from a production build under
+`.svelte-kit/output/client/_app/immutable`. Vite replaces this output on every
+build, so hashed files from an earlier build are not counted. When an intentional
+client feature changes an aggregate ceiling, run at least three clean production
+builds, document the observed range next to the budget, and keep only narrow
+headroom above the maximum. Do not raise a ceiling for an unexplained bundle
+increase or a single non-reproducible result.
+
 Update visual baselines only after intentionally reviewing UI changes:
 
 ```bash
