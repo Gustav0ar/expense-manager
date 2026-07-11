@@ -12,6 +12,7 @@ import {
 	type AnyPgColumn,
 	jsonb,
 	pgTable,
+	primaryKey,
 	text,
 	timestamp,
 	uuid,
@@ -333,6 +334,16 @@ export const budgetAlertDelivery = pgTable(
 			.references(() => workspace.id, { onDelete: 'cascade' }),
 		periodMonth: date('period_month', { mode: 'string' }).notNull(),
 		recipientEmail: text('recipient_email').notNull(),
+		recipientUserId: text('recipient_user_id').references(() => user.id, {
+			onDelete: 'set null'
+		}),
+		recipientLabelSnapshot: text('recipient_label_snapshot'),
+		categoryId: bigint('category_id', { mode: 'number' }).references(() => category.id, {
+			onDelete: 'set null'
+		}),
+		categoryNameSnapshot: text('category_name_snapshot'),
+		level: text('level'),
+		stage: text('stage'),
 		status: text('status').notNull().default('pending'),
 		claimToken: text('claim_token'),
 		claimExpiresAt: timestamp('claim_expires_at', { withTimezone: true }),
@@ -344,6 +355,7 @@ export const budgetAlertDelivery = pgTable(
 		providerMessageUuid: text('provider_message_uuid'),
 		lastProviderEvent: text('last_provider_event'),
 		lastProviderEventAt: timestamp('last_provider_event_at', { withTimezone: true }),
+		lastErrorCategory: text('last_error_category'),
 		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp('updated_at', { withTimezone: true })
 			.notNull()
@@ -355,12 +367,51 @@ export const budgetAlertDelivery = pgTable(
 			'budget_alert_delivery_status_check',
 			sql`${table.status} in ('pending', 'sending', 'sent', 'failed')`
 		),
-		check('budget_alert_delivery_attempt_count_check', sql`${table.attemptCount} >= 0`),
-		uniqueIndex('budget_alert_delivery_workspace_month_recipient_unique_idx').on(
-			table.workspaceId,
-			table.periodMonth,
-			sql`lower(${table.recipientEmail})`
+		check(
+			'budget_alert_delivery_level_check',
+			sql`${table.level} is null or ${table.level} in ('warning', 'over')`
 		),
+		check(
+			'budget_alert_delivery_stage_check',
+			sql`${table.stage} is null or ${table.stage} in ('initial', 'escalation')`
+		),
+		check(
+			'budget_alert_delivery_escalation_level_check',
+			sql`${table.stage} is null or ${table.stage} <> 'escalation' or ${table.level} = 'over'`
+		),
+		check('budget_alert_delivery_attempt_count_check', sql`${table.attemptCount} >= 0`),
+		check(
+			'budget_alert_delivery_error_category_check',
+			sql`${table.lastErrorCategory} is null or ${table.lastErrorCategory} in ('timeout', 'configuration', 'provider_rejected', 'provider_unavailable', 'network', 'unknown')`
+		),
+		uniqueIndex('budget_alert_delivery_workspace_month_recipient_unique_idx')
+			.on(table.workspaceId, table.periodMonth, sql`lower(${table.recipientEmail})`)
+			.where(
+				sql`${table.recipientUserId} is null and ${table.categoryId} is null and ${table.level} is null and ${table.stage} is null`
+			),
+		uniqueIndex('budget_alert_delivery_alert_recipient_unique_idx')
+			.on(
+				table.workspaceId,
+				table.categoryId,
+				table.periodMonth,
+				table.recipientUserId,
+				table.level,
+				table.stage
+			)
+			.where(
+				sql`${table.recipientUserId} is not null and ${table.categoryId} is not null and ${table.level} is not null and ${table.stage} is not null`
+			),
+		uniqueIndex('budget_alert_delivery_transition_recipient_unique_idx')
+			.on(
+				table.workspaceId,
+				table.periodMonth,
+				table.categoryId,
+				table.recipientUserId,
+				table.stage
+			)
+			.where(
+				sql`${table.recipientUserId} is not null and ${table.categoryId} is not null and ${table.level} is not null and ${table.stage} is not null`
+			),
 		index('budget_alert_delivery_workspace_month_status_idx').on(
 			table.workspaceId,
 			table.periodMonth,
@@ -369,7 +420,13 @@ export const budgetAlertDelivery = pgTable(
 		uniqueIndex('budget_alert_delivery_provider_reference_unique_idx').on(table.providerReference),
 		index('budget_alert_delivery_claim_expires_at_idx')
 			.on(table.claimExpiresAt)
-			.where(sql`${table.status} = 'sending'`)
+			.where(sql`${table.status} = 'sending'`),
+		index('budget_alert_delivery_workspace_history_idx').on(
+			table.workspaceId,
+			table.id.desc().nullsFirst()
+		),
+		index('budget_alert_delivery_recipient_user_idx').on(table.recipientUserId),
+		index('budget_alert_delivery_category_idx').on(table.categoryId)
 	]
 );
 
@@ -414,6 +471,8 @@ export const budgetAlertPreference = pgTable(
 			.primaryKey()
 			.references(() => workspace.id, { onDelete: 'cascade' }),
 		isEnabled: boolean('is_enabled').notNull().default(false),
+		recipientMode: text('recipient_mode').notNull().default('all_managers'),
+		escalateOverBudget: boolean('escalate_over_budget').notNull().default(false),
 		locale: text('locale').notNull().default('en'),
 		updatedByUserId: text('updated_by_user_id').references(() => user.id, {
 			onDelete: 'set null'
@@ -425,10 +484,39 @@ export const budgetAlertPreference = pgTable(
 			.$onUpdate(() => new Date())
 	},
 	(table) => [
+		check(
+			'budget_alert_preference_recipient_mode_check',
+			sql`${table.recipientMode} in ('all_managers', 'selected')`
+		),
 		check('budget_alert_preference_locale_check', sql`${table.locale} in ('en', 'pt-BR')`),
 		index('budget_alert_preference_enabled_idx')
 			.on(table.workspaceId)
 			.where(sql`${table.isEnabled} = true`)
+	]
+);
+
+export const budgetAlertRecipient = pgTable(
+	'budget_alert_recipient',
+	{
+		workspaceId: bigint('workspace_id', { mode: 'number' }).notNull(),
+		userId: text('user_id').notNull(),
+		createdByUserId: text('created_by_user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'restrict' }),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(table) => [
+		primaryKey({
+			columns: [table.workspaceId, table.userId],
+			name: 'budget_alert_recipient_workspace_user_pk'
+		}),
+		foreignKey({
+			columns: [table.workspaceId, table.userId],
+			foreignColumns: [workspaceMember.workspaceId, workspaceMember.userId],
+			name: 'budget_alert_recipient_workspace_member_fk'
+		}).onDelete('cascade'),
+		index('budget_alert_recipient_user_idx').on(table.userId),
+		index('budget_alert_recipient_created_by_idx').on(table.createdByUserId)
 	]
 );
 

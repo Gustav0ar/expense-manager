@@ -205,6 +205,28 @@ test('covers planning bad paths and budget deletion', async ({ page }) => {
 		.first()
 		.getAttribute('value');
 	expect(categoryId).toBeTruthy();
+	const notificationCenter = page.locator('.notification-center');
+	await expect(
+		notificationCenter.getByRole('heading', { name: 'Configurações de notificações' })
+	).toBeVisible();
+	await expect(
+		notificationCenter.getByText('Ainda não há histórico de envios de alertas.')
+	).toBeVisible();
+	await notificationCenter.getByRole('checkbox', { name: /Alertas automáticos por email/ }).check();
+	await notificationCenter.getByRole('radio', { name: /Gestores selecionados/ }).check();
+	const saveNotifications = notificationCenter.getByRole('button', {
+		name: 'Salvar configurações de notificações'
+	});
+	await expect(saveNotifications).toBeDisabled();
+	await expect(
+		notificationCenter.getByText('Não há gestores elegíveis disponíveis para alertas de orçamento.')
+	).toBeVisible();
+	await notificationCenter
+		.getByRole('checkbox', { name: /Alertas automáticos por email/ })
+		.uncheck();
+	await expect(saveNotifications).toBeEnabled();
+	await saveNotifications.click();
+	await expect(page.getByText('Preferências de alertas de orçamento salvas.')).toBeVisible();
 
 	await expectActionMessage(
 		await page.request.post('/app/planning?/createCatalog', {

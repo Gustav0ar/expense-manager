@@ -1,11 +1,18 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { budgetFormValues, localizedFormFieldErrors } from '$lib/server/action-utils';
+import {
+	budgetFormValues,
+	handleServiceError,
+	localizedFormFieldErrors
+} from '$lib/server/action-utils';
 import { listCategories } from '$lib/server/services/categories';
 import {
 	deleteBudget,
 	getBudgetAlertPreference,
+	listBudgetAlertDeliveryHistory,
+	listBudgetAlertEligibleRecipients,
 	listBudgetStatus,
+	retryBudgetAlertDelivery,
 	sendBudgetAlerts,
 	setBudgetAlertPreference,
 	upsertBudget
@@ -37,6 +44,7 @@ import {
 	budgetSchema,
 	budgetAlertSchema,
 	budgetAlertPreferenceSchema,
+	budgetAlertHistoryFilterSchema,
 	confirmImportPreviewSchema,
 	idSchema,
 	expenseCatalogSchema,
@@ -50,6 +58,7 @@ import {
 	undoImportBatchSchema
 } from '$lib/server/validation';
 import { translate } from '$lib/i18n';
+import { canManageBudgets } from '$lib/server/security/roles';
 
 export const load: PageServerLoad = async (event) => {
 	const context = await requireWorkspaceContext(event);
@@ -58,6 +67,12 @@ export const load: PageServerLoad = async (event) => {
 	});
 	if (!filters.success) throw error(400, translate(event.locals.locale, 'Filters are invalid.'));
 	const periodMonth = filters.data.periodMonth || firstDayOfMonth(new Date());
+	const historyFilters = budgetAlertHistoryFilterSchema.safeParse({
+		cursor: event.url.searchParams.get('alertCursor') || undefined
+	});
+	if (!historyFilters.success)
+		throw error(400, translate(event.locals.locale, 'Filters are invalid.'));
+	const canManageBudgetAlerts = canManageBudgets(context.role);
 
 	const [
 		categories,
@@ -76,6 +91,12 @@ export const load: PageServerLoad = async (event) => {
 		listImportBatches(context),
 		listReconciliationQueue(context)
 	]);
+	const [budgetAlertRecipients, budgetAlertHistory] = canManageBudgetAlerts
+		? await Promise.all([
+				listBudgetAlertEligibleRecipients(context),
+				listBudgetAlertDeliveryHistory(context, historyFilters.data)
+			])
+		: [[], { items: [], nextCursor: null }];
 
 	return {
 		categories,
@@ -83,6 +104,9 @@ export const load: PageServerLoad = async (event) => {
 		periodMonth,
 		budgets,
 		budgetAlertPreference,
+		canManageBudgetAlerts,
+		budgetAlertRecipients,
+		budgetAlertHistory,
 		recurringExpenses,
 		importBatches,
 		reconciliationQueue
@@ -117,22 +141,72 @@ export const actions: Actions = {
 	},
 	setBudgetAlertPreference: async (event) => {
 		const context = await requireWorkspaceContext(event);
-		const parsed = parseForm(await event.request.formData(), budgetAlertPreferenceSchema);
+		const formData = await event.request.formData();
+		if (!formData.has('recipientMode')) {
+			const enabled = formData.get('enabled');
+			if (enabled !== 'true' && enabled !== 'false')
+				return fail(400, {
+					message: translate(event.locals.locale, 'Invalid budget alert preference.'),
+					tone: 'danger'
+				});
+			try {
+				await setBudgetAlertPreference(context, enabled === 'true');
+			} catch (serviceError) {
+				return handleServiceError(serviceError, { tone: 'danger' }, { exclude403: true });
+			}
+			return {
+				tone: 'success',
+				message: translate(
+					event.locals.locale,
+					enabled === 'true'
+						? 'Automatic budget alerts enabled.'
+						: 'Automatic budget alerts disabled.'
+				)
+			};
+		}
+		const parsed = parseForm(formData, budgetAlertPreferenceSchema);
 		if (!parsed.success)
 			return fail(400, {
 				message: translate(event.locals.locale, 'Invalid budget alert preference.'),
 				tone: 'danger'
 			});
 
-		await setBudgetAlertPreference(context, parsed.data.enabled);
+		try {
+			await setBudgetAlertPreference(context, {
+				isEnabled: parsed.data.enabled,
+				recipientMode: parsed.data.recipientMode,
+				escalateOverBudget: parsed.data.escalateOverBudget,
+				recipientUserIds: parsed.data.recipientUserIds
+			});
+		} catch (serviceError) {
+			return handleServiceError(serviceError, { tone: 'danger' }, { exclude403: true });
+		}
 		return {
 			tone: 'success',
-			message: translate(
-				event.locals.locale,
-				parsed.data.enabled
-					? 'Automatic budget alerts enabled.'
-					: 'Automatic budget alerts disabled.'
-			)
+			message: translate(event.locals.locale, 'Budget alert preferences saved.')
+		};
+	},
+	retryBudgetAlertDelivery: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const formData = await event.request.formData();
+		const id = idSchema.safeParse(formData.get('id'));
+		if (!id.success)
+			return fail(400, {
+				message: translate(event.locals.locale, 'Invalid budget alert delivery.'),
+				tone: 'danger'
+			});
+		let result;
+		try {
+			result = await retryBudgetAlertDelivery(context, id.data);
+		} catch (serviceError) {
+			return handleServiceError(serviceError, { tone: 'danger' }, { exclude403: true });
+		}
+		return {
+			tone: result.failedCount > 0 ? 'danger' : 'success',
+			message:
+				result.sentCount > 0
+					? translate(event.locals.locale, 'Budget alert delivery retried.')
+					: translate(event.locals.locale, 'Budget alert delivery retry failed.')
 		};
 	},
 	sendBudgetAlerts: async (event) => {

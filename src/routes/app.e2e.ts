@@ -115,6 +115,12 @@ async function expectNoHorizontalOverflow(page: Page) {
 			'.category-edit',
 			'.budget-item',
 			'.budget-inline-form',
+			'.notification-center',
+			'.manager-grid',
+			'.preference-card',
+			'.history-card',
+			'.choice-row',
+			'.switch-row',
 			'.recurring-item',
 			'.table-wrap',
 			'.support-catalog-form'
@@ -146,7 +152,19 @@ async function expectNoHorizontalOverflow(page: Page) {
 					clientWidth: Math.ceil(element.clientWidth),
 					scrollWidth: Math.ceil(element.scrollWidth),
 					width: Math.ceil(rect.width),
-					height: Math.ceil(rect.height)
+					height: Math.ceil(rect.height),
+					overflowingChildren: Array.from(element.children)
+						.map((child) => {
+							const childRect = child.getBoundingClientRect();
+							return {
+								className: child.getAttribute('class') ?? '',
+								tag: child.tagName.toLowerCase(),
+								left: Math.floor(childRect.left),
+								right: Math.ceil(childRect.right),
+								width: Math.ceil(childRect.width)
+							};
+						})
+						.filter((child) => child.left < rect.left - 1 || child.right > rect.right + 1)
 				};
 			})
 			.filter(
@@ -1081,11 +1099,22 @@ test('covers planning, imports, attachments and audit flows', async ({ page }) =
 		'R$ 500,00'
 	);
 	await expect(page.getByText('Alertas automáticos desativados')).toBeVisible();
-	await page.getByRole('button', { name: 'Ativar alertas automáticos' }).click();
-	await expect(page.getByText('Alertas automáticos de orçamento ativados.')).toBeVisible();
+	const notificationSettings = page.locator('form.preference-card');
+	const automaticAlerts = notificationSettings.getByRole('checkbox', {
+		name: /Alertas automáticos por email/
+	});
+	await automaticAlerts.check();
+	await notificationSettings
+		.getByRole('button', { name: 'Salvar configurações de notificações' })
+		.click();
+	await expect(page.getByText('Preferências de alertas de orçamento salvas.')).toBeVisible();
 	await expect(page.getByText('Alertas automáticos ativados')).toBeVisible();
-	await page.getByRole('button', { name: 'Desativar alertas automáticos' }).click();
-	await expect(page.getByText('Alertas automáticos de orçamento desativados.')).toBeVisible();
+	await automaticAlerts.uncheck();
+	await notificationSettings
+		.getByRole('button', { name: 'Salvar configurações de notificações' })
+		.click();
+	await expect(page.getByText('Preferências de alertas de orçamento salvas.')).toBeVisible();
+	await expect(page.getByText('Alertas automáticos desativados')).toBeVisible();
 	await page.getByRole('button', { name: 'Enviar alertas agora' }).click();
 	await expect(page.getByText('Nenhum alerta de orçamento para enviar.')).toBeVisible();
 
