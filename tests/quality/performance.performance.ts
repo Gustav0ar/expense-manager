@@ -23,17 +23,19 @@ type RuntimeBudget = {
 
 const assetBudget: AssetBudget = {
 	largestJsBytes: 90 * kib,
-	totalCssBytes: 80 * kib,
-	// Import preview moved the original 140 KiB gzip ceiling to 145,503 bytes.
-	// Reconciliation measured 148,850 bytes and the localized budget notification
-	// center now measures 154,760 bytes. Keep a narrow 156,672-byte ceiling
-	// without changing per-asset/runtime limits.
-	totalGzipJsBytes: 153 * kib,
-	// Import preview moved the original 384 KiB raw ceiling to 400,607 bytes.
-	// Reconciliation measured 411,503 bytes and the localized budget notification
-	// center now measures 434,661 bytes. Keep a narrow 436,224-byte ceiling
-	// without changing per-asset/runtime limits.
-	totalJsBytes: 426 * kib
+	// The responsive trash route adds 1,684 bytes to the former 80 KiB ceiling;
+	// retain a narrow 83,968-byte aggregate limit.
+	totalCssBytes: 82 * kib,
+	// The trash route initially measured 158,601 bytes. Its later cursor-pagination
+	// controls intentionally moved three clean builds to 158,887-158,898 bytes.
+	// Keep 334 bytes of headroom above that observed maximum without changing the
+	// per-asset/runtime limits.
+	totalGzipJsBytes: 159_232,
+	// The trash route initially measured 444,003 bytes. Its later cursor-pagination
+	// controls intentionally moved three clean builds to 445,170-445,174 bytes.
+	// Keep 266 bytes of headroom above that observed maximum without changing the
+	// per-asset/runtime limits.
+	totalJsBytes: 445_440
 };
 
 const runtimeBudget: RuntimeBudget = {
