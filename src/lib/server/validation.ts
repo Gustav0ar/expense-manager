@@ -319,8 +319,24 @@ export const budgetAlertSchema = z.object({
 	periodMonth: monthSchema
 });
 
+const budgetAlertRecipientIdsSchema = z
+	.string()
+	.trim()
+	.max(25_600)
+	.transform((value) =>
+		value === '' ? [] : Array.from(new Set(value.split(',').map((userId) => userId.trim())))
+	)
+	.pipe(z.array(z.string().min(1).max(255)).max(100));
+
 export const budgetAlertPreferenceSchema = z.object({
-	enabled: z.enum(['true', 'false']).transform((value) => value === 'true')
+	enabled: z.enum(['true', 'false']).transform((value) => value === 'true'),
+	recipientMode: z.enum(['all_managers', 'selected']),
+	escalateOverBudget: z.enum(['true', 'false']).transform((value) => value === 'true'),
+	recipientUserIds: budgetAlertRecipientIdsSchema
+});
+
+export const budgetAlertHistoryFilterSchema = z.object({
+	cursor: z.string().trim().max(500).optional()
 });
 
 export const auditFilterSchema = z.object({

@@ -34,18 +34,42 @@ REQUIRE_EMAIL_VERIFICATION="true"
 The `MAILJET_FROM` domain must match a verified Mailjet domain. Do not use a
 personal mailbox as the production sender.
 
-Budget-alert delivery is tracked per workspace, month and recipient. Successful
-recipients are not sent the same monthly alert again, while failed recipients
-remain retryable. In-flight claims expire after ten minutes so an interrupted
-application process cannot leave delivery permanently stuck.
+Budget-alert delivery is tracked per workspace, month, category, recipient and
+transition. A recipient receives at most one initial warning or direct
+over-budget alert for a category in a month. Workspaces may optionally send one
+additional over-budget escalation when a previously warned category crosses its
+budget. Falling below a threshold and crossing it again does not resend either
+transition.
 
 Automatic budget alerts are opt-in per workspace. Owners and administrators can
-enable them from the Budget page; the preference stores the selected UI locale.
+enable them from the Budget page, send to every eligible manager or select
+specific recipients, and choose whether warning-to-over escalation is enabled.
+Only verified users with an active owner or administrator membership in the same
+workspace are eligible. Selected recipients are revalidated immediately before
+every retry, so a demoted, disabled, unverified or deselected account is not
+contacted.
+
+The preference, selected-recipient replacement and audit event commit in one
+database transaction. Delivery transitions are protected by partial unique
+indexes and token-owned ten-minute claims. Provider calls occur only after the
+claim transaction commits. Each transition is attempted at most eight times;
+logs and the administrator-visible history retain only a coarse failure category.
+Bounce, blocked, spam and unsubscribe feedback is never retried. Open and click
+events are shown as activity reported by the provider, not proof that a person
+read the message.
+
+Rows created before category-level transition tracking are intentionally left
+unmapped. Any workspace/month containing a legacy delivery or legacy sent audit
+marker remains closed, preventing deployment from resending historical alerts.
+The migration creates no selected-recipient rows and existing preferences keep
+the all-managers behavior with escalation disabled.
+
+The preference also stores the selected UI locale.
 The background coordinator checks enabled workspaces hourly and uses a Postgres
 advisory lock so only one application instance performs a cycle. The existing
-monthly recipient ledger makes repeated cycles idempotent and retries failed
-recipients without resending successful deliveries. Manual **Send alerts now**
-remains available independently of the automatic preference.
+transition ledger makes repeated cycles idempotent. Manual **Send alerts now**
+uses the same transition and recipient rules and remains available independently
+of the automatic preference.
 
 ## Durable Invitation Delivery
 
@@ -159,6 +183,13 @@ records the latest provider event in event-time order. The event table stores
 only the provider, event type, timestamps and provider identifiers; it does not
 persist callback IP addresses, user agents, clicked URLs, raw payloads or email
 addresses. A daily background job removes event rows after 90 days.
+
+The Budget notification center exposes a cursor-paginated, workspace-scoped
+history to owners and administrators. It never returns or renders `CustomID`,
+provider message IDs, message UUIDs, event fingerprints, webhook payloads or
+provider response bodies. Members and viewers can still read budget progress but
+receive no recipient selection, recipient identity, delivery history or retry
+data.
 
 If the webhook credential is absent, sending continues normally and the
 callback endpoint returns HTTP 503. This keeps the feedback integration

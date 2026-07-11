@@ -146,4 +146,14 @@ test('captures stable desktop and mobile app surfaces', async ({ page }) => {
 	await page.goto('/app/expenses?from=2026-06-01&to=2026-06-30');
 	await expect(page.getByRole('heading', { exact: true, name: 'Expenses' })).toBeVisible();
 	await capture(page, page.locator('.app-shell'), 'expenses-mobile.png');
+
+	await page.setViewportSize({ width: 1280, height: 900 });
+	await page.goto('/app/planning?periodMonth=2026-06');
+	const notificationCenter = page.locator('.notification-center');
+	await expect(notificationCenter.getByRole('heading', { name: 'Budget alerts' })).toBeVisible();
+	await capture(page, notificationCenter, 'budget-notifications-desktop.png');
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390);
+	await expect(notificationCenter.locator('.rail-labels span:nth-child(2)')).toBeHidden();
+	await capture(page, notificationCenter, 'budget-notifications-mobile.png');
 });

@@ -45,6 +45,16 @@ async function main() {
 				paymentBaseline.metrics,
 				paymentOptimized.metrics
 			);
+			const budgetAlertHistoryIndexes = await explainIndexes(
+				tx,
+				budgetAlertHistorySql,
+				workspaceId
+			);
+			if (!budgetAlertHistoryIndexes.includes('budget_alert_delivery_workspace_history_idx')) {
+				throw new Error(
+					`budget-alert history did not use its cursor index: ${budgetAlertHistoryIndexes.join(', ')}`
+				);
+			}
 
 			report = {
 				fixture: {
@@ -56,7 +66,8 @@ async function main() {
 					rules: 80
 				},
 				category: { baseline: categoryBaseline.metrics, optimized: categoryOptimized.metrics },
-				paymentMethod: { baseline: paymentBaseline.metrics, optimized: paymentOptimized.metrics }
+				paymentMethod: { baseline: paymentBaseline.metrics, optimized: paymentOptimized.metrics },
+				budgetAlertHistory: { indexes: budgetAlertHistoryIndexes }
 			};
 
 			throw rollbackSentinel;
@@ -70,7 +81,9 @@ async function main() {
 	if (!report) throw new Error('Usage-count query plan report was not created');
 
 	console.log(JSON.stringify(report, null, 2));
-	console.log('Usage-count query results match and multiplicative intermediates are eliminated.');
+	console.log(
+		'Usage-count queries eliminate multiplicative intermediates and budget-alert history uses its cursor index.'
+	);
 }
 
 async function seedFixture(tx, workspaceId, userId) {
@@ -140,12 +153,35 @@ async function seedFixture(tx, workspaceId, userId) {
 		cross join generate_series(1, 4) rule_series
 		where parent.workspace_id = ${workspaceId} and parent.parent_category_id is null
 	`;
+	await tx`
+		insert into budget_alert_delivery (workspace_id, period_month, recipient_email)
+		select ${workspaceId},
+			(date '1900-01-01' + (series - 1) * interval '1 month')::date,
+			'usage-count-query-plan-fixture@example.invalid'
+		from generate_series(1, 1000) series
+	`;
+	await tx`
+		insert into workspace (name, created_by_user_id, currency)
+		select 'Budget history noise ' || series, ${userId}, 'USD'
+		from generate_series(1, 40) series
+	`;
+	await tx`
+		insert into budget_alert_delivery (workspace_id, period_month, recipient_email)
+		select noise.id,
+			(date '1900-01-01' + (series - 1) * interval '1 month')::date,
+			'usage-count-query-plan-fixture@example.invalid'
+		from workspace noise
+		cross join generate_series(1, 1000) series
+		where noise.created_by_user_id = ${userId}
+			and noise.name like 'Budget history noise %'
+	`;
 	await tx`analyze category`;
 	await tx`analyze expense`;
 	await tx`analyze recurring_expense`;
 	await tx`analyze category_budget`;
 	await tx`analyze category_rule`;
 	await tx`analyze payment_method`;
+	await tx`analyze budget_alert_delivery`;
 }
 
 async function explainAndRun(tx, query, workspaceId) {
@@ -179,6 +215,21 @@ function collectPlanMetrics(explain) {
 			maxIntermediateRows,
 			(node['Actual Rows'] ?? 0) * (node['Actual Loops'] ?? 1)
 		);
+		for (const child of node.Plans ?? []) visit(child);
+	}
+}
+
+async function explainIndexes(tx, query, workspaceId) {
+	await tx`set local enable_seqscan = off`;
+	const explainRows = await tx.unsafe(`explain (format json) ${query}`, [workspaceId]);
+	const document = Object.values(explainRows[0])[0];
+	const explain = typeof document === 'string' ? JSON.parse(document) : document;
+	const indexes = [];
+	visit(explain[0].Plan);
+	return indexes;
+
+	function visit(node) {
+		if (node['Index Name']) indexes.push(node['Index Name']);
 		for (const child of node.Plans ?? []) visit(child);
 	}
 }
@@ -304,6 +355,14 @@ const paymentMethodOptimizedSql = `
 	left join recurring_usage ru on ru.payment_method_id = pm.id
 	where pm.workspace_id = $1 and pm.is_archived = false
 	order by pm.name asc, pm.id asc
+`;
+
+const budgetAlertHistorySql = `
+	select id, period_month, status, attempt_count, updated_at
+	from budget_alert_delivery
+	where workspace_id = $1 and id < 9223372036854775807
+	order by id desc
+	limit 21
 `;
 
 await main();

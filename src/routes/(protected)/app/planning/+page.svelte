@@ -1,11 +1,11 @@
 <script lang="ts">
 	import LocalizedDate from '$lib/components/LocalizedDate.svelte';
 	import LocalizedDateTime from '$lib/components/LocalizedDateTime.svelte';
+	import BudgetNotificationCenter from './BudgetNotificationCenter.svelte';
 	import { translate } from '$lib/i18n';
 	import { formatCents } from '$lib/utils/format';
 	import { resolve } from '$app/paths';
 	import {
-		Bell,
 		FileUp,
 		Landmark,
 		Pause,
@@ -134,37 +134,17 @@
 		<section class="panel">
 			<div class="panel-heading panel-heading-wrap">
 				<h3>{t('Budget by category')}</h3>
-				<div class="inline-actions">
-					<span
-						class={['status-pill', data.budgetAlertPreference.isEnabled ? 'success' : 'neutral']}
-					>
-						{data.budgetAlertPreference.isEnabled
-							? t('Automatic alerts on')
-							: t('Automatic alerts off')}
-					</span>
-					<form method="post" action="?/setBudgetAlertPreference">
-						<input
-							type="hidden"
-							name="enabled"
-							value={data.budgetAlertPreference.isEnabled ? 'false' : 'true'}
-						/>
-						<button class="button secondary" type="submit">
-							<Bell size={16} />
-							<span>
-								{data.budgetAlertPreference.isEnabled
-									? t('Disable automatic alerts')
-									: t('Enable automatic alerts')}
-							</span>
-						</button>
-					</form>
-					<form method="post" action="?/sendBudgetAlerts">
-						<input type="hidden" name="periodMonth" value={data.periodMonth} />
-						<button class="button secondary" type="submit" title={t('Send budget alert email')}>
-							<Target size={16} />
-							<span>{t('Send alerts now')}</span>
-						</button>
-					</form>
-				</div>
+				{#if data.canManageBudgetAlerts}
+					<div class="inline-actions">
+						<form method="post" action="?/sendBudgetAlerts">
+							<input type="hidden" name="periodMonth" value={data.periodMonth} />
+							<button class="button secondary" type="submit" title={t('Send budget alert email')}>
+								<Target size={16} />
+								<span>{t('Send alerts now')}</span>
+							</button>
+						</form>
+					</div>
+				{/if}
 			</div>
 			<form method="post" action="?/upsertBudget" class="form-grid compact planning-form">
 				<input type="hidden" name="periodMonth" value={data.periodMonth} />
@@ -381,6 +361,16 @@
 			</div>
 		</section>
 	</div>
+
+	<BudgetNotificationCenter
+		locale={data.locale}
+		periodMonth={data.periodMonth}
+		canManage={data.canManageBudgetAlerts}
+		budgets={data.budgets}
+		preference={data.budgetAlertPreference}
+		eligibleRecipients={data.budgetAlertRecipients}
+		history={data.budgetAlertHistory}
+	/>
 
 	<section class="panel">
 		<div class="panel-heading">

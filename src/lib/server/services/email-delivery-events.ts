@@ -183,6 +183,7 @@ export async function recordMailjetDeliveryEvents(events: MailjetDeliveryEvent[]
 						)`,
 						claimToken: null,
 						claimExpiresAt: null,
+						lastErrorCategory: null,
 						updatedAt: new Date()
 					})
 					.where(

@@ -223,6 +223,112 @@ assert_ofx_reconciliation() {
 	fi
 }
 
+assert_budget_alert_controls() {
+	local target_url="$1"
+	local target_label="$2"
+	local schema_count
+	schema_count="$(
+		psql "${target_url}" -v ON_ERROR_STOP=1 -Atqc \
+			"SELECT
+			   (SELECT count(*) FROM information_schema.columns
+			    WHERE table_schema = 'public' AND table_name = 'budget_alert_recipient'
+			      AND column_name IN ('workspace_id', 'user_id', 'created_by_user_id')
+			      AND is_nullable = 'NO')
+			 + (SELECT count(*) FROM information_schema.columns
+			    WHERE table_schema = 'public' AND table_name = 'budget_alert_delivery'
+			      AND column_name IN (
+			        'recipient_user_id', 'recipient_label_snapshot', 'category_id',
+			        'category_name_snapshot', 'level', 'stage', 'last_error_category'
+			      ))
+			 + (SELECT count(*) FROM information_schema.columns
+			    WHERE table_schema = 'public' AND table_name = 'budget_alert_preference'
+			      AND column_name IN ('recipient_mode', 'escalate_over_budget')
+			      AND is_nullable = 'NO')
+			 + (SELECT count(*) FROM pg_constraint
+			    WHERE conname IN (
+			      'budget_alert_recipient_workspace_user_pk',
+			      'budget_alert_recipient_created_by_user_id_user_id_fk',
+			      'budget_alert_recipient_workspace_member_fk',
+			      'budget_alert_delivery_level_check',
+			      'budget_alert_delivery_stage_check',
+			      'budget_alert_delivery_escalation_level_check',
+			      'budget_alert_delivery_error_category_check',
+			      'budget_alert_preference_recipient_mode_check'
+			    ) AND convalidated)
+			 + (SELECT count(*) FROM pg_indexes
+			    WHERE schemaname = 'public'
+			      AND indexname IN (
+			        'budget_alert_delivery_workspace_month_recipient_unique_idx',
+			        'budget_alert_delivery_alert_recipient_unique_idx',
+			        'budget_alert_delivery_transition_recipient_unique_idx',
+			        'budget_alert_delivery_workspace_history_idx',
+			        'budget_alert_recipient_created_by_idx'
+			      ))"
+	)"
+	if [ "${schema_count}" != "25" ]; then
+		echo "${target_label} does not have the guarded budget-alert control schema." >&2
+		exit 1
+	fi
+
+	local transition_index_count
+	transition_index_count="$(
+		psql "${target_url}" -v ON_ERROR_STOP=1 -Atqc \
+			"SELECT count(*) FROM pg_indexes
+			 WHERE schemaname = 'public'
+			   AND tablename = 'budget_alert_delivery'
+			   AND indexname = 'budget_alert_delivery_transition_recipient_unique_idx'
+			   AND indexdef ILIKE 'CREATE UNIQUE INDEX%workspace_id%period_month%category_id%recipient_user_id%stage%WHERE%level%is not null%'"
+	)"
+	if [ "${transition_index_count}" != "1" ]; then
+		echo "${target_label} does not enforce one level per budget-alert transition stage." >&2
+		exit 1
+	fi
+
+	local history_index_count
+	history_index_count="$(
+		psql "${target_url}" -v ON_ERROR_STOP=1 -Atqc \
+			"SELECT count(*) FROM pg_index i
+			 JOIN pg_class index_relation ON index_relation.oid = i.indexrelid
+			 JOIN pg_class table_relation ON table_relation.oid = i.indrelid
+			 JOIN pg_namespace namespace ON namespace.oid = table_relation.relnamespace
+			 WHERE namespace.nspname = 'public'
+			   AND table_relation.relname = 'budget_alert_delivery'
+			   AND index_relation.relname = 'budget_alert_delivery_workspace_history_idx'
+			   AND i.indoption::text = '0 3'
+			   AND pg_get_indexdef(i.indexrelid) ILIKE '%workspace_id%id DESC%'"
+	)"
+	if [ "${history_index_count}" != "1" ]; then
+		echo "${target_label} does not support descending budget-alert history cursors." >&2
+		exit 1
+	fi
+
+	local escalation_constraint_count
+	escalation_constraint_count="$(
+		psql "${target_url}" -v ON_ERROR_STOP=1 -Atqc \
+			"SELECT count(*) FROM pg_constraint
+			 WHERE conname = 'budget_alert_delivery_escalation_level_check'
+			   AND contype = 'c'
+			   AND convalidated
+			   AND pg_get_constraintdef(oid) ILIKE '%stage%escalation%level%over%'"
+	)"
+	if [ "${escalation_constraint_count}" != "1" ]; then
+		echo "${target_label} allows a non-over escalation delivery." >&2
+		exit 1
+	fi
+
+	local foreign_key_delete_rules
+	foreign_key_delete_rules="$(
+		psql "${target_url}" -v ON_ERROR_STOP=1 -Atqc \
+			"SELECT count(*) FROM pg_constraint
+			 WHERE (conname = 'budget_alert_recipient_workspace_member_fk' AND confdeltype = 'c')
+			    OR (conname = 'budget_alert_recipient_created_by_user_id_user_id_fk' AND confdeltype = 'r')"
+	)"
+	if [ "${foreign_key_delete_rules}" != "2" ]; then
+		echo "${target_label} has incorrect budget-alert recipient deletion rules." >&2
+		exit 1
+	fi
+}
+
 mkdir -p "${legacy_migrations}/meta"
 cp "${repo_root}"/drizzle/000[0-8]_*.sql "${legacy_migrations}/"
 
@@ -286,6 +392,7 @@ assert_money_constraints "${upgrade_database_url}" "Upgraded database"
 assert_invitation_delivery_outbox "${upgrade_database_url}" "Upgraded database"
 assert_attachment_deletion_outbox "${upgrade_database_url}" "Upgraded database"
 assert_ofx_reconciliation "${upgrade_database_url}" "Upgraded database"
+assert_budget_alert_controls "${upgrade_database_url}" "Upgraded database"
 
 fresh_database_created=true
 createdb --maintenance-db="${maintenance_url}" "${fresh_database}"
@@ -308,6 +415,7 @@ assert_money_constraints "${fresh_database_url}" "Fresh database"
 assert_invitation_delivery_outbox "${fresh_database_url}" "Fresh database"
 assert_attachment_deletion_outbox "${fresh_database_url}" "Fresh database"
 assert_ofx_reconciliation "${fresh_database_url}" "Fresh database"
+assert_budget_alert_controls "${fresh_database_url}" "Fresh database"
 
 cleanup
 trap - EXIT INT TERM

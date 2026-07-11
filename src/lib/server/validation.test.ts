@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	authEmailSchema,
 	auditFilterSchema,
+	budgetAlertHistoryFilterSchema,
 	budgetAlertSchema,
 	budgetAlertPreferenceSchema,
 	budgetSchema,
@@ -368,9 +369,62 @@ describe('validation schemas', () => {
 		expect(budgetAlertSchema.parse({ periodMonth: '2026-06' })).toEqual({
 			periodMonth: '2026-06-01'
 		});
-		expect(budgetAlertPreferenceSchema.parse({ enabled: 'true' })).toEqual({ enabled: true });
-		expect(budgetAlertPreferenceSchema.parse({ enabled: 'false' })).toEqual({ enabled: false });
-		expect(budgetAlertPreferenceSchema.safeParse({ enabled: 'yes' }).success).toBe(false);
+		expect(
+			budgetAlertPreferenceSchema.parse({
+				enabled: 'true',
+				recipientMode: 'selected',
+				escalateOverBudget: 'true',
+				recipientUserIds: ' user-2,user-1,user-2 '
+			})
+		).toEqual({
+			enabled: true,
+			recipientMode: 'selected',
+			escalateOverBudget: true,
+			recipientUserIds: ['user-2', 'user-1']
+		});
+		expect(
+			budgetAlertPreferenceSchema.parse({
+				enabled: 'false',
+				recipientMode: 'all_managers',
+				escalateOverBudget: 'false',
+				recipientUserIds: ''
+			})
+		).toEqual({
+			enabled: false,
+			recipientMode: 'all_managers',
+			escalateOverBudget: false,
+			recipientUserIds: []
+		});
+		expect(
+			budgetAlertPreferenceSchema.safeParse({
+				enabled: 'yes',
+				recipientMode: 'all_managers',
+				escalateOverBudget: 'false',
+				recipientUserIds: ''
+			}).success
+		).toBe(false);
+		expect(
+			budgetAlertPreferenceSchema.safeParse({
+				enabled: 'true',
+				recipientMode: 'selected',
+				escalateOverBudget: 'false',
+				recipientUserIds: 'user-1,,user-2'
+			}).success
+		).toBe(false);
+		expect(
+			budgetAlertPreferenceSchema.safeParse({
+				enabled: 'true',
+				recipientMode: 'selected',
+				escalateOverBudget: 'false',
+				recipientUserIds: Array.from({ length: 101 }, (_, index) => `user-${index}`).join(',')
+			}).success
+		).toBe(false);
+		expect(budgetAlertHistoryFilterSchema.parse({ cursor: ' next-page ' })).toEqual({
+			cursor: 'next-page'
+		});
+		expect(budgetAlertHistoryFilterSchema.safeParse({ cursor: 'x'.repeat(501) }).success).toBe(
+			false
+		);
 		expect(auditFilterSchema.parse({ action: 'expense.created', cursor: 'abc' })).toEqual({
 			action: 'expense.created',
 			cursor: 'abc'

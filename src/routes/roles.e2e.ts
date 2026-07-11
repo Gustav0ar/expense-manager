@@ -570,6 +570,38 @@ test('enforces administration boundaries for workspace, members, categories and 
 			await setBudgetAlertPreferenceRequest(invited.viewer.page),
 			'viewer cannot change automatic budget alerts'
 		);
+
+		await owner.page.goto('/app/planning?periodMonth=2026-06');
+		const notificationCenter = owner.page.locator('.notification-center');
+		await expect(
+			notificationCenter.getByRole('heading', { name: 'Alert thresholds' })
+		).toBeVisible();
+		await expect(
+			notificationCenter.getByRole('heading', { name: 'Notification settings' })
+		).toBeVisible();
+		const selectedManagers = notificationCenter.getByRole('radio', {
+			name: /Selected managers/
+		});
+		await selectedManagers.focus();
+		await selectedManagers.press('Space');
+		await expect(selectedManagers).toBeChecked();
+		await expect(
+			notificationCenter.getByText('No eligible managers are available for budget alerts.')
+		).toBeVisible();
+		expect(await owner.page.content()).not.toContain(invited.admin.email);
+
+		for (const restricted of [invited.member, invited.viewer]) {
+			await restricted.page.goto('/app/planning?periodMonth=2026-06');
+			const restrictedCenter = restricted.page.locator('.notification-center');
+			await expect(
+				restrictedCenter.getByRole('heading', { name: 'Alert thresholds' })
+			).toBeVisible();
+			await expect(
+				restrictedCenter.getByRole('heading', { name: 'Notification settings' })
+			).toHaveCount(0);
+			expect(await restricted.page.content()).not.toContain(invited.admin.email);
+		}
+
 		const savedBudgetId = await budgetId(owner.page, 'Admin Base');
 		await expectDenied(
 			await deleteBudgetRequest(invited.member.page, savedBudgetId),
