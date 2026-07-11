@@ -192,12 +192,20 @@ test('covers workspace preferences, appearance, language, creation and switching
 	await expect(localeForm(page).locator('select[name="locale"] option[value="en"]')).toHaveText(
 		'🇺🇸 English'
 	);
+	await expectActionMessage(
+		await postWorkspaceUpdate(page, { name: 'A', weekStartsOn: '1', currency: 'USD' }),
+		'Check workspace data.'
+	);
 
 	await localeForm(page).locator('select[name="locale"]').selectOption('pt-BR');
 	await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
 	await expect(page.locator('main .eyebrow', { hasText: 'Ajustes' })).toBeVisible();
 	await expect(localeForm(page).locator('select[name="locale"] option[value="pt-BR"]')).toHaveText(
 		'🇧🇷 Português (Brasil)'
+	);
+	await expectActionMessage(
+		await postWorkspaceUpdate(page, { name: 'A', weekStartsOn: '1', currency: 'USD' }),
+		'Confira os dados do workspace.'
 	);
 
 	await localeForm(page).locator('select[name="locale"]').selectOption('system');

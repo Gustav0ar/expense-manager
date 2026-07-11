@@ -453,6 +453,7 @@ export const ptBrMessages = {
 		'Não foi possível comprimir a imagem. Tente um arquivo menor.',
 	'Could not save the catalog.': 'Não foi possível salvar o cadastro.',
 	'Could not save the category.': 'Não foi possível salvar a categoria.',
+	'Could not update the workspace.': 'Não foi possível atualizar o workspace.',
 	'Delete category': 'Excluir categoria',
 	'Permission denied.': 'Permissão insuficiente.',
 	'Origin is invalid.': 'Origem inválida.',

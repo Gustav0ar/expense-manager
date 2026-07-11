@@ -5,6 +5,7 @@ import svelte from 'eslint-plugin-svelte';
 import { defineConfig, includeIgnoreFile } from 'eslint/config';
 import globals from 'globals';
 import ts from 'typescript-eslint';
+import { requireTranslatedServerMessages } from './eslint-rules/i18n-server-messages.js';
 
 const gitignorePath = path.resolve(import.meta.dirname, '.gitignore');
 
@@ -31,6 +32,18 @@ export default defineConfig(
 				extraFileExtensions: ['.svelte'],
 				parser: ts.parser
 			}
+		}
+	},
+	{
+		files: ['src/lib/server/**/*.{ts,js}', 'src/routes/**/+{page.,}server.{ts,js}'],
+		ignores: ['**/*.test.{ts,js}'],
+		plugins: {
+			'i18n-local': {
+				rules: { 'require-translated-server-messages': requireTranslatedServerMessages }
+			}
+		},
+		rules: {
+			'i18n-local/require-translated-server-messages': 'error'
 		}
 	},
 	{
