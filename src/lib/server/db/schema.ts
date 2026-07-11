@@ -675,6 +675,7 @@ export const expenseAttachment = pgTable(
 		sizeBytes: integer('size_bytes').notNull(),
 		storageKey: text('storage_key').notNull().unique(),
 		sha256: text('sha256').notNull(),
+		deletedAt: timestamp('deleted_at', { withTimezone: true }),
 		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 	},
 	(table) => [
@@ -682,6 +683,53 @@ export const expenseAttachment = pgTable(
 		index('expense_attachment_workspace_expense_idx').on(table.workspaceId, table.expenseId),
 		index('expense_attachment_expense_idx').on(table.expenseId),
 		index('expense_attachment_uploaded_by_idx').on(table.uploadedByUserId)
+	]
+);
+
+export const attachmentDeletion = pgTable(
+	'attachment_deletion',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		attachmentId: bigint('attachment_id', { mode: 'number' }).notNull(),
+		workspaceId: bigint('workspace_id', { mode: 'number' }).notNull(),
+		expenseId: bigint('expense_id', { mode: 'number' }).notNull(),
+		entityType: text('entity_type').notNull().default('expense_attachment'),
+		entityId: text('entity_id').notNull(),
+		storageKey: text('storage_key').notNull(),
+		sizeBytes: integer('size_bytes').notNull(),
+		sha256: text('sha256').notNull(),
+		status: text('status').notNull().default('pending'),
+		notBefore: timestamp('not_before', { withTimezone: true }).notNull(),
+		nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull(),
+		attemptCount: integer('attempt_count').notNull().default(0),
+		claimToken: text('claim_token'),
+		claimExpiresAt: timestamp('claim_expires_at', { withTimezone: true }),
+		lastErrorCategory: text('last_error_category'),
+		lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+		completedAt: timestamp('completed_at', { withTimezone: true }),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp('updated_at', { withTimezone: true })
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date())
+	},
+	(table) => [
+		check(
+			'attachment_deletion_status_check',
+			sql`${table.status} in ('pending', 'processing', 'completed', 'failed')`
+		),
+		check('attachment_deletion_attempt_count_check', sql`${table.attemptCount} >= 0`),
+		check('attachment_deletion_size_bytes_check', sql`${table.sizeBytes} between 1 and 2097152`),
+		check(
+			'attachment_deletion_error_category_check',
+			sql`${table.lastErrorCategory} is null or ${table.lastErrorCategory} in ('permission', 'io', 'path_invalid', 'unknown')`
+		),
+		uniqueIndex('attachment_deletion_attachment_unique_idx').on(table.attachmentId),
+		uniqueIndex('attachment_deletion_storage_key_unique_idx').on(table.storageKey),
+		index('attachment_deletion_due_idx')
+			.on(table.status, table.nextAttemptAt, table.id)
+			.where(sql`${table.status} in ('pending', 'processing')`),
+		index('attachment_deletion_workspace_idx').on(table.workspaceId)
 	]
 );
 

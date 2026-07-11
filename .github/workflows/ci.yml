@@ -61,6 +61,21 @@ jobs:
           restore-keys: pnpm-store-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
       - run: pnpm audit --prod
+      - name: Install PostgreSQL 18 client
+        run: |
+          sudo install -d -m 0755 /usr/share/keyrings
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | gpg --batch --dearmor \
+            | sudo tee /usr/share/keyrings/postgresql-pgdg.gpg >/dev/null
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/keyrings/postgresql-pgdg.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/postgresql-pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-18
+          postgres_bin=/usr/lib/postgresql/18/bin
+          test -x "${postgres_bin}/pg_dump"
+          "${postgres_bin}/pg_dump" --version | grep -E '^pg_dump \(PostgreSQL\) 18\.'
+          echo "${postgres_bin}" >> "$GITHUB_PATH"
       - run: bash -n scripts/*.sh
       - run: docker compose config
       - run: docker compose --profile tools config
@@ -68,6 +83,8 @@ jobs:
       - run: docker compose -f docker-compose.traefik.yml --profile tools config
       - run: pnpm db:migrate
       - run: pnpm test:migrations
+      - name: Verify attachment backup and recovery
+        run: pnpm test:attachment-recovery
       - run: pnpm check
       - run: pnpm lint
       - run: pnpm test:coverage

@@ -7,6 +7,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { emailVerificationThrottle, user } from '$lib/server/db/auth.schema';
 import {
 	auditEvent,
+	attachmentDeletion,
 	budgetAlertDelivery,
 	budgetAlertPreference,
 	category,
@@ -101,6 +102,7 @@ describe('server service integration', () => {
 	afterEach(async () => {
 		for (const workspaceId of workspaceIds.splice(0)) {
 			await db.delete(workspace).where(eq(workspace.id, workspaceId));
+			await db.delete(attachmentDeletion).where(eq(attachmentDeletion.workspaceId, workspaceId));
 		}
 		for (const userId of userIds.splice(0)) {
 			await db.delete(user).where(eq(user.id, userId));
@@ -2555,7 +2557,7 @@ describe('server service integration', () => {
 		).rejects.toThrow();
 	});
 
-	it('deletes attachments from DB and disk when expense is deleted', async () => {
+	it('tombstones attachments and enqueues durable deletion when expense is deleted', async () => {
 		const fixture = await createWorkspaceFixture();
 		const previousUploadDir = process.env.UPLOAD_DIR;
 		const uploadDir = await mkdtemp(path.join(tmpdir(), 'attach-delete-'));
@@ -2577,14 +2579,22 @@ describe('server service integration', () => {
 			const att = await saveExpenseAttachment(fixture.context, expenseRow.id, file);
 			expect(att?.id).toBeGreaterThan(0);
 
-			// deleteExpense should clean up the attachment from DB and disk
 			await deleteExpense(fixture.context, expenseRow.id);
 
 			const remaining = await db
-				.select()
+				.select({ deletedAt: expenseAttachment.deletedAt })
 				.from(expenseAttachment)
 				.where(eq(expenseAttachment.id, att!.id));
-			expect(remaining).toHaveLength(0);
+			expect(remaining[0]?.deletedAt).toBeInstanceOf(Date);
+			await expect(
+				db
+					.select({ status: attachmentDeletion.status })
+					.from(attachmentDeletion)
+					.where(eq(attachmentDeletion.attachmentId, att!.id))
+			).resolves.toEqual([{ status: 'pending' }]);
+			await expect(getAttachmentForDownload(fixture.context, att!.id)).rejects.toMatchObject({
+				status: 404
+			});
 		} finally {
 			if (previousUploadDir === undefined) {
 				delete process.env.UPLOAD_DIR;

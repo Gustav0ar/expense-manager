@@ -205,6 +205,10 @@ test('runs recurring work at production startup with no traffic and a one-connec
 				ORIGIN: baseURL,
 				DATABASE_URL: databaseUrl,
 				DB_POOL_MAX: '1',
+				// Scope the storage integrity scan to this disposable fixture. The shared
+				// E2E database intentionally retains historical attachment fixtures.
+				ATTACHMENT_WORKER_TEST_WORKSPACE_ID: String(workspaceId),
+				ATTACHMENT_WORKER_TEST_SCOPE_SENTINEL: 'infrastructure-test-only',
 				BETTER_AUTH_SECRET: 'infrastructure-test-secret-infrastructure-test',
 				EMAIL_DELIVERY: 'log',
 				TRUST_PROXY_HEADERS: 'false',

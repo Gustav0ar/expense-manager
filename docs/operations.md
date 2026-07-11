@@ -766,6 +766,14 @@ restarting a healthy web process can amplify an external provider or database
 incident. Monitor the JSON state or the structured `background_job:` error logs
 and alert when a job remains degraded beyond three expected intervals.
 
+The `attachmentDeletionScheduler` entry reports queue counts, terminal failures,
+the last successful cycle and report-only reconciliation counts. It never
+includes storage keys or filesystem paths. A missing active attachment, a
+terminal deletion failure or a storage scan failure degrades health. Pending
+deletions are expected during the 48-hour backup grace. Unknown disk files are
+reported but are never automatically deleted; investigate the matching audit
+and backup history before taking any manual action.
+
 Production shutdown stops the interval coordinator first, then flushes tracing
 and closes both database clients with a bounded timeout. A clean `SIGTERM` should
 therefore exit with status `0`; repeated forced exits warrant investigation.
@@ -866,7 +874,15 @@ restore.
 
 ## Verifiable Backups
 
-The backup job creates a temporary custom Postgres dump, validates it with `pg_restore --list`, writes a `.sha256` checksum and repeats the same process for the attachment package when uploads exist. It then uploads everything to the encrypted remote `RESTIC_REPOSITORY` and removes local temporary files.
+The backup job creates a custom Postgres dump and attachment manifest from the
+same exported snapshot while holding the attachment-storage advisory lock. It
+validates the dump, verifies every manifest entry by size and SHA-256 in both
+the live read-only upload mount and a disposable extraction of the archive, and
+then uploads the matching timestamped artifacts to the encrypted remote
+`RESTIC_REPOSITORY`. The lock coordinates only physical deletion; application
+writes remain available. A file uploaded after the snapshot is a harmless extra
+in the archive, while a delete committed after the snapshot remains on disk for
+the 48-hour grace period.
 
 To inspect remote snapshots:
 
@@ -881,4 +897,18 @@ sha256sum -c restore/path/from/restic/expense_manager_YYYYMMDDTHHMMSSZ.dump.sha2
 pg_restore --list restore/path/from/restic/expense_manager_YYYYMMDDTHHMMSSZ.dump >/dev/null
 sha256sum -c restore/path/from/restic/uploads_YYYYMMDDTHHMMSSZ.tar.gz.sha256
 tar -tzf restore/path/from/restic/uploads_YYYYMMDDTHHMMSSZ.tar.gz >/dev/null
+sha256sum -c restore/path/from/restic/attachment_manifest_YYYYMMDDTHHMMSSZ.tsv.sha256
+```
+
+Run the checksum-aware attachment recovery verification only against a
+disposable database target. The verifier creates and drops a database whose name
+starts with `expense_manager_recovery_drill_` and extracts uploads under `/tmp`;
+it never modifies the configured database or live upload directory:
+
+```bash
+RECOVERY_DATABASE_URL="$DATABASE_URL" \
+scripts/ops/verify-attachment-recovery.sh \
+  restore/expense_manager_YYYYMMDDTHHMMSSZ.dump \
+  restore/uploads_YYYYMMDDTHHMMSSZ.tar.gz \
+  restore/attachment_manifest_YYYYMMDDTHHMMSSZ.tsv
 ```

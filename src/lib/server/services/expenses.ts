@@ -1,5 +1,4 @@
 import { error } from '@sveltejs/kit';
-import { unlink } from 'node:fs/promises';
 import {
 	and,
 	desc,
@@ -17,6 +16,7 @@ import {
 import { db } from '$lib/server/db';
 import {
 	auditEvent,
+	attachmentDeletion,
 	category,
 	costCenter,
 	expense,
@@ -46,7 +46,7 @@ import { getBudgetSummary } from './budgets';
 import { randomToken } from '$lib/server/utils/crypto';
 import { resolveExpenseCatalogSelection } from './expense-catalogs';
 import { translate } from '$lib/i18n';
-import { getUploadDir, safeStoragePath } from './attachments';
+import { buildAttachmentDeletionRows } from './attachment-deletion';
 
 export type ExpenseInput = {
 	categoryId: number;
@@ -198,9 +198,12 @@ export async function listExpenses(context: WorkspaceContext, filters: ExpenseFi
 					})
 					.from(expenseAttachment)
 					.where(
-						inArray(
-							expenseAttachment.expenseId,
-							baseItems.map((item) => item.id)
+						and(
+							inArray(
+								expenseAttachment.expenseId,
+								baseItems.map((item) => item.id)
+							),
+							isNull(expenseAttachment.deletedAt)
 						)
 					);
 	const attachmentsByExpense = new Map<number, typeof attachments>();
@@ -627,7 +630,7 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 		throw error(403, translate(context.locale, 'Permission denied.'));
 	}
 
-	const attachments = await db.transaction(async (tx) => {
+	await db.transaction(async (tx) => {
 		const [deleted] = await tx
 			.update(expense)
 			.set({ deletedAt: new Date() })
@@ -651,15 +654,22 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 		if (!deleted)
 			throw error(409, translate(context.locale, 'Expense was modified. Reload and try again.'));
 
-		// The attachment FK cascade only applies to hard deletes, so remove the
-		// rows with the soft delete and all related audit events in one commit.
+		const deletedAt = new Date();
 		const rows = await tx
-			.select({ id: expenseAttachment.id, storageKey: expenseAttachment.storageKey })
-			.from(expenseAttachment)
-			.where(eq(expenseAttachment.expenseId, id));
+			.update(expenseAttachment)
+			.set({ deletedAt })
+			.where(and(eq(expenseAttachment.expenseId, id), isNull(expenseAttachment.deletedAt)))
+			.returning({
+				id: expenseAttachment.id,
+				workspaceId: expenseAttachment.workspaceId,
+				expenseId: expenseAttachment.expenseId,
+				storageKey: expenseAttachment.storageKey,
+				sizeBytes: expenseAttachment.sizeBytes,
+				sha256: expenseAttachment.sha256
+			});
 
 		if (rows.length > 0) {
-			await tx.delete(expenseAttachment).where(eq(expenseAttachment.expenseId, id));
+			await tx.insert(attachmentDeletion).values(buildAttachmentDeletionRows(rows, deletedAt));
 
 			await tx.insert(auditEvent).values(
 				rows.map((att) => ({
@@ -680,23 +690,7 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 			entityType: 'expense',
 			entityId: id
 		});
-
-		return rows;
 	});
-
-	if (attachments.length > 0) {
-		const uploadDir = getUploadDir();
-		// Remove files from disk after the DB transaction succeeds.
-		// Failures here leave orphaned files but won't corrupt DB state.
-		for (const att of attachments) {
-			try {
-				const filePath = safeStoragePath(uploadDir, att.storageKey);
-				await unlink(filePath);
-			} catch {
-				// File may not exist on disk; safe to ignore.
-			}
-		}
-	}
 }
 
 export async function bulkReviewExpenses(
@@ -876,6 +870,7 @@ export async function getAnalyticalExpenseReport(
 					from expense_attachment ea
 					where ea.expense_id = ${expense.id}
 						and ea.workspace_id = ${expense.workspaceId}
+						and ea.deleted_at is null
 					group by ea.expense_id
 				), 0)`,
 				createdAt: expense.createdAt

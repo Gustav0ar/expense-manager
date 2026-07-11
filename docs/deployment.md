@@ -61,7 +61,12 @@ docker compose --profile tools run --rm migrate
 docker compose up -d app caddy backup
 ```
 
-The `backup` service writes encrypted backups to the remote `RESTIC_REPOSITORY`. During each run it creates a temporary Postgres custom-format dump, a temporary `uploads_*.tar.gz` archive and `.sha256` checksums. The dump is validated with `pg_restore --list`, the uploads package is validated with `tar -tzf`, and then all artifacts are uploaded to the remote restic repository. Temporary local files are removed when the run finishes.
+The `backup` service writes encrypted backups to the remote `RESTIC_REPOSITORY`. During each run it creates a custom-format Postgres dump and an attachment manifest from one exported repeatable-read snapshot. A shared advisory lock pauses only the physical attachment deletion worker while the uploads archive is captured; normal uploads and database writes continue. Every attachment referenced by the snapshot is checked for path safety, size and SHA-256 both before archiving and after extracting the archive into a temporary directory. The dump, manifest and uploads archive each receive a `.sha256` checksum before the matching artifacts are uploaded together. Temporary local files are removed when the run finishes.
+
+The attachment deletion grace is 48 hours. Keep
+`ATTACHMENT_BACKUP_MAX_CAPTURE_SECONDS` below 172800; the production default is
+86400 (24 hours). The backup aborts instead of uploading an unproven artifact if
+the capture exceeds that limit or any snapshot reference is missing or corrupt.
 
 ## Restore
 

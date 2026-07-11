@@ -131,6 +131,58 @@ assert_invitation_delivery_outbox() {
 	fi
 }
 
+assert_attachment_deletion_outbox() {
+	local target_url="$1"
+	local target_label="$2"
+	local schema_count
+	schema_count="$(
+		psql "${target_url}" -v ON_ERROR_STOP=1 -Atqc \
+			"SELECT
+			   (SELECT count(*)
+			    FROM information_schema.columns
+			    WHERE table_schema = 'public'
+			      AND table_name = 'attachment_deletion'
+			      AND column_name IN (
+			        'attachment_id', 'workspace_id', 'expense_id', 'storage_key',
+			        'size_bytes', 'sha256', 'status', 'not_before', 'next_attempt_at',
+			        'attempt_count', 'claim_token', 'claim_expires_at', 'completed_at'
+			      ))
+			 + (SELECT count(*)
+			    FROM information_schema.columns
+			    WHERE table_schema = 'public'
+			      AND table_name = 'expense_attachment'
+			      AND column_name = 'deleted_at'
+			      AND data_type = 'timestamp with time zone')
+			 + (SELECT count(*)
+			    FROM pg_constraint
+			    WHERE conname IN (
+			      'attachment_deletion_status_check',
+			      'attachment_deletion_attempt_count_check',
+			      'attachment_deletion_error_category_check'
+			    ) AND contype = 'c' AND convalidated)
+			 + (SELECT count(*)
+			    FROM pg_indexes
+			    WHERE schemaname = 'public'
+			      AND tablename = 'attachment_deletion'
+			      AND indexname IN (
+			        'attachment_deletion_attachment_unique_idx',
+			        'attachment_deletion_storage_key_unique_idx',
+			        'attachment_deletion_due_idx'
+			      ))
+			 + (SELECT count(*)
+			    FROM pg_proc
+			    WHERE proname = 'enqueue_attachment_deletion_on_hard_delete')
+			 + (SELECT count(*)
+			    FROM pg_trigger
+			    WHERE tgname = 'expense_attachment_enqueue_deletion_trigger'
+			      AND NOT tgisinternal)"
+	)"
+	if [ "${schema_count}" != "22" ]; then
+		echo "${target_label} does not have the durable attachment deletion outbox schema." >&2
+		exit 1
+	fi
+}
+
 mkdir -p "${legacy_migrations}/meta"
 cp "${repo_root}"/drizzle/000[0-8]_*.sql "${legacy_migrations}/"
 
@@ -192,6 +244,7 @@ echo "Reapplying the complete migration set to verify idempotency."
 DATABASE_URL="${upgrade_database_url}" pnpm exec drizzle-kit migrate --config "${repo_root}/drizzle.config.ts"
 assert_money_constraints "${upgrade_database_url}" "Upgraded database"
 assert_invitation_delivery_outbox "${upgrade_database_url}" "Upgraded database"
+assert_attachment_deletion_outbox "${upgrade_database_url}" "Upgraded database"
 
 fresh_database_created=true
 createdb --maintenance-db="${maintenance_url}" "${fresh_database}"
@@ -212,6 +265,7 @@ echo "Reapplying the complete migration set to the fresh database."
 DATABASE_URL="${fresh_database_url}" pnpm exec drizzle-kit migrate --config "${repo_root}/drizzle.config.ts"
 assert_money_constraints "${fresh_database_url}" "Fresh database"
 assert_invitation_delivery_outbox "${fresh_database_url}" "Fresh database"
+assert_attachment_deletion_outbox "${fresh_database_url}" "Fresh database"
 
 cleanup
 trap - EXIT INT TERM

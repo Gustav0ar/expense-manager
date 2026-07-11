@@ -3,20 +3,33 @@ import { runRecurringExpenseScheduler } from '$lib/server/services/recurring';
 import { runAutomaticBudgetAlertScheduler } from '$lib/server/services/budgets';
 import { pruneEmailDeliveryEvents } from '$lib/server/services/email-delivery-events';
 import { runInvitationDeliveryScheduler } from '$lib/server/services/invitation-delivery';
+import { runAttachmentDeletionWorker } from '$lib/server/services/attachment-deletion';
 
 export const verificationCleanupIntervalMs = 60_000;
 export const recurringSchedulerIntervalMs = 5 * 60 * 1000;
 export const budgetAlertSchedulerIntervalMs = 60 * 60 * 1000;
 export const emailDeliveryCleanupIntervalMs = 24 * 60 * 60 * 1000;
 export const invitationDeliverySchedulerIntervalMs = 60_000;
+export const attachmentDeletionSchedulerIntervalMs = 5 * 60 * 1000;
 
 type BackgroundJobName =
 	| 'verificationCleanup'
 	| 'recurringScheduler'
 	| 'budgetAlertScheduler'
 	| 'invitationDeliveryScheduler'
+	| 'attachmentDeletionScheduler'
 	| 'emailDeliveryCleanup';
-type BackgroundJobResult = { skipped?: boolean; failed?: number } | void;
+type BackgroundJobResult = {
+	skipped?: boolean;
+	failed?: number;
+	pending?: number;
+	reconciliation?: {
+		missingActive: number;
+		missingRetained: number;
+		unknownDisk: number;
+		scanFailed: boolean;
+	} | null;
+} | void;
 type BackgroundJobRunner = () => Promise<BackgroundJobResult>;
 
 type BackgroundJobState = {
@@ -30,6 +43,11 @@ type BackgroundJobState = {
 	lastDurationMs: number | null;
 	failures: number;
 	lastFailedCount: number;
+	lastPendingCount: number;
+	lastMissingActiveCount: number;
+	lastMissingRetainedCount: number;
+	lastUnknownDiskCount: number;
+	lastStorageScanFailed: boolean;
 };
 
 type TimerHandle = ReturnType<typeof setInterval>;
@@ -39,11 +57,13 @@ type BackgroundJobCoordinatorOptions = {
 	recurringScheduler?: BackgroundJobRunner;
 	budgetAlertScheduler?: BackgroundJobRunner;
 	invitationDeliveryScheduler?: BackgroundJobRunner;
+	attachmentDeletionScheduler?: BackgroundJobRunner;
 	emailDeliveryCleanup?: BackgroundJobRunner;
 	verificationIntervalMs?: number;
 	recurringIntervalMs?: number;
 	budgetAlertIntervalMs?: number;
 	invitationDeliveryIntervalMs?: number;
+	attachmentDeletionIntervalMs?: number;
 	emailDeliveryCleanupIntervalMs?: number;
 	now?: () => number;
 	setIntervalFn?: (callback: () => void, intervalMs: number) => TimerHandle;
@@ -62,7 +82,12 @@ function initialJobState(): BackgroundJobState {
 		lastErrorAt: null,
 		lastDurationMs: null,
 		failures: 0,
-		lastFailedCount: 0
+		lastFailedCount: 0,
+		lastPendingCount: 0,
+		lastMissingActiveCount: 0,
+		lastMissingRetainedCount: 0,
+		lastUnknownDiskCount: 0,
+		lastStorageScanFailed: false
 	};
 }
 
@@ -78,6 +103,7 @@ export class BackgroundJobCoordinator {
 		recurringScheduler: initialJobState(),
 		budgetAlertScheduler: initialJobState(),
 		invitationDeliveryScheduler: initialJobState(),
+		attachmentDeletionScheduler: initialJobState(),
 		emailDeliveryCleanup: initialJobState()
 	};
 	private readonly nextRunAt: Record<BackgroundJobName, number> = {
@@ -85,6 +111,7 @@ export class BackgroundJobCoordinator {
 		recurringScheduler: 0,
 		budgetAlertScheduler: 0,
 		invitationDeliveryScheduler: 0,
+		attachmentDeletionScheduler: 0,
 		emailDeliveryCleanup: 0
 	};
 	private readonly promises: Partial<Record<BackgroundJobName, Promise<void>>> = {};
@@ -97,6 +124,8 @@ export class BackgroundJobCoordinator {
 			budgetAlertScheduler: options.budgetAlertScheduler ?? runAutomaticBudgetAlertScheduler,
 			invitationDeliveryScheduler:
 				options.invitationDeliveryScheduler ?? runInvitationDeliveryScheduler,
+			attachmentDeletionScheduler:
+				options.attachmentDeletionScheduler ?? runAttachmentDeletionWorker,
 			emailDeliveryCleanup: options.emailDeliveryCleanup ?? pruneEmailDeliveryEvents
 		};
 		this.intervals = {
@@ -105,6 +134,8 @@ export class BackgroundJobCoordinator {
 			budgetAlertScheduler: options.budgetAlertIntervalMs ?? budgetAlertSchedulerIntervalMs,
 			invitationDeliveryScheduler:
 				options.invitationDeliveryIntervalMs ?? invitationDeliverySchedulerIntervalMs,
+			attachmentDeletionScheduler:
+				options.attachmentDeletionIntervalMs ?? attachmentDeletionSchedulerIntervalMs,
 			emailDeliveryCleanup: options.emailDeliveryCleanupIntervalMs ?? emailDeliveryCleanupIntervalMs
 		};
 		this.now = options.now ?? Date.now;
@@ -128,6 +159,7 @@ export class BackgroundJobCoordinator {
 		this.triggerJob('recurringScheduler');
 		this.triggerJob('budgetAlertScheduler');
 		this.triggerJob('invitationDeliveryScheduler');
+		this.triggerJob('attachmentDeletionScheduler');
 		this.triggerJob('emailDeliveryCleanup');
 	}
 
@@ -149,6 +181,7 @@ export class BackgroundJobCoordinator {
 			recurringScheduler: this.publicJobState('recurringScheduler', now),
 			budgetAlertScheduler: this.publicJobState('budgetAlertScheduler', now),
 			invitationDeliveryScheduler: this.publicJobState('invitationDeliveryScheduler', now),
+			attachmentDeletionScheduler: this.publicJobState('attachmentDeletionScheduler', now),
 			emailDeliveryCleanup: this.publicJobState('emailDeliveryCleanup', now)
 		};
 		const values = Object.values(jobs);
@@ -178,6 +211,11 @@ export class BackgroundJobCoordinator {
 				const completedAt = this.now();
 				state.lastCompletedAt = completedAt;
 				state.lastFailedCount = result?.failed ?? 0;
+				state.lastPendingCount = result?.pending ?? 0;
+				state.lastMissingActiveCount = result?.reconciliation?.missingActive ?? 0;
+				state.lastMissingRetainedCount = result?.reconciliation?.missingRetained ?? 0;
+				state.lastUnknownDiskCount = result?.reconciliation?.unknownDisk ?? 0;
+				state.lastStorageScanFailed = result?.reconciliation?.scanFailed ?? false;
 				state.failures += state.lastFailedCount;
 				if (result?.skipped) state.lockSkips++;
 				else state.lastSucceededAt = completedAt;
@@ -207,7 +245,7 @@ export class BackgroundJobCoordinator {
 			state.lastErrorAt != null &&
 			(state.lastCompletedAt == null || state.lastErrorAt > state.lastCompletedAt);
 		const status =
-			latestAttemptFailed || stale || state.lastFailedCount > 0
+			latestAttemptFailed || stale || state.lastFailedCount > 0 || state.lastStorageScanFailed
 				? ('degraded' as const)
 				: state.lastCompletedAt == null
 					? ('starting' as const)
@@ -224,7 +262,12 @@ export class BackgroundJobCoordinator {
 			lastErrorAt: toIso(state.lastErrorAt),
 			lastDurationMs: state.lastDurationMs,
 			failures: state.failures,
-			lastFailedCount: state.lastFailedCount
+			lastFailedCount: state.lastFailedCount,
+			lastPendingCount: state.lastPendingCount,
+			lastMissingActiveCount: state.lastMissingActiveCount,
+			lastMissingRetainedCount: state.lastMissingRetainedCount,
+			lastUnknownDiskCount: state.lastUnknownDiskCount,
+			lastStorageScanFailed: state.lastStorageScanFailed
 		};
 	}
 }

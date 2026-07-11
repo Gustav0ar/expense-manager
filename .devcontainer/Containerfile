@@ -3,6 +3,16 @@ FROM node:24-bookworm
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \
 		ca-certificates \
+		curl \
+		gnupg \
+	&& install -d -m 0755 /usr/share/keyrings \
+	&& curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+		| gpg --batch --dearmor -o /usr/share/keyrings/postgresql-pgdg.gpg \
+	&& printf '%s\n' \
+		'deb [signed-by=/usr/share/keyrings/postgresql-pgdg.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main' \
+		> /etc/apt/sources.list.d/postgresql-pgdg.list \
+	&& apt-get update \
+	&& apt-get install -y --no-install-recommends \
 		git \
 		fonts-liberation \
 		fonts-noto-color-emoji \
@@ -32,7 +42,7 @@ RUN apt-get update \
 		libxrandr2 \
 		openssh-client \
 		openssl \
-		postgresql-client \
+		postgresql-client-18 \
 		prometheus \
 	&& rm -rf /var/lib/apt/lists/*
 
