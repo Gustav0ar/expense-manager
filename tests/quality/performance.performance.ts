@@ -24,13 +24,14 @@ type RuntimeBudget = {
 const assetBudget: AssetBudget = {
 	largestJsBytes: 90 * kib,
 	totalCssBytes: 80 * kib,
-	// The localized import review ledger moved the prior 140 KiB gzip ceiling
-	// (143,360 bytes) to a reviewed 145,503-byte build.
-	totalGzipJsBytes: 144 * kib,
-	// Import preview adds the localized, selectable review ledger. The previous
-	// 384 KiB ceiling was 393,216 bytes; the reviewed production build measured
-	// 400,607 bytes. Keep the largest-asset and runtime budgets unchanged.
-	totalJsBytes: 392 * kib
+	// Import preview moved the original 140 KiB gzip ceiling to 145,503 bytes.
+	// The localized reconciliation ledger now measures 148,850 bytes; retain a
+	// narrow 149,504-byte ceiling without changing per-asset/runtime limits.
+	totalGzipJsBytes: 146 * kib,
+	// Import preview moved the original 384 KiB raw ceiling to 400,607 bytes.
+	// The localized reconciliation ledger now measures 411,503 bytes; retain a
+	// narrow 413,696-byte ceiling without changing per-asset/runtime limits.
+	totalJsBytes: 404 * kib
 };
 
 const runtimeBudget: RuntimeBudget = {

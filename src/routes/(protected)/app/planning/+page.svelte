@@ -4,8 +4,19 @@
 	import { translate } from '$lib/i18n';
 	import { formatCents } from '$lib/utils/format';
 	import { resolve } from '$app/paths';
-	import { Bell, FileUp, Pause, Play, RefreshCw, RotateCcw, Target, Trash2 } from '@lucide/svelte';
+	import {
+		Bell,
+		FileUp,
+		Landmark,
+		Pause,
+		Play,
+		RefreshCw,
+		RotateCcw,
+		Target,
+		Trash2
+	} from '@lucide/svelte';
 	import { untrack } from 'svelte';
+	import type { ReconciliationQueueItem } from '$lib/server/services/reconciliation';
 	import type { ActionData, PageData } from './$types';
 	type PreviewRow = {
 		sourceRowId: string;
@@ -34,6 +45,14 @@
 			(form?.importResult?.importedCount ?? 0) > 0 ||
 			(form?.importResult?.duplicateCount ?? 0) > 0
 	);
+	let reconciliationSearch = $state('');
+	const filteredReconciliationQueue = $derived.by(() => {
+		const query = reconciliationSearch.trim().toLocaleLowerCase(data.locale);
+		if (!query) return data.reconciliationQueue;
+		return (data.reconciliationQueue as ReconciliationQueueItem[]).filter((item) =>
+			`${item.description} ${item.memo ?? ''}`.toLocaleLowerCase(data.locale).includes(query)
+		);
+	});
 
 	function amountInputValue(cents: number | null) {
 		return cents == null ? '' : (cents / 100).toFixed(2).replace('.', ',');
@@ -71,6 +90,10 @@
 
 	function clearPreviewSelection() {
 		selectedPreviewRowIds = [];
+	}
+
+	function candidateDateReason(days: number) {
+		return days === 0 ? t('Same date') : t('{count} days apart', { count: days });
 	}
 </script>
 
@@ -392,6 +415,128 @@
 			</label>
 			<button class="button primary align-end" type="submit">{t('Import')}</button>
 		</form>
+
+		{#if form?.reconciliationResult?.failedRows?.length}
+			<div class="import-errors" role="region" aria-label={t('OFX staging failures')}>
+				<h5>{t('OFX staging failures')}</h5>
+				{#each form.reconciliationResult.failedRows as row, index (`ofx-failure-${row.rowNumber}-${index}`)}
+					<p>{row.message}</p>
+				{/each}
+			</div>
+		{/if}
+
+		{#if data.reconciliationQueue.length > 0}
+			<section class="reconciliation-workspace" aria-labelledby="reconciliation-title">
+				<div class="panel-heading panel-heading-wrap">
+					<div>
+						<span class="eyebrow">{t('Bank ledger')}</span>
+						<h4 id="reconciliation-title">{t('Reconcile OFX transactions')}</h4>
+						<p>{t('Suggestions never change expenses until you confirm a decision.')}</p>
+					</div>
+					<Landmark size={20} />
+				</div>
+				<label class="reconciliation-search">
+					<span>{t('Search staged transactions')}</span>
+					<input
+						type="search"
+						bind:value={reconciliationSearch}
+						placeholder={t('Search description')}
+					/>
+				</label>
+				<p class="sr-only" aria-live="polite">
+					{t('{count} transactions shown', { count: filteredReconciliationQueue.length })}
+				</p>
+
+				<div class="reconciliation-queue">
+					{#each filteredReconciliationQueue as transaction (transaction.id)}
+						<article
+							class="reconciliation-item"
+							aria-labelledby={`bank-transaction-${transaction.id}`}
+						>
+							<div class="bank-side">
+								<span class={['status-pill', transaction.isCredit ? 'neutral' : 'warning']}>
+									{transaction.isCredit ? t('Credit') : t('Debit')}
+								</span>
+								<h5 id={`bank-transaction-${transaction.id}`}>{transaction.description}</h5>
+								<strong>{money(Math.abs(transaction.signedAmountCents))}</strong>
+								<span><LocalizedDate value={transaction.postedDate} /></span>
+								{#if transaction.sourceCurrency}<span>{transaction.sourceCurrency}</span>{/if}
+								{#if transaction.memo}<p>{transaction.memo}</p>{/if}
+							</div>
+
+							<div class="candidate-side">
+								{#if transaction.currencyMismatch}
+									<p class="notice danger" role="alert">
+										{t(
+											'This statement currency does not match the workspace. You can only ignore this transaction.'
+										)}
+									</p>
+								{:else if transaction.isCredit}
+									<p>
+										{t('Credits are staged for visibility and cannot create or match expenses.')}
+									</p>
+								{:else if transaction.candidates.length > 0}
+									<h6>{t('Exact amount candidates')}</h6>
+									<div class="candidate-list">
+										{#each transaction.candidates as candidate (candidate.id)}
+											<form method="post" action="?/matchBankTransaction" class="candidate-row">
+												<input type="hidden" name="transactionId" value={transaction.id} />
+												<input type="hidden" name="expenseId" value={candidate.id} />
+												<div>
+													<strong>{candidate.description}</strong>
+													<span
+														>{money(candidate.amountCents)} · <LocalizedDate
+															value={candidate.expenseDate}
+														/></span
+													>
+													<small>
+														{t('Exact amount')} · {candidateDateReason(candidate.dateDistanceDays)} ·
+														{t('{score}% description overlap', { score: candidate.textScore })}
+													</small>
+												</div>
+												<button class="button primary" type="submit">{t('Match')}</button>
+											</form>
+										{/each}
+									</div>
+								{:else}
+									<p>{t('No eligible expense found within the date window.')}</p>
+								{/if}
+
+								<div class="reconciliation-actions">
+									{#if !transaction.isCredit && !transaction.currencyMismatch}
+										<form method="post" action="?/createFromBankTransaction" class="inline-form">
+											<input type="hidden" name="transactionId" value={transaction.id} />
+											<label>
+												<span class="sr-only">{t('Category for new expense')}</span>
+												<select
+													name="categoryId"
+													required
+													aria-label={t('Category for new expense')}
+												>
+													<option value="">{t('Select category')}</option>
+													{#each data.categories as category (category.id)}
+														<option value={category.id}
+															>{category.icon ?? '💼'} {category.name}</option
+														>
+													{/each}
+												</select>
+											</label>
+											<button class="button secondary" type="submit"
+												>{t('Create and reconcile')}</button
+											>
+										</form>
+									{/if}
+									<form method="post" action="?/ignoreBankTransaction">
+										<input type="hidden" name="transactionId" value={transaction.id} />
+										<button class="button secondary" type="submit">{t('Ignore')}</button>
+									</form>
+								</div>
+							</div>
+						</article>
+					{/each}
+				</div>
+			</section>
+		{/if}
 
 		{#if form?.importPreview}
 			<section class="import-preview" aria-labelledby="import-preview-title">

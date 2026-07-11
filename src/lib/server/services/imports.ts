@@ -60,7 +60,7 @@ export type FailedImportRow = ImportBatchFailedRow;
 type ActiveCategory = { id: number; name: string; isArchived: boolean };
 type CategoryRule = Awaited<ReturnType<typeof getActiveRules>>[number];
 type NormalizedPreviewRow = Omit<ImportPreviewRow, 'categoryName' | 'isDuplicate'>;
-type ImportExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+export type ImportExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export async function listImportBatches(context: WorkspaceContext) {
 	return db
@@ -340,68 +340,14 @@ export async function confirmImportPreview(
 			})
 			.returning({ id: importBatch.id });
 
-		if (acceptedRows.length > 0) {
-			const [paymentMethods, vendors, costCenters] = await Promise.all([
-				buildCatalogLookup(
-					tx,
-					context.workspaceId,
-					'paymentMethod',
-					acceptedRows.map((row) => row.paymentMethod),
-					context.locale
-				),
-				buildCatalogLookup(
-					tx,
-					context.workspaceId,
-					'vendor',
-					acceptedRows.map((row) => row.vendor),
-					context.locale
-				),
-				buildCatalogLookup(
-					tx,
-					context.workspaceId,
-					'costCenter',
-					acceptedRows.map((row) => row.costCenter),
-					context.locale
-				)
-			]);
-			const values: Array<typeof expense.$inferInsert> = acceptedRows.map((row) => {
-				const payment = lookupCatalogItem(paymentMethods, row.paymentMethod);
-				const importedVendor = lookupCatalogItem(vendors, row.vendor);
-				const importedCostCenter = lookupCatalogItem(costCenters, row.costCenter);
-				const material = {
-					categoryId: row.categoryId,
-					description: row.description,
-					amountCents: row.amountCents,
-					currency: context.currency,
-					expenseDate: row.expenseDate,
-					paymentMethodId: payment?.id ?? null,
-					paymentMethod: payment?.name ?? null,
-					vendorId: importedVendor?.id ?? null,
-					vendor: importedVendor?.name ?? null,
-					costCenterId: importedCostCenter?.id ?? null,
-					costCenter: importedCostCenter?.name ?? null,
-					competencyMonth: null,
-					notes: row.notes || null,
-					status: 'posted',
-					reviewStatus,
-					reviewedByUserId,
-					reviewedAt,
-					reviewRejectionReason: null
-				};
-				return {
-					workspaceId: context.workspaceId,
-					createdByUserId: context.userId,
-					importBatchId: batch.id,
-					...material,
-					importBaselineHash: importMaterialHash(material),
-					createdAt: now,
-					updatedAt: now
-				};
-			});
-			for (const chunk of chunkImportValues(values, importInsertChunkSize)) {
-				await tx.insert(expense).values(chunk);
-			}
-		}
+		await insertImportedExpenseRows(tx, context, {
+			rows: acceptedRows,
+			batchId: batch.id,
+			now,
+			reviewStatus,
+			reviewedByUserId,
+			reviewedAt
+		});
 
 		await tx
 			.update(importPreview)
@@ -431,6 +377,87 @@ export async function confirmImportPreview(
 			failedRows: preview.analysis.failedRows
 		};
 	});
+}
+
+/**
+ * Transaction-aware import insertion shared by preview confirmation and bank
+ * reconciliation. Callers own the surrounding transaction and audit record.
+ */
+export async function insertImportedExpenseRows(
+	executor: ImportExecutor,
+	context: WorkspaceContext,
+	input: {
+		rows: ImportPreviewRow[];
+		batchId: number;
+		now: Date;
+		reviewStatus: 'pending' | 'approved';
+		reviewedByUserId: string | null;
+		reviewedAt: Date | null;
+	}
+) {
+	if (input.rows.length === 0) return [];
+	const [paymentMethods, vendors, costCenters] = await Promise.all([
+		buildCatalogLookup(
+			executor,
+			context.workspaceId,
+			'paymentMethod',
+			input.rows.map((row) => row.paymentMethod),
+			context.locale
+		),
+		buildCatalogLookup(
+			executor,
+			context.workspaceId,
+			'vendor',
+			input.rows.map((row) => row.vendor),
+			context.locale
+		),
+		buildCatalogLookup(
+			executor,
+			context.workspaceId,
+			'costCenter',
+			input.rows.map((row) => row.costCenter),
+			context.locale
+		)
+	]);
+	const values: Array<typeof expense.$inferInsert> = input.rows.map((row) => {
+		const payment = lookupCatalogItem(paymentMethods, row.paymentMethod);
+		const importedVendor = lookupCatalogItem(vendors, row.vendor);
+		const importedCostCenter = lookupCatalogItem(costCenters, row.costCenter);
+		const material = {
+			categoryId: row.categoryId,
+			description: row.description,
+			amountCents: row.amountCents,
+			currency: context.currency,
+			expenseDate: row.expenseDate,
+			paymentMethodId: payment?.id ?? null,
+			paymentMethod: payment?.name ?? null,
+			vendorId: importedVendor?.id ?? null,
+			vendor: importedVendor?.name ?? null,
+			costCenterId: importedCostCenter?.id ?? null,
+			costCenter: importedCostCenter?.name ?? null,
+			competencyMonth: null,
+			notes: row.notes || null,
+			status: 'posted',
+			reviewStatus: input.reviewStatus,
+			reviewedByUserId: input.reviewedByUserId,
+			reviewedAt: input.reviewedAt,
+			reviewRejectionReason: null
+		};
+		return {
+			workspaceId: context.workspaceId,
+			createdByUserId: context.userId,
+			importBatchId: input.batchId,
+			...material,
+			importBaselineHash: importMaterialHash(material),
+			createdAt: input.now,
+			updatedAt: input.now
+		};
+	});
+	const inserted: Array<{ id: number }> = [];
+	for (const chunk of chunkImportValues(values, importInsertChunkSize)) {
+		inserted.push(...(await executor.insert(expense).values(chunk).returning({ id: expense.id })));
+	}
+	return inserted;
 }
 
 /** Compatibility service for non-UI callers; the upload action itself only creates a preview. */

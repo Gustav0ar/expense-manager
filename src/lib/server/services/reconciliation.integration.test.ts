@@ -1,0 +1,456 @@
+import { randomUUID } from 'node:crypto';
+import { afterEach, describe, expect, it } from 'vitest';
+import { and, eq, inArray } from 'drizzle-orm';
+import { user } from '$lib/server/db/auth.schema';
+import {
+	auditEvent,
+	bankTransaction,
+	category,
+	expense,
+	workspace,
+	workspaceMember
+} from '$lib/server/db/schema';
+import { db } from '$lib/server/db';
+import { createExpense } from './expenses';
+import {
+	decideBankTransaction,
+	listReconciliationQueue,
+	stageOfxTransactions
+} from './reconciliation';
+import type { WorkspaceContext } from './workspaces';
+
+const workspaceIds: number[] = [];
+const userIds: string[] = [];
+
+describe.sequential('OFX reconciliation integration', () => {
+	afterEach(async () => {
+		for (const workspaceId of workspaceIds.splice(0))
+			await db.delete(workspace).where(eq(workspace.id, workspaceId));
+		for (const userId of userIds.splice(0)) await db.delete(user).where(eq(user.id, userId));
+	});
+
+	it('stages re-uploads idempotently and returns deterministic candidates without mutating expenses', async () => {
+		const fixture = await createFixture();
+		const exact = await createExpense(fixture.context, {
+			categoryId: fixture.categoryId,
+			description: 'Mercado Central groceries',
+			amount: '42.35',
+			expenseDate: '2026-07-10'
+		});
+		await createExpense(fixture.context, {
+			categoryId: fixture.categoryId,
+			description: 'Other purchase',
+			amount: '42.35',
+			expenseDate: '2026-07-12'
+		});
+		const file = statement([
+			'<STMTTRN><DTPOSTED>20260710<TRNAMT>-42.35<FITID>debit-1<NAME>Mercado Central</STMTTRN>',
+			'<STMTTRN><DTPOSTED>20260711<TRNAMT>9.00<FITID>credit-1<NAME>Refund</STMTTRN>'
+		]);
+
+		await expect(stageOfxTransactions(fixture.context, file)).resolves.toMatchObject({
+			stagedCount: 2,
+			duplicateCount: 0
+		});
+		await expect(stageOfxTransactions(fixture.context, file)).resolves.toMatchObject({
+			stagedCount: 0,
+			duplicateCount: 2
+		});
+		const queue = await listReconciliationQueue(fixture.context);
+		expect(queue).toHaveLength(2);
+		expect(queue[0]?.candidates.map((row) => row.id)).toEqual([exact.id, expect.any(Number)]);
+		expect(queue[0]?.candidates[0]).toMatchObject({ dateDistanceDays: 0, textScore: 67 });
+		expect(queue[1]).toMatchObject({ isCredit: true, candidates: [] });
+		const [unchanged] = await db
+			.select({ paymentStatus: expense.paymentStatus })
+			.from(expense)
+			.where(eq(expense.id, exact.id));
+		expect(unchanged.paymentStatus).toBe('unpaid');
+	});
+
+	it('validates uploads and returns a credit-only queue without candidates', async () => {
+		const fixture = await createFixture();
+		await expect(
+			stageOfxTransactions(fixture.context, new File([], '', { type: 'application/x-ofx' }))
+		).rejects.toMatchObject({ status: 400 });
+		await expect(
+			stageOfxTransactions(
+				fixture.context,
+				new File([new Uint8Array(1024 * 1024 + 1)], 'large.ofx', {
+					type: 'application/x-ofx'
+				})
+			)
+		).rejects.toMatchObject({ status: 400 });
+		await stageOfxTransactions(
+			fixture.context,
+			statement([
+				'<STMTTRN><DTPOSTED>20260710<TRNAMT>1.00<FITID>credit-only<NAME>Credit only</STMTTRN>'
+			])
+		);
+		await expect(listReconciliationQueue(fixture.context, { dateWindowDays: 99 })).resolves.toEqual(
+			[expect.objectContaining({ isCredit: true, candidates: [] })]
+		);
+	});
+
+	it('atomically matches, audits and replays the same confirmation', async () => {
+		const fixture = await createFixture();
+		const created = await createExpense(fixture.context, {
+			categoryId: fixture.categoryId,
+			description: 'Electric bill',
+			amount: '80.00',
+			expenseDate: '2026-07-09'
+		});
+		await stageOfxTransactions(
+			fixture.context,
+			statement([
+				'<STMTTRN><DTPOSTED>20260710<TRNAMT>-80.00<FITID>match-1<NAME>Electric bill</STMTTRN>'
+			])
+		);
+		const [transaction] = await listReconciliationQueue(fixture.context);
+		const input = {
+			transactionId: transaction.id,
+			decision: 'match' as const,
+			expenseId: created.id
+		};
+		await expect(decideBankTransaction(fixture.context, input)).resolves.toEqual({
+			status: 'matched',
+			expenseId: created.id
+		});
+		await expect(decideBankTransaction(fixture.context, input)).resolves.toEqual({
+			status: 'matched',
+			expenseId: created.id
+		});
+		const [row] = await db.select().from(expense).where(eq(expense.id, created.id));
+		expect(row).toMatchObject({
+			paymentStatus: 'reconciled',
+			paidAt: '2026-07-10',
+			reconciledByUserId: fixture.context.userId
+		});
+		const decisionAudits = await db
+			.select({
+				action: auditEvent.action,
+				entityId: auditEvent.entityId,
+				metadata: auditEvent.metadata
+			})
+			.from(auditEvent)
+			.where(
+				and(
+					eq(auditEvent.workspaceId, fixture.context.workspaceId),
+					inArray(auditEvent.action, ['bank_transaction.matched', 'expense.payment_reconciled'])
+				)
+			);
+		expect(decisionAudits).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					action: 'bank_transaction.matched',
+					entityId: String(transaction.id)
+				}),
+				{
+					action: 'expense.payment_reconciled',
+					entityId: String(created.id),
+					metadata: { paidAt: '2026-07-10', bankTransactionId: transaction.id }
+				}
+			])
+		);
+		expect(decisionAudits).toHaveLength(2);
+	});
+
+	it('preserves decided ledger history when a future retention purge removes the expense', async () => {
+		const fixture = await createFixture();
+		const created = await createExpense(fixture.context, {
+			categoryId: fixture.categoryId,
+			description: 'Future purge',
+			amount: '11.00',
+			expenseDate: '2026-07-10'
+		});
+		await stageOfxTransactions(
+			fixture.context,
+			statement([
+				'<STMTTRN><DTPOSTED>20260710<TRNAMT>-11.00<FITID>purge-history<NAME>Future purge</STMTTRN>'
+			])
+		);
+		const [transaction] = await listReconciliationQueue(fixture.context);
+		await decideBankTransaction(fixture.context, {
+			transactionId: transaction.id,
+			decision: 'match',
+			expenseId: created.id
+		});
+		await db.delete(expense).where(eq(expense.id, created.id));
+		const [ledger] = await db
+			.select({ status: bankTransaction.status, expenseId: bankTransaction.expenseId })
+			.from(bankTransaction)
+			.where(eq(bankTransaction.id, transaction.id));
+		expect(ledger).toEqual({ status: 'matched', expenseId: null });
+	});
+
+	it('keeps mismatched currency visible but blocks match/create while allowing ignore', async () => {
+		const fixture = await createFixture();
+		await stageOfxTransactions(
+			fixture.context,
+			statement(
+				['<STMTTRN><DTPOSTED>20260710<TRNAMT>-13.00<FITID>usd-row<NAME>USD debit</STMTTRN>'],
+				'USD'
+			)
+		);
+		const [transaction] = await listReconciliationQueue(fixture.context);
+		expect(transaction).toMatchObject({
+			sourceCurrency: 'USD',
+			currencyMismatch: true,
+			candidates: []
+		});
+		await expect(
+			decideBankTransaction(fixture.context, {
+				transactionId: transaction.id,
+				decision: 'create',
+				categoryId: fixture.categoryId
+			})
+		).rejects.toMatchObject({ status: 409 });
+		await expect(
+			decideBankTransaction(fixture.context, {
+				transactionId: transaction.id,
+				decision: 'ignore'
+			})
+		).resolves.toMatchObject({ status: 'ignored' });
+	});
+
+	it('accepts legacy statements without CURDEF using the workspace currency policy', async () => {
+		const fixture = await createFixture();
+		await stageOfxTransactions(
+			fixture.context,
+			new File(
+				[
+					'<OFX><BANKACCTFROM><BANKID>001<ACCTID>legacy</BANKACCTFROM><BANKTRANLIST><STMTTRN><DTPOSTED>20260710<TRNAMT>-6.00<FITID>legacy-currency<NAME>Legacy debit</STMTTRN></BANKTRANLIST></OFX>'
+				],
+				'legacy.ofx',
+				{ type: 'application/x-ofx' }
+			)
+		);
+		const [transaction] = await listReconciliationQueue(fixture.context);
+		expect(transaction).toMatchObject({ sourceCurrency: null, currencyMismatch: false });
+		await expect(
+			decideBankTransaction(fixture.context, {
+				transactionId: transaction.id,
+				decision: 'create',
+				categoryId: fixture.categoryId
+			})
+		).resolves.toMatchObject({ status: 'created' });
+	});
+
+	it('enforces one-to-one matching under concurrency', async () => {
+		const fixture = await createFixture();
+		const created = await createExpense(fixture.context, {
+			categoryId: fixture.categoryId,
+			description: 'Concurrent candidate',
+			amount: '19.90',
+			expenseDate: '2026-07-10'
+		});
+		await stageOfxTransactions(
+			fixture.context,
+			statement([
+				'<STMTTRN><DTPOSTED>20260710<TRNAMT>-19.90<FITID>concurrent-a<NAME>Candidate A</STMTTRN>',
+				'<STMTTRN><DTPOSTED>20260710<TRNAMT>-19.90<FITID>concurrent-b<NAME>Candidate B</STMTTRN>'
+			])
+		);
+		const queue = await listReconciliationQueue(fixture.context);
+		const results = await Promise.allSettled(
+			queue.map((row) =>
+				decideBankTransaction(fixture.context, {
+					transactionId: row.id,
+					decision: 'match',
+					expenseId: created.id
+				})
+			)
+		);
+		expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+		expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+		expect(
+			await db.select().from(bankTransaction).where(eq(bankTransaction.expenseId, created.id))
+		).toHaveLength(1);
+	});
+
+	it('creates through the import path, ignores credits, and rejects unauthorized/cross-workspace decisions', async () => {
+		const fixture = await createFixture();
+		const other = await createFixture();
+		const viewer = await createRoleContext(fixture, 'viewer');
+		await expect(listReconciliationQueue(viewer)).resolves.toEqual([]);
+		await stageOfxTransactions(
+			fixture.context,
+			statement([
+				'<STMTTRN><DTPOSTED>20260710<TRNAMT>-12.00<FITID>create-1<NAME>New expense</STMTTRN>',
+				'<STMTTRN><DTPOSTED>20260710<TRNAMT>4.00<FITID>credit-ignore<NAME>Credit</STMTTRN>'
+			])
+		);
+		const [debit, credit] = await listReconciliationQueue(fixture.context);
+		await expect(
+			decideBankTransaction(viewer, { transactionId: debit.id, decision: 'ignore' })
+		).rejects.toMatchObject({ status: 403 });
+		await expect(
+			decideBankTransaction(other.context, { transactionId: debit.id, decision: 'ignore' })
+		).rejects.toMatchObject({ status: 404 });
+		await expect(
+			decideBankTransaction(fixture.context, {
+				transactionId: credit.id,
+				decision: 'create',
+				categoryId: fixture.categoryId
+			})
+		).rejects.toMatchObject({ status: 400 });
+		const created = await decideBankTransaction(fixture.context, {
+			transactionId: debit.id,
+			decision: 'create',
+			categoryId: fixture.categoryId
+		});
+		expect(created).toMatchObject({ status: 'created', expenseId: expect.any(Number) });
+		const [createdExpense] = await db
+			.select()
+			.from(expense)
+			.where(eq(expense.id, created.expenseId!));
+		expect(createdExpense).toMatchObject({
+			description: 'New expense',
+			paymentStatus: 'reconciled',
+			importBatchId: expect.any(Number)
+		});
+		await expect(
+			decideBankTransaction(fixture.context, { transactionId: credit.id, decision: 'ignore' })
+		).resolves.toMatchObject({ status: 'ignored', expenseId: null });
+		await expect(
+			decideBankTransaction(fixture.context, {
+				transactionId: credit.id,
+				decision: 'ignore'
+			})
+		).resolves.toMatchObject({ status: 'ignored', expenseId: null });
+		await expect(
+			decideBankTransaction(fixture.context, {
+				transactionId: debit.id,
+				decision: 'create',
+				categoryId: fixture.categoryId
+			})
+		).resolves.toMatchObject({ status: 'created', expenseId: created.expenseId });
+		const createPaymentAudits = await db
+			.select({ entityId: auditEvent.entityId, metadata: auditEvent.metadata })
+			.from(auditEvent)
+			.where(
+				and(
+					eq(auditEvent.workspaceId, fixture.context.workspaceId),
+					eq(auditEvent.action, 'expense.payment_reconciled'),
+					eq(auditEvent.entityId, String(created.expenseId))
+				)
+			);
+		expect(createPaymentAudits).toEqual([
+			{
+				entityId: String(created.expenseId),
+				metadata: { paidAt: '2026-07-10', bankTransactionId: debit.id }
+			}
+		]);
+		await expect(
+			decideBankTransaction(fixture.context, {
+				transactionId: debit.id,
+				decision: 'ignore'
+			})
+		).rejects.toMatchObject({ status: 409 });
+	});
+
+	it('rolls back financial and staged state when audit insertion cannot proceed', async () => {
+		const fixture = await createFixture();
+		const created = await createExpense(fixture.context, {
+			categoryId: fixture.categoryId,
+			description: 'Rollback candidate',
+			amount: '30.00',
+			expenseDate: '2026-07-10'
+		});
+		await stageOfxTransactions(
+			fixture.context,
+			statement([
+				'<STMTTRN><DTPOSTED>20260710<TRNAMT>-30.00<FITID>rollback-1<NAME>Rollback candidate</STMTTRN>'
+			])
+		);
+		const [transaction] = await listReconciliationQueue(fixture.context);
+		await expect(
+			decideBankTransaction(
+				fixture.context,
+				{
+					transactionId: transaction.id,
+					decision: 'match',
+					expenseId: created.id
+				},
+				{
+					onBeforeAudit: () => {
+						throw new Error('audit unavailable');
+					}
+				}
+			)
+		).rejects.toThrow('audit unavailable');
+		const [expenseRow] = await db.select().from(expense).where(eq(expense.id, created.id));
+		const [transactionRow] = await db
+			.select()
+			.from(bankTransaction)
+			.where(eq(bankTransaction.id, transaction.id));
+		expect(expenseRow.paymentStatus).toBe('unpaid');
+		expect(transactionRow.status).toBe('pending');
+		await expect(
+			db
+				.select()
+				.from(auditEvent)
+				.where(
+					and(
+						eq(auditEvent.workspaceId, fixture.context.workspaceId),
+						inArray(auditEvent.action, ['bank_transaction.matched', 'expense.payment_reconciled'])
+					)
+				)
+		).resolves.toHaveLength(0);
+	});
+});
+
+async function createFixture() {
+	const ownerId = `reconcile-owner-${randomUUID()}`;
+	await db
+		.insert(user)
+		.values({ id: ownerId, name: 'Owner', email: `${ownerId}@example.com`, emailVerified: true });
+	userIds.push(ownerId);
+	const [workspaceRow] = await db
+		.insert(workspace)
+		.values({ name: `Reconcile ${randomUUID()}`, currency: 'BRL', createdByUserId: ownerId })
+		.returning();
+	workspaceIds.push(workspaceRow.id);
+	await db
+		.insert(workspaceMember)
+		.values({ workspaceId: workspaceRow.id, userId: ownerId, role: 'owner', status: 'active' });
+	const [categoryRow] = await db
+		.insert(category)
+		.values({ workspaceId: workspaceRow.id, name: 'General', color: '#2563eb', icon: '💼' })
+		.returning({ id: category.id });
+	const context: WorkspaceContext = {
+		userId: ownerId,
+		workspaceId: workspaceRow.id,
+		workspaceName: workspaceRow.name,
+		weekStartsOn: workspaceRow.weekStartsOn,
+		currency: workspaceRow.currency,
+		locale: 'en',
+		role: 'owner'
+	};
+	return { context, categoryId: categoryRow.id };
+}
+
+async function createRoleContext(
+	fixture: Awaited<ReturnType<typeof createFixture>>,
+	role: WorkspaceContext['role']
+) {
+	const userId = `reconcile-${role}-${randomUUID()}`;
+	await db
+		.insert(user)
+		.values({ id: userId, name: role, email: `${userId}@example.com`, emailVerified: true });
+	userIds.push(userId);
+	await db
+		.insert(workspaceMember)
+		.values({ workspaceId: fixture.context.workspaceId, userId, role, status: 'active' });
+	return { ...fixture.context, userId, role };
+}
+
+function statement(transactions: string[], currency = 'BRL') {
+	return new File(
+		[
+			`<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><CURDEF>${currency}<BANKACCTFROM><BANKID>001<ACCTID>1234<ACCTTYPE>CHECKING</BANKACCTFROM><BANKTRANLIST>${transactions.join('')}</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>`
+		],
+		'statement.ofx',
+		{ type: 'application/x-ofx' }
+	);
+}

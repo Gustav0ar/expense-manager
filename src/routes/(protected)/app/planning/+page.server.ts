@@ -17,6 +17,11 @@ import {
 	undoImportBatch
 } from '$lib/server/services/imports';
 import {
+	decideBankTransaction,
+	listReconciliationQueue,
+	stageOfxTransactions
+} from '$lib/server/services/reconciliation';
+import {
 	createExpenseCatalogItem,
 	listExpenseCatalogs
 } from '$lib/server/services/expense-catalogs';
@@ -39,6 +44,9 @@ import {
 	parseForm,
 	planningFilterSchema,
 	recurringExpenseSchema,
+	reconciliationCreateSchema,
+	reconciliationIgnoreSchema,
+	reconciliationMatchSchema,
 	undoImportBatchSchema
 } from '$lib/server/validation';
 import { translate } from '$lib/i18n';
@@ -51,15 +59,23 @@ export const load: PageServerLoad = async (event) => {
 	if (!filters.success) throw error(400, translate(event.locals.locale, 'Filters are invalid.'));
 	const periodMonth = filters.data.periodMonth || firstDayOfMonth(new Date());
 
-	const [categories, catalogs, budgets, budgetAlertPreference, recurringExpenses, importBatches] =
-		await Promise.all([
-			listCategories(context),
-			listExpenseCatalogs(context),
-			listBudgetStatus(context, periodMonth),
-			getBudgetAlertPreference(context),
-			listRecurringExpenses(context),
-			listImportBatches(context)
-		]);
+	const [
+		categories,
+		catalogs,
+		budgets,
+		budgetAlertPreference,
+		recurringExpenses,
+		importBatches,
+		reconciliationQueue
+	] = await Promise.all([
+		listCategories(context),
+		listExpenseCatalogs(context),
+		listBudgetStatus(context, periodMonth),
+		getBudgetAlertPreference(context),
+		listRecurringExpenses(context),
+		listImportBatches(context),
+		listReconciliationQueue(context)
+	]);
 
 	return {
 		categories,
@@ -68,7 +84,8 @@ export const load: PageServerLoad = async (event) => {
 		budgets,
 		budgetAlertPreference,
 		recurringExpenses,
-		importBatches
+		importBatches,
+		reconciliationQueue
 	};
 };
 
@@ -229,6 +246,23 @@ export const actions: Actions = {
 			return fail(400, { message: translate(event.locals.locale, 'Check file and format.') });
 		}
 
+		if (parsed.data.sourceType === 'ofx') {
+			const result = await stageOfxTransactions(context, file);
+			return {
+				message: translate(
+					event.locals.locale,
+					'{stagedCount} bank transactions staged; {duplicateCount} duplicates and {failedCount} failures.',
+					{
+						stagedCount: result.stagedCount,
+						duplicateCount: result.duplicateCount,
+						failedCount: result.failedCount
+					}
+				),
+				reconciliationResult: result,
+				tone: result.stagedCount > 0 || result.duplicateCount > 0 ? 'success' : 'danger'
+			};
+		}
+
 		const result = await previewImportExpenses(context, { ...parsed.data, file });
 		return {
 			message: translate(event.locals.locale, 'Import preview ready. Review before confirming.'),
@@ -285,6 +319,48 @@ export const actions: Actions = {
 				result
 			),
 			undoResult: result
+		};
+	},
+	matchBankTransaction: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const parsed = parseForm(await event.request.formData(), reconciliationMatchSchema);
+		if (!parsed.success)
+			return fail(400, {
+				message: translate(event.locals.locale, 'Reconciliation choice is invalid.'),
+				tone: 'danger'
+			});
+		await decideBankTransaction(context, { ...parsed.data, decision: 'match' });
+		return {
+			tone: 'success',
+			message: translate(event.locals.locale, 'Bank transaction matched and reconciled.')
+		};
+	},
+	createFromBankTransaction: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const parsed = parseForm(await event.request.formData(), reconciliationCreateSchema);
+		if (!parsed.success)
+			return fail(400, {
+				message: translate(event.locals.locale, 'Reconciliation choice is invalid.'),
+				tone: 'danger'
+			});
+		await decideBankTransaction(context, { ...parsed.data, decision: 'create' });
+		return {
+			tone: 'success',
+			message: translate(event.locals.locale, 'Expense created and reconciled.')
+		};
+	},
+	ignoreBankTransaction: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const parsed = parseForm(await event.request.formData(), reconciliationIgnoreSchema);
+		if (!parsed.success)
+			return fail(400, {
+				message: translate(event.locals.locale, 'Reconciliation choice is invalid.'),
+				tone: 'danger'
+			});
+		await decideBankTransaction(context, { ...parsed.data, decision: 'ignore' });
+		return {
+			tone: 'success',
+			message: translate(event.locals.locale, 'Bank transaction ignored.')
 		};
 	}
 };
