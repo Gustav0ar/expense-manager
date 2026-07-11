@@ -33,7 +33,7 @@ export const actions: Actions = {
 		if (!parsed.success) {
 			return fail(400, {
 				message: translate(event.locals.locale, 'Check email and password.'),
-				values: Object.fromEntries(formData)
+				values: safeValues(formData, next)
 			});
 		}
 
@@ -87,6 +87,13 @@ export const actions: Actions = {
 
 function safeNext(next: string) {
 	return next.startsWith('/') && !next.startsWith('//') ? next : '/app';
+}
+
+function safeValues(formData: FormData, next: string) {
+	return {
+		email: formData.get('email')?.toString() ?? '',
+		next
+	};
 }
 
 function isEmailNotVerifiedError(err: APIError) {
