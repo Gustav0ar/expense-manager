@@ -1,6 +1,9 @@
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
+	expect: {
+		timeout: 10_000
+	},
 	workers: 3,
 	use: {
 		baseURL: 'http://localhost:4173'

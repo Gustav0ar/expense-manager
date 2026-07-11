@@ -1563,7 +1563,12 @@ test('covers MFA setup, challenge and invalid code handling', async ({ page }) =
 	await page.getByRole('button', { name: 'Configurar MFA' }).click();
 	const secret = (await page.locator('.setup-code strong').textContent())?.trim();
 	expect(secret).toBeTruthy();
-	await page.getByLabel('Código gerado no app').fill(generateTotpCode(secret!));
+	// Claim the previous accepted counter during enrollment so the later challenge
+	// can use the current counter without replaying a code or guessing future time.
+	const previousCounterTimestamp = Math.floor(Date.now() / 30_000) * 30_000 - 30_000;
+	await page
+		.getByLabel('Código gerado no app')
+		.fill(generateTotpCode(secret!, previousCounterTimestamp));
 	await page.getByRole('button', { name: 'Ativar' }).click();
 	await expect(page.getByText('MFA ativado.')).toBeVisible();
 	await expect(page.locator('.recovery-grid code')).toHaveCount(10);
@@ -1585,12 +1590,7 @@ test('covers MFA setup, challenge and invalid code handling', async ({ page }) =
 	await page.goto(invitePath);
 	await expect(page).toHaveURL(/\/mfa/);
 	expect(page.url()).toContain(`next=${encodeURIComponent(invitePath)}`);
-	// Generate a code one step ahead of the enrollment code so it is guaranteed
-	// to be a different counter value — the enrollment code was already claimed
-	// as lastUsedTotpCounter and cannot be reused within the same step.
-	await page
-		.getByLabel('Código do autenticador ou recovery code')
-		.fill(generateTotpCode(secret!, Date.now() + 31_000));
+	await page.getByLabel('Código do autenticador ou recovery code').fill(generateTotpCode(secret!));
 	await page.getByRole('button', { name: 'Verificar' }).click();
 	await expect(page).toHaveURL(/\/invite\//);
 	await expect(page.getByRole('button', { name: 'Aceitar convite' })).toBeVisible();
