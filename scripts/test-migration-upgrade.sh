@@ -329,6 +329,32 @@ assert_budget_alert_controls() {
 	fi
 }
 
+assert_expense_trash() {
+	local target_url="$1"
+	local target_label="$2"
+	local schema_count
+	schema_count="$(
+		psql "${target_url}" -v ON_ERROR_STOP=1 -Atqc \
+			"SELECT
+			   (SELECT count(*) FROM information_schema.columns
+			    WHERE table_schema = 'public' AND table_name = 'expense'
+			      AND column_name = 'trash_expires_at' AND data_type = 'timestamp with time zone')
+			 + (SELECT count(*) FROM information_schema.columns
+			    WHERE table_schema = 'public' AND table_name = 'attachment_deletion'
+			      AND column_name = 'reason' AND is_nullable = 'NO')
+			 + (SELECT count(*) FROM pg_constraint
+			    WHERE conname IN ('expense_trash_timestamp_pair_check', 'attachment_deletion_reason_check')
+			      AND contype = 'c' AND convalidated)
+			 + (SELECT count(*) FROM pg_indexes
+			    WHERE schemaname = 'public' AND tablename = 'expense'
+			      AND indexname IN ('expense_workspace_trash_idx', 'expense_trash_expiry_idx'))"
+	)"
+	if [ "${schema_count}" != "6" ]; then
+		echo "${target_label} does not have the recoverable expense-trash schema." >&2
+		exit 1
+	fi
+}
+
 mkdir -p "${legacy_migrations}/meta"
 cp "${repo_root}"/drizzle/000[0-8]_*.sql "${legacy_migrations}/"
 
@@ -374,6 +400,39 @@ if [ "${missing_before_repair}" != "0" ]; then
 	exit 1
 fi
 
+# A pre-trash soft deletion is deliberately non-restorable after upgrade. Its
+# attachment may already have been removed, so the migration must tombstone its
+# metadata and preserve a durable deletion intent rather than promise recovery.
+psql "${upgrade_database_url}" -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO "user" (id, name, email, email_verified)
+VALUES ('expense-trash-migration-fixture', 'Trash fixture', 'expense-trash-migration-fixture@example.com', true);
+WITH inserted_workspace AS (
+	INSERT INTO workspace (name, created_by_user_id, currency)
+	VALUES ('Trash migration fixture', 'expense-trash-migration-fixture', 'USD')
+	RETURNING id
+), inserted_category AS (
+	INSERT INTO category (workspace_id, name, color)
+	SELECT id, 'Legacy trash', '#123456' FROM inserted_workspace
+	RETURNING id, workspace_id
+), inserted_expense AS (
+	INSERT INTO expense (
+		workspace_id, category_id, created_by_user_id, description,
+		amount_cents, currency, expense_date, deleted_at
+	)
+	SELECT workspace_id, id, 'expense-trash-migration-fixture', 'Legacy deleted expense',
+		100, 'USD', '2026-07-01', '2026-07-02T00:00:00Z'::timestamptz
+	FROM inserted_category
+	RETURNING id, workspace_id
+)
+INSERT INTO expense_attachment (
+	workspace_id, expense_id, uploaded_by_user_id, original_name, content_type,
+	size_bytes, storage_key, sha256
+)
+SELECT workspace_id, id, 'expense-trash-migration-fixture', 'legacy.txt', 'text/plain',
+	6, 'legacy/trash/legacy.txt', repeat('a', 64)
+FROM inserted_expense;
+SQL
+
 echo "Applying the complete migration set to the 0008 database."
 DATABASE_URL="${upgrade_database_url}" pnpm exec drizzle-kit migrate --config "${repo_root}/drizzle.config.ts"
 
@@ -393,6 +452,23 @@ assert_invitation_delivery_outbox "${upgrade_database_url}" "Upgraded database"
 assert_attachment_deletion_outbox "${upgrade_database_url}" "Upgraded database"
 assert_ofx_reconciliation "${upgrade_database_url}" "Upgraded database"
 assert_budget_alert_controls "${upgrade_database_url}" "Upgraded database"
+assert_expense_trash "${upgrade_database_url}" "Upgraded database"
+
+legacy_trash_count="$(
+	psql "${upgrade_database_url}" -v ON_ERROR_STOP=1 -Atqc \
+		"SELECT count(*)
+		 FROM expense e
+		 JOIN expense_attachment a ON a.expense_id = e.id
+		 JOIN attachment_deletion d ON d.attachment_id = a.id
+		 WHERE e.description = 'Legacy deleted expense'
+		   AND e.trash_expires_at = e.deleted_at
+		   AND a.deleted_at = e.deleted_at
+		   AND d.reason = 'attachment_deleted'"
+)"
+if [ "${legacy_trash_count}" != "1" ]; then
+	echo "Upgraded legacy trash row became restorable or lost its attachment intent." >&2
+	exit 1
+fi
 
 fresh_database_created=true
 createdb --maintenance-db="${maintenance_url}" "${fresh_database}"
@@ -416,6 +492,7 @@ assert_invitation_delivery_outbox "${fresh_database_url}" "Fresh database"
 assert_attachment_deletion_outbox "${fresh_database_url}" "Fresh database"
 assert_ofx_reconciliation "${fresh_database_url}" "Fresh database"
 assert_budget_alert_controls "${fresh_database_url}" "Fresh database"
+assert_expense_trash "${fresh_database_url}" "Fresh database"
 
 cleanup
 trap - EXIT INT TERM

@@ -156,4 +156,21 @@ test('captures stable desktop and mobile app surfaces', async ({ page }) => {
 	await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390);
 	await expect(notificationCenter.locator('.rail-labels span:nth-child(2)')).toBeHidden();
 	await capture(page, notificationCenter, 'budget-notifications-mobile.png');
+
+	await page.setViewportSize({ width: 1280, height: 900 });
+	await page.goto('/app/expenses?q=Visual%20expense');
+	await expenseRow(page, 'Visual expense')
+		.getByRole('button', { name: 'Delete Visual expense' })
+		.click();
+	await page
+		.getByRole('dialog', { name: 'Delete expense?' })
+		.getByRole('button', { name: 'Delete', exact: true })
+		.click();
+	await page.goto('/app/expenses/trash');
+	const trashPage = page.locator('.trash-page');
+	await expect(trashPage.getByRole('heading', { name: 'Expense trash' })).toBeVisible();
+	await capture(page, trashPage, 'expense-trash-desktop.png');
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390);
+	await capture(page, trashPage, 'expense-trash-mobile.png');
 });

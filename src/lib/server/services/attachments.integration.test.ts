@@ -156,7 +156,7 @@ describe('attachment service integration', () => {
 		const retainedPath = safeStoragePath(getUploadDir(), intent.storageKey);
 		await expect(stat(retainedPath)).resolves.toMatchObject({ size: 12 });
 		await expect(
-			runAttachmentDeletionWorker({
+			runAttachmentWorkerUntilAcquired({
 				now: new Date(Date.now() + attachmentDeletionGraceMs + 1),
 				workspaceId: fixture.context.workspaceId,
 				reconcile: false
@@ -252,8 +252,8 @@ describe('attachment service integration', () => {
 		const firstDue = Date.now() + attachmentDeletionGraceMs + 1;
 		const permissionError = Object.assign(new Error('denied'), { code: 'EACCES' });
 
-		for (let attempt = 0; attempt < attachmentDeletionMaxAttempts; attempt++) {
-			await runAttachmentDeletionWorker({
+		for (let attempt = 0; attempt < attachmentDeletionMaxAttempts * 10; attempt++) {
+			const result = await runAttachmentDeletionWorker({
 				now: new Date(firstDue + attempt * 24 * 60 * 60 * 1000),
 				workspaceId: fixture.context.workspaceId,
 				removeFile: async () => {
@@ -261,6 +261,13 @@ describe('attachment service integration', () => {
 				},
 				reconcile: false
 			});
+			if ('skipped' in result && result.skipped)
+				await new Promise<void>((resolve) => setImmediate(resolve));
+			const [state] = await db
+				.select({ status: attachmentDeletion.status })
+				.from(attachmentDeletion)
+				.where(eq(attachmentDeletion.attachmentId, saved!.id));
+			if (state.status === 'failed') break;
 		}
 
 		const [intent] = await db
@@ -383,7 +390,7 @@ describe('attachment service integration', () => {
 		);
 		await deleteExpenseAttachment(second.context, secondAttachment!.id);
 
-		const result = await runAttachmentDeletionWorker({
+		const result = await runAttachmentWorkerUntilAcquired({
 			now: new Date(Date.now() + attachmentDeletionGraceMs + 1),
 			workspaceId: first.context.workspaceId,
 			removeFile: async () => {},
@@ -445,7 +452,7 @@ describe('attachment service integration', () => {
 			.where(eq(attachmentDeletion.attachmentId, retained!.id));
 		await rm(safeStoragePath(getUploadDir(), retainedRow.storageKey));
 		await expect(
-			runAttachmentDeletionWorker({
+			runAttachmentWorkerUntilAcquired({
 				uploadDir: getUploadDir(),
 				workspaceId: fixture.context.workspaceId
 			})
@@ -515,6 +522,7 @@ async function createFixture() {
 	};
 	return { context, expenseId: expenseRow.id };
 }
+
 async function runAttachmentWorkerUntilAcquired(
 	options: Parameters<typeof runAttachmentDeletionWorker>[0]
 ) {

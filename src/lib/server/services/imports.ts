@@ -22,7 +22,8 @@ import {
 	type ExpenseImportSource
 } from '$lib/server/utils/import';
 import { parseCurrencyToCents } from '$lib/server/utils/money';
-import { buildAttachmentDeletionRows } from './attachment-deletion';
+import { attachmentDeletionGraceMs, buildAttachmentDeletionRows } from './attachment-deletion';
+import { expenseTrashDates } from './expense-trash';
 import { getActiveRules, matchCategoryRuleFromRules } from './category-rules';
 import {
 	assertCatalogName,
@@ -523,11 +524,11 @@ export async function undoImportBatch(context: WorkspaceContext, batchId: number
 					row.importBaselineHash === importMaterialHash(row)
 			)
 			.map((row) => row.id);
-		const deletedAt = new Date();
+		const { deletedAt, trashExpiresAt } = expenseTrashDates();
 		if (eligibleIds.length > 0) {
 			await tx
 				.update(expense)
-				.set({ deletedAt })
+				.set({ deletedAt, trashExpiresAt })
 				.where(
 					and(
 						eq(expense.workspaceId, context.workspaceId),
@@ -556,9 +557,12 @@ export async function undoImportBatch(context: WorkspaceContext, batchId: number
 					sha256: expenseAttachment.sha256
 				});
 			if (attachments.length > 0) {
-				await tx
-					.insert(attachmentDeletion)
-					.values(buildAttachmentDeletionRows(attachments, deletedAt));
+				await tx.insert(attachmentDeletion).values(
+					buildAttachmentDeletionRows(attachments, deletedAt, {
+						reason: 'expense_trash',
+						notBefore: new Date(trashExpiresAt.getTime() + attachmentDeletionGraceMs)
+					})
+				);
 				await tx.insert(auditEvent).values(
 					attachments.map((attachment) => ({
 						workspaceId: context.workspaceId,

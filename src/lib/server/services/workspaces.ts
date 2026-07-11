@@ -1,5 +1,5 @@
 import { error, redirect, type Cookies, type RequestEvent } from '@sveltejs/kit';
-import { and, count, desc, eq, isNull, ne, sql } from 'drizzle-orm';
+import { and, count, desc, eq, ne, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import {
 	auditEvent,
@@ -154,14 +154,14 @@ export async function updateWorkspace(
 		const [{ value: expenseCount }] = await db
 			.select({ value: count() })
 			.from(expense)
-			.where(and(eq(expense.workspaceId, context.workspaceId), isNull(expense.deletedAt)));
+			.where(eq(expense.workspaceId, context.workspaceId));
 
 		if (expenseCount > 0) {
 			throw error(
 				422,
 				translate(
 					context.locale,
-					'Cannot change currency: this workspace has {count} expense(s). Delete all expenses first.',
+					'Cannot change currency: this workspace has {count} live or retained expense(s). Remove them permanently first.',
 					{ count: expenseCount }
 				)
 			);

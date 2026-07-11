@@ -1373,3 +1373,103 @@ test('navigates expense list pagination', async ({ page }) => {
 	await expect(page.locator('.expense-table-item')).toHaveCount(1);
 	await expect(expenseRow(page, 'Despesa paginada 01')).toBeVisible();
 });
+
+test('moves an expense to the dedicated trash and restores it on desktop and mobile', async ({
+	page
+}) => {
+	await registerAndCreateWorkspace(page);
+	await createCategory(page);
+	await createExpenseFromForm(page, {
+		description: 'Despesa recuperável',
+		amount: '42,50',
+		date: '2026-07-10',
+		category: '🧰 Operacional'
+	});
+
+	await expenseRow(page, 'Despesa recuperável')
+		.getByRole('button', { name: 'Excluir Despesa recuperável' })
+		.click();
+	const deleteDialog = page.getByRole('dialog', { name: 'Excluir despesa?' });
+	await expect(deleteDialog).toContainText('poderá ser recuperada por 30 dias');
+	await deleteDialog.getByRole('button', { name: 'Excluir', exact: true }).click();
+	await expect(expenseRow(page, 'Despesa recuperável')).toBeHidden();
+
+	await page.getByRole('link', { name: 'Ver lixeira' }).click();
+	await expect(page).toHaveURL(/\/app\/expenses\/trash$/);
+	await expect(page.getByRole('heading', { name: 'Lixeira de despesas' })).toBeVisible();
+	const trashItem = page.locator('.trash-item').filter({ hasText: 'Despesa recuperável' });
+	await expect(trashItem).toContainText('Excluída em');
+	await expect(trashItem).toContainText('Exclusão permanente em');
+
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(trashItem.getByRole('button', { name: 'Restaurar' })).toBeVisible();
+	const overflow = await page.evaluate(
+		() => document.documentElement.scrollWidth - window.innerWidth
+	);
+	expect(overflow).toBeLessThanOrEqual(1);
+	await trashItem.getByRole('button', { name: 'Restaurar' }).focus();
+	await expect(trashItem.getByRole('button', { name: 'Restaurar' })).toBeFocused();
+	await page.keyboard.press('Enter');
+	await expect(page.getByText('A lixeira está vazia')).toBeVisible();
+
+	await page.getByRole('link', { name: 'Voltar para despesas' }).click();
+	await expect(expenseRow(page, 'Despesa recuperável')).toBeVisible();
+});
+
+test('reaches every trashed expense beyond 100 rows and preserves cursor navigation', async ({
+	page
+}) => {
+	test.setTimeout(60_000);
+	await registerAndCreateWorkspace(page, 'Paginação da lixeira');
+	await createCategory(page);
+
+	await page.goto('/app/planning?periodMonth=2026-07');
+	const importForm = page.locator('form[action="?/importExpenses"]');
+	await importForm.getByLabel('Categoria padrão').selectOption({ label: '🧰 Operacional' });
+	const descriptions = Array.from(
+		{ length: 105 },
+		(_, index) => `Lixeira paginada ${String(index + 1).padStart(3, '0')}`
+	);
+	await importForm.locator('input[type="file"]').setInputFiles({
+		name: 'lixeira-paginada.csv',
+		mimeType: 'text/csv',
+		buffer: Buffer.from(
+			[
+				'date,description,amount',
+				...descriptions.map(
+					(description, index) => `2026-07-10,${description},${(index + 1).toFixed(2)}`
+				)
+			].join('\n')
+		)
+	});
+	await importForm.getByRole('button', { name: 'Importar' }).click();
+	await page.getByRole('button', { name: 'Confirmar despesas selecionadas' }).click();
+	await expect(page.getByText('105 despesas importadas.')).toBeVisible();
+
+	const batch = page.locator('tbody tr').filter({ hasText: 'lixeira-paginada.csv' });
+	page.once('dialog', (dialog) => dialog.accept());
+	await batch.getByRole('button', { name: 'Desfazer importação' }).click();
+	await expect(
+		page.getByText('Despesas importadas desfeitas: 105. Despesas protegidas ignoradas: 0.')
+	).toBeVisible();
+
+	await page.goto('/app/expenses/trash');
+	await expect(page.locator('.trash-item')).toHaveCount(100);
+	const firstPage = await page.locator('.trash-item h3').allTextContents();
+	await page.getByRole('link', { name: 'Próxima página' }).click();
+	await expect(page).toHaveURL(/\/app\/expenses\/trash\?cursor=/);
+	await expect(page.getByRole('link', { name: 'Primeira página' })).toBeVisible();
+	await expect(page.locator('.trash-item')).toHaveCount(5);
+	const secondPage = await page.locator('.trash-item h3').allTextContents();
+	const reached = [...firstPage, ...secondPage];
+	expect(new Set(reached).size).toBe(105);
+	expect([...reached].sort()).toEqual([...descriptions].sort());
+
+	const cursorUrl = page.url();
+	await page.locator('.trash-item').first().getByRole('button', { name: 'Restaurar' }).click();
+	await expect(page).toHaveURL(cursorUrl);
+	await expect(page.locator('.trash-item')).toHaveCount(4);
+	await page.getByRole('link', { name: 'Primeira página' }).click();
+	await expect(page).toHaveURL(/\/app\/expenses\/trash$/);
+	await expect(page.locator('.trash-item')).toHaveCount(100);
+});

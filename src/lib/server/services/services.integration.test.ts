@@ -75,6 +75,7 @@ import {
 	updateExpense,
 	updateExpensePaymentStatus
 } from './expenses';
+import { expenseTrashDates, expenseTrashRetentionMs, restoreTrashedExpense } from './expense-trash';
 import {
 	getOrCreateCatalogItem,
 	listExpenseCatalogs,
@@ -427,6 +428,10 @@ describe('server service integration', () => {
 				undoneCount: 1,
 				skippedCount: 0
 			});
+			const [trashedExpense] = await db
+				.select({ deletedAt: expense.deletedAt, trashExpiresAt: expense.trashExpiresAt })
+				.from(expense)
+				.where(eq(expense.id, expenseRow.id));
 			const [attachment] = await db
 				.select({
 					deletedAt: expenseAttachment.deletedAt,
@@ -437,16 +442,39 @@ describe('server service integration', () => {
 			const [intent] = await db
 				.select({
 					attachmentId: attachmentDeletion.attachmentId,
+					reason: attachmentDeletion.reason,
 					status: attachmentDeletion.status,
-					storageKey: attachmentDeletion.storageKey
+					storageKey: attachmentDeletion.storageKey,
+					notBefore: attachmentDeletion.notBefore
 				})
 				.from(attachmentDeletion)
 				.where(eq(attachmentDeletion.attachmentId, saved!.id));
 			expect(attachment.deletedAt).toBeInstanceOf(Date);
-			expect(intent).toEqual({
+			expect(trashedExpense.trashExpiresAt!.getTime() - trashedExpense.deletedAt!.getTime()).toBe(
+				expenseTrashRetentionMs
+			);
+			expect(intent).toMatchObject({
 				attachmentId: saved!.id,
+				reason: 'expense_trash',
 				status: 'pending',
 				storageKey: attachment.storageKey
+			});
+			expect(intent.notBefore.getTime()).toBe(
+				trashedExpense.trashExpiresAt!.getTime() + 48 * 60 * 60 * 1000
+			);
+			await restoreTrashedExpense(fixture.context, expenseRow.id);
+			const [unchangedBatch] = await db
+				.select({
+					undoneCount: importBatch.undoneCount,
+					undoSkippedCount: importBatch.undoSkippedCount,
+					undoneAt: importBatch.undoneAt
+				})
+				.from(importBatch)
+				.where(eq(importBatch.id, imported.importBatchId));
+			expect(unchangedBatch).toMatchObject({
+				undoneCount: 1,
+				undoSkippedCount: 0,
+				undoneAt: expect.any(Date)
 			});
 		} finally {
 			if (previousUploadDir === undefined) delete process.env.UPLOAD_DIR;
@@ -573,9 +601,10 @@ describe('server service integration', () => {
 			defaultCategoryId: fixture.categoryId,
 			file: new File([deletedCsv], 'deleted.csv', { type: 'text/csv' })
 		});
+		const deletedAt = new Date();
 		await db
 			.update(expense)
-			.set({ deletedAt: new Date() })
+			.set({ deletedAt, trashExpiresAt: expenseTrashDates(deletedAt).trashExpiresAt })
 			.where(eq(expense.importBatchId, deletedImport.importBatchId));
 
 		const mixedRows = [
@@ -1857,7 +1886,8 @@ describe('server service integration', () => {
 				expenseDate: '2026-06-03',
 				paymentMethodId: usedPaymentMethod.id,
 				paymentMethod: usedPaymentMethod.name,
-				deletedAt: new Date('2026-06-04T00:00:00.000Z')
+				deletedAt: new Date('2026-06-04T00:00:00.000Z'),
+				trashExpiresAt: new Date('2026-07-04T00:00:00.000Z')
 			}
 		]);
 		await db.insert(recurringExpense).values([
@@ -1947,7 +1977,7 @@ describe('server service integration', () => {
 		expect(paymentMethods).toEqual([
 			expect.objectContaining({
 				id: usedPaymentMethod.id,
-				expenseCount: 2,
+				expenseCount: 3,
 				recurringCount: 2
 			}),
 			expect.objectContaining({
@@ -1971,7 +2001,7 @@ describe('server service integration', () => {
 			})
 		).resolves.toMatchObject({
 			mode: 'archived',
-			item: expect.objectContaining({ expenseCount: 2, recurringCount: 2 })
+			item: expect.objectContaining({ expenseCount: 3, recurringCount: 2 })
 		});
 		await expect(
 			removeExpenseCatalogItem(fixture.context, {
@@ -3733,7 +3763,11 @@ describe('server service integration', () => {
 				]
 			});
 
-			await db.update(expense).set({ deletedAt: new Date() }).where(eq(expense.id, expenseRow.id));
+			const deletedAt = new Date();
+			await db
+				.update(expense)
+				.set({ deletedAt, trashExpiresAt: expenseTrashDates(deletedAt).trashExpiresAt })
+				.where(eq(expense.id, expenseRow.id));
 
 			await expect(getAttachmentForDownload(fixture.context, created!.id)).rejects.toMatchObject({
 				status: 404

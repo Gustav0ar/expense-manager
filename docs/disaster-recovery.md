@@ -109,6 +109,18 @@ reference in the restored database has a matching file, size and checksum. An
 unknown extra file is reported for investigation and is not a reason to delete
 it automatically.
 
+Expense trash extends attachment retention: a newly deleted expense is
+recoverable for 30 days and its physical files remain retained through that
+period plus the 48-hour backup grace. Restore a database dump and upload archive
+from the same snapshot. A database-only restore can expose trash entries whose
+artifacts cannot pass size/SHA-256 validation; the application correctly blocks
+those restores rather than partially reviving the expense.
+
+The trash screen uses a stable, workspace-scoped cursor ordered by deletion time
+and expense ID. Operators can therefore reach every retained record even when a
+workspace has more than 100 deleted expenses; restoring or purging a row keeps
+the current cursor in the redirect.
+
 ```bash
 cd "$DEPLOY_PATH"
 mkdir -p restore
