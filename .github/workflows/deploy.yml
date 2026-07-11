@@ -200,6 +200,7 @@ jobs:
           ORIGIN: ${{ secrets.ORIGIN }}
           TRUSTED_ORIGINS: ${{ secrets.TRUSTED_ORIGINS }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          BETTER_AUTH_SECRET_PREVIOUS: ${{ secrets.BETTER_AUTH_SECRET_PREVIOUS }}
           REQUIRE_EMAIL_VERIFICATION: ${{ vars.REQUIRE_EMAIL_VERIFICATION || 'true' }}
           ALLOW_REGISTRATION: ${{ vars.ALLOW_REGISTRATION || 'false' }}
           POSTGRES_DB: ${{ vars.POSTGRES_DB || 'expense_manager' }}
@@ -348,6 +349,7 @@ jobs:
             write_env_var ORIGIN "${ORIGIN}"
             write_env_var TRUSTED_ORIGINS "${TRUSTED_ORIGINS}"
             write_env_var BETTER_AUTH_SECRET "${BETTER_AUTH_SECRET}"
+            write_env_var BETTER_AUTH_SECRET_PREVIOUS "${BETTER_AUTH_SECRET_PREVIOUS}"
             write_env_var REQUIRE_EMAIL_VERIFICATION "${REQUIRE_EMAIL_VERIFICATION}"
             write_env_var ALLOW_REGISTRATION "${ALLOW_REGISTRATION}"
             write_env_var POSTGRES_DB "${POSTGRES_DB}"

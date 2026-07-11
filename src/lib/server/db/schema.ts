@@ -114,6 +114,48 @@ export const workspaceInvitation = pgTable(
 	]
 );
 
+export const workspaceInvitationDelivery = pgTable(
+	'workspace_invitation_delivery',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		invitationId: bigint('invitation_id', { mode: 'number' })
+			.notNull()
+			.references(() => workspaceInvitation.id, { onDelete: 'cascade' }),
+		encryptedToken: text('encrypted_token').notNull(),
+		locale: text('locale').notNull().default('en'),
+		status: text('status').notNull().default('pending'),
+		claimToken: text('claim_token'),
+		claimExpiresAt: timestamp('claim_expires_at', { withTimezone: true }),
+		attemptCount: integer('attempt_count').notNull().default(0),
+		lastErrorCategory: text('last_error_category'),
+		provider: text('provider'),
+		providerMessageId: text('provider_message_id'),
+		providerMessageUuid: text('provider_message_uuid'),
+		sentAt: timestamp('sent_at', { withTimezone: true }),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp('updated_at', { withTimezone: true })
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date())
+	},
+	(table) => [
+		uniqueIndex('workspace_invitation_delivery_invitation_unique_idx').on(table.invitationId),
+		check(
+			'workspace_invitation_delivery_status_check',
+			sql`${table.status} in ('pending', 'sending', 'sent', 'failed')`
+		),
+		check('workspace_invitation_delivery_attempt_count_check', sql`${table.attemptCount} >= 0`),
+		check(
+			'workspace_invitation_delivery_error_category_check',
+			sql`${table.lastErrorCategory} is null or ${table.lastErrorCategory} in ('timeout', 'configuration', 'provider_rejected', 'provider_unavailable', 'network', 'encryption', 'expired', 'unknown')`
+		),
+		index('workspace_invitation_delivery_status_created_idx').on(table.status, table.createdAt),
+		index('workspace_invitation_delivery_claim_expires_at_idx')
+			.on(table.claimExpiresAt)
+			.where(sql`${table.status} = 'sending'`)
+	]
+);
+
 export const category = pgTable(
 	'category',
 	{

@@ -110,7 +110,12 @@ async function invitationRow(page: Page, email: string) {
 	return rows.first();
 }
 
-async function inviteUser(page: Page, email: string, role: 'admin' | 'member' | 'viewer') {
+async function inviteUser(
+	page: Page,
+	email: string,
+	role: 'admin' | 'member' | 'viewer',
+	expectedRole: 'admin' | 'member' | 'viewer' = role
+) {
 	await page.goto('/app/settings/users');
 	const form = usersInviteForm(page);
 	await form.getByLabel('Email').fill(email);
@@ -129,8 +134,19 @@ async function inviteUser(page: Page, email: string, role: 'admin' | 'member' | 
 		viewer: 'Visualizador'
 	};
 	const row = await invitationRow(page, email);
-	await expect(row.locator('td').nth(1)).toHaveText(roleLabel[role]);
+	await expect(row.locator('td').nth(1)).toHaveText(roleLabel[expectedRole]);
 	await expect(row.locator('td').nth(2)).toHaveText('Pendente');
+	await expect(row.locator('td').nth(3)).toHaveText('Enviado');
+	return inviteUrl!;
+}
+
+async function resendInvitation(page: Page, email: string) {
+	const row = await invitationRow(page, email);
+	await row.getByRole('button', { name: 'Reenviar' }).click();
+	const inviteUrlRow = page.locator('.invite-url-row');
+	await expect(inviteUrlRow).toBeVisible();
+	const inviteUrl = (await inviteUrlRow.locator('.invite-url-code').textContent())?.trim();
+	expect(inviteUrl).toBeTruthy();
 	return inviteUrl!;
 }
 
@@ -229,12 +245,18 @@ test('covers invitations, every assignable role, acceptance, role changes and re
 
 		const roleCycleEmail = uniqueEmail('users-role-cycle');
 		const initialInviteUrl = await inviteUser(page, roleCycleEmail, 'viewer');
-		const renewedInviteUrl = await inviteUser(page, roleCycleEmail, 'member');
-		expect(new URL(renewedInviteUrl).pathname).not.toBe(new URL(initialInviteUrl).pathname);
+		const stableInviteUrl = await inviteUser(page, roleCycleEmail, 'member', 'viewer');
+		expect(new URL(stableInviteUrl).pathname).toBe(new URL(initialInviteUrl).pathname);
 		await expect(invitationRows(page, roleCycleEmail)).toHaveCount(1);
 		await expect((await invitationRow(page, roleCycleEmail)).locator('td').nth(1)).toHaveText(
-			'Membro'
+			'Visualizador'
 		);
+		const renewedInviteUrl = await resendInvitation(page, roleCycleEmail);
+		expect(new URL(renewedInviteUrl).pathname).not.toBe(new URL(initialInviteUrl).pathname);
+		const staleInvitePage = await browser.newPage();
+		await staleInvitePage.goto(new URL(initialInviteUrl).pathname);
+		await expect(staleInvitePage.getByText('Convite inválido ou expirado.')).toBeVisible();
+		await staleInvitePage.close();
 
 		const roleCycleSession = await acceptInvite(browser, renewedInviteUrl, {
 			email: roleCycleEmail,
@@ -247,7 +269,7 @@ test('covers invitations, every assignable role, acceptance, role changes and re
 		);
 		await expect(
 			(await memberRow(page, roleCycleEmail)).locator('select[name="role"]')
-		).toHaveValue('member');
+		).toHaveValue('viewer');
 
 		await changeMemberRole(page, roleCycleEmail, 'admin');
 		await changeMemberRole(page, roleCycleEmail, 'viewer');

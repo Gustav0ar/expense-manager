@@ -752,10 +752,11 @@ before and after in a database copy or an operational maintenance window.
 ## Background Job Freshness
 
 `/api/health` reports the recurring-expense scheduler, automatic budget-alert
-scheduler, email-delivery event retention and expired-registration cleanup
+scheduler, durable invitation-delivery scheduler, email-delivery event retention and expired-registration cleanup
 under `backgroundJobs`. Each job
 exposes its attempt count, advisory-lock skip count, last
-attempt/completion/success/error timestamps and last duration. The overall
+attempt/completion/success/error timestamps, last duration, cumulative failed
+work items and latest failed count. The overall
 background-job state can be `starting`, `ok` or `degraded`. Automatic budget
 alerts run hourly and remain disabled for a workspace until an owner or
 administrator opts in from the Budget page.

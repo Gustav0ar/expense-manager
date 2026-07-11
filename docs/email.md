@@ -47,6 +47,92 @@ monthly recipient ledger makes repeated cycles idempotent and retries failed
 recipients without resending successful deliveries. Manual **Send alerts now**
 remains available independently of the automatic preference.
 
+## Durable Invitation Delivery
+
+Invitation creation commits the invitation and its delivery record in one
+database transaction before contacting the provider. The acceptance token stays
+hashed on the invitation. The delivery record contains only an AES-256-GCM
+ciphertext, a versioned HKDF derivation context, delivery status, a short-lived
+claim, bounded attempt count, provider identifiers and a coarse error category.
+It never stores or logs the plaintext token or provider error body.
+
+The first delivery attempt happens after commit. Provider rejection, network
+failure or an accepted-but-timed-out request leaves the same link retryable;
+automatic retries never rotate or invalidate it. Claims expire after ten minutes,
+are ownership-checked on completion and are selected with `FOR UPDATE SKIP
+LOCKED`. A session advisory lock limits each background cycle to one application
+instance, while the row claim also prevents races with immediate delivery. Each
+cycle claims at most 25 rows and each delivery is attempted at most eight times.
+The `/api/health` background-job payload exposes scheduler attempts, cumulative
+failed deliveries and the latest failed count.
+
+Submitting the normal invite form again for an existing pending address preserves
+its original link and role. The explicit **Resend** action is the only operation
+that rotates that invitation token, refreshes its expiry and records a resend
+audit event. Invitations created before the delivery ledger have no recoverable
+plaintext token; they remain valid, show as legacy in the UI and must be
+explicitly resent to enter durable delivery.
+
+Invitation encryption derives a dedicated key from `BETTER_AUTH_SECRET`; it does
+not reuse that secret as an AES key. Ciphertexts include a derivation-format
+version. The application reads retained rotation keys from
+`BETTER_AUTH_SECRET_PREVIOUS_FILE` first, with the direct
+`BETTER_AUTH_SECRET_PREVIOUS` value available for non-Compose runtimes. Multiple
+retained keys are comma-separated.
+
+### Application-secret rotation
+
+Never replace the current application secret until its old value is available to
+the new container as the previous secret. Authenticated ciphertext intentionally
+cannot be decrypted with an unrelated key.
+
+For the GitHub deployment workflow:
+
+1. Set the protected `BETTER_AUTH_SECRET_PREVIOUS` production secret to the exact
+   old/current value. Do not print or copy it into workflow input or logs.
+2. Replace the protected `BETTER_AUTH_SECRET` production secret with the newly
+   generated value and run the normal reviewed deployment. The deploy script
+   writes both values to separate mode-`0444` Compose secret files before it
+   recreates the application container.
+3. Confirm a queued invitation created before rotation can still be delivered and
+   accepted. Monitor `invitationDeliveryScheduler` in `/api/health`.
+4. Wait at least the seven-day invitation lifetime, or explicitly resend every
+   remaining pending invitation so it is encrypted with the new key.
+5. Delete the `BETTER_AUTH_SECRET_PREVIOUS` production secret and deploy again.
+   The deploy script replaces the retained-key file with an empty file; the app
+   then uses only the current key.
+
+For direct Docker Compose, copy the current secret file to a separate private
+file before replacing it, set
+`BETTER_AUTH_SECRET_PREVIOUS_SOURCE_FILE=./secrets/better_auth_secret_previous`
+in the private `.env`, and recreate `app`. These commands keep secret material
+out of terminal output:
+
+```bash
+umask 077
+mkdir -p secrets
+chmod 700 secrets
+install -m 0444 secrets/better_auth_secret secrets/better_auth_secret_previous
+openssl rand -base64 48 > secrets/better_auth_secret.next
+chmod 0444 secrets/better_auth_secret.next
+mv secrets/better_auth_secret.next secrets/better_auth_secret
+# Set BETTER_AUTH_SECRET_PREVIOUS_SOURCE_FILE in the private .env, then:
+docker compose up -d --force-recreate app
+```
+
+After the overlap, set the source back to `/dev/null`, recreate `app`, and only
+then remove the retained file:
+
+```bash
+# Set BETTER_AUTH_SECRET_PREVIOUS_SOURCE_FILE=/dev/null in the private .env, then:
+docker compose up -d --force-recreate app
+rm -f secrets/better_auth_secret_previous
+```
+
+Both shipped Compose files default the optional previous secret to `/dev/null`,
+so deployments that are not rotating require no additional file. The full
+production procedure is also documented in [`DEPLOY.md`](../DEPLOY.md).
+
 ## Mailjet Delivery Feedback
 
 The application accepts Mailjet Event API callbacks at:
@@ -104,6 +190,8 @@ connection normally and upgrades it with STARTTLS when the server supports it.
 - Use a separate Mailjet API key pair for staging if staging sends real email.
 - Rotate the secret key immediately if it is copied into a chat, log, shell history,
   issue, pull request or commit.
+- Retain the previous application secret only for the bounded invitation-key
+  rotation window described above, then remove it.
 - Do not enable `EMAIL_DELIVERY="log"` in production because it writes email
   subjects and bodies to logs.
 
