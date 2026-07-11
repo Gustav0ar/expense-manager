@@ -1,0 +1,313 @@
+import { randomUUID } from 'node:crypto';
+import type { Cookies, RequestEvent } from '@sveltejs/kit';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { eq } from 'drizzle-orm';
+import { user } from '$lib/server/db/auth.schema';
+import {
+	category,
+	expense,
+	auditEvent,
+	workspace,
+	workspaceInvitation,
+	workspaceMember
+} from '$lib/server/db/schema';
+import { db } from '$lib/server/db';
+import { listAuditEvents, writeAuditEvent } from './audit';
+import {
+	changeMemberRole,
+	createWorkspace,
+	getMemberships,
+	listInvitations,
+	listMembers,
+	removeMember,
+	inviteMember,
+	requireUser,
+	requireWorkspaceContext,
+	resolveWorkspaceContext,
+	setWorkspaceCookie,
+	updateWorkspace,
+	type WorkspaceContext
+} from './workspaces';
+
+const workspaceIds: number[] = [];
+const userIds: string[] = [];
+
+describe('workspace service integration', () => {
+	afterEach(async () => {
+		for (const workspaceId of workspaceIds.splice(0)) {
+			await db.delete(workspace).where(eq(workspace.id, workspaceId));
+		}
+		for (const userId of userIds.splice(0)) {
+			await db.delete(user).where(eq(user.id, userId));
+		}
+	});
+
+	it('requires authentication and redirects users without a workspace', async () => {
+		const anonymous = requestEvent();
+		await expect(requireUser(anonymous)).rejects.toMatchObject({
+			status: 303,
+			location: '/login?next=%2Fapp%2Fexpenses%3Fpage%3D2'
+		});
+
+		const account = await createUser('no-workspace');
+		const authenticated = requestEvent({ user: account });
+		expect(await requireUser(authenticated)).toMatchObject({ id: account.id });
+		await expect(requireWorkspaceContext(authenticated)).rejects.toMatchObject({
+			status: 303,
+			location: '/app/onboarding'
+		});
+	});
+
+	it('creates memberships and resolves the selected workspace with a durable cookie', async () => {
+		const account = await createUser('workspace-owner');
+		const first = await createTrackedWorkspace(account.id, 'First workspace');
+		const second = await createTrackedWorkspace(account.id, 'Second workspace');
+		const memberships = await getMemberships(account.id);
+		expect(memberships.map((membership) => membership.workspaceId)).toEqual([second.id, first.id]);
+
+		const cookies = cookieJar({ workspace_id: String(first.id) });
+		const event = requestEvent({ user: account, cookies });
+		const context = await resolveWorkspaceContext(event);
+		expect(context).toMatchObject({
+			workspaceId: first.id,
+			workspaceName: 'First workspace',
+			role: 'owner',
+			locale: 'en'
+		});
+		expect(cookies.set).toHaveBeenCalledWith(
+			'workspace_id',
+			String(first.id),
+			expect.objectContaining({ httpOnly: true, sameSite: 'lax' })
+		);
+
+		// A resolved context is cached in locals and does not query or rewrite cookies again.
+		cookies.set.mockClear();
+		expect(await resolveWorkspaceContext(event)).toBe(context);
+		expect(cookies.set).not.toHaveBeenCalled();
+
+		const explicitCookies = cookieJar();
+		setWorkspaceCookie(explicitCookies, second.id);
+		expect(explicitCookies.set).toHaveBeenCalledWith(
+			'workspace_id',
+			String(second.id),
+			expect.objectContaining({ path: '/', maxAge: 31_536_000 })
+		);
+
+		const cachedEmpty = requestEvent({ user: account });
+		cachedEmpty.locals.workspaceContext = null;
+		await expect(resolveWorkspaceContext(cachedEmpty)).resolves.toBeNull();
+
+		const preloaded = requestEvent({ user: account });
+		preloaded.locals.workspaceMemberships = memberships;
+		await expect(requireWorkspaceContext(preloaded)).resolves.toMatchObject({
+			workspaceId: second.id
+		});
+	});
+
+	it('updates workspace settings while guarding permissions and currency history', async () => {
+		const account = await createUser('settings-owner');
+		const created = await createTrackedWorkspace(account.id, 'Settings workspace');
+		const context = workspaceContext(account.id, created.id, created.name);
+
+		await expect(
+			updateWorkspace(
+				{ ...context, role: 'member' },
+				{ name: 'Denied', weekStartsOn: 0, currency: 'USD' }
+			)
+		).rejects.toMatchObject({ status: 403 });
+
+		await expect(
+			updateWorkspace(context, { name: 'Renamed workspace', weekStartsOn: 1, currency: 'BRL' })
+		).resolves.toMatchObject({ id: created.id, name: 'Renamed workspace' });
+		await expect(
+			updateWorkspace(context, { name: 'Same currency', weekStartsOn: 0, currency: 'USD' })
+		).resolves.toMatchObject({ id: created.id, name: 'Same currency' });
+
+		const [categoryRow] = await db
+			.insert(category)
+			.values({ workspaceId: created.id, name: 'Travel', color: '#123456' })
+			.returning({ id: category.id });
+		await db.insert(expense).values({
+			workspaceId: created.id,
+			categoryId: categoryRow.id,
+			createdByUserId: account.id,
+			description: 'Flight',
+			amountCents: 100,
+			currency: 'BRL',
+			expenseDate: '2026-07-01'
+		});
+
+		await expect(
+			updateWorkspace(
+				{ ...context, currency: 'BRL' },
+				{ name: 'Blocked currency', weekStartsOn: 1, currency: 'EUR' }
+			)
+		).rejects.toMatchObject({ status: 422 });
+	});
+
+	it('lists members and invitations and enforces member-management boundaries', async () => {
+		const owner = await createUser('member-owner');
+		const member = await createUser('managed-member');
+		const outsider = await createUser('outsider');
+		const created = await createTrackedWorkspace(owner.id, 'Members workspace');
+		const context = workspaceContext(owner.id, created.id, created.name);
+		const [memberRow] = await db
+			.insert(workspaceMember)
+			.values({ workspaceId: created.id, userId: member.id, role: 'member', status: 'active' })
+			.returning({ id: workspaceMember.id });
+		await expect(
+			inviteMember({ ...context, role: 'viewer' }, { email: outsider.email, role: 'member' })
+		).rejects.toMatchObject({ status: 403 });
+		const [ownerRow] = await db
+			.select({ id: workspaceMember.id })
+			.from(workspaceMember)
+			.where(eq(workspaceMember.userId, owner.id));
+
+		await db.insert(workspaceInvitation).values({
+			workspaceId: created.id,
+			email: outsider.email,
+			role: 'viewer',
+			tokenHash: randomUUID().replaceAll('-', ''),
+			invitedByUserId: owner.id,
+			expiresAt: new Date(Date.now() + 60_000)
+		});
+		expect(await listMembers(context)).toHaveLength(2);
+		expect(await listInvitations(context)).toEqual([
+			expect.objectContaining({ email: outsider.email, role: 'viewer', status: 'pending' })
+		]);
+
+		await expect(
+			changeMemberRole({ ...context, role: 'viewer' }, memberRow.id, 'admin')
+		).rejects.toMatchObject({ status: 403 });
+		await expect(changeMemberRole(context, memberRow.id, 'admin')).resolves.toBeUndefined();
+		expect(await listMembers(context)).toContainEqual(expect.objectContaining({ role: 'admin' }));
+		await expect(changeMemberRole(context, ownerRow.id, 'viewer')).rejects.toMatchObject({
+			status: 403
+		});
+		await expect(changeMemberRole(context, 2_147_483_647, 'viewer')).rejects.toMatchObject({
+			status: 404
+		});
+
+		await expect(removeMember({ ...context, role: 'viewer' }, memberRow.id)).rejects.toMatchObject({
+			status: 403
+		});
+		await expect(removeMember(context, ownerRow.id)).rejects.toMatchObject({ status: 403 });
+		await expect(removeMember(context, 2_147_483_647)).rejects.toMatchObject({ status: 404 });
+		await expect(removeMember(context, memberRow.id)).resolves.toBeUndefined();
+		expect(await listMembers(context)).toHaveLength(1);
+	});
+
+	it('writes and filters a stable, cursor-paginated audit trail', async () => {
+		const owner = await createUser('audit-owner');
+		const created = await createTrackedWorkspace(owner.id, 'Audit workspace');
+		const context = workspaceContext(owner.id, created.id, created.name);
+		const action = `coverage.${randomUUID()}`;
+		for (let index = 1; index <= 3; index += 1) {
+			await writeAuditEvent({
+				workspaceId: created.id,
+				actorUserId: owner.id,
+				action,
+				entityType: index === 3 ? 'other' : 'coverage',
+				entityId: index,
+				metadata: { index }
+			});
+		}
+
+		const firstPage = await listAuditEvents(context, { action, limit: 2 });
+		expect(firstPage.items).toHaveLength(2);
+		expect(firstPage.nextCursor).toEqual(expect.any(String));
+		const secondPage = await listAuditEvents(context, {
+			action,
+			cursor: firstPage.nextCursor!,
+			limit: 2
+		});
+		expect(secondPage.items).toHaveLength(1);
+		expect(secondPage.nextCursor).toBeNull();
+
+		expect(
+			await listAuditEvents(context, { action, entityType: 'coverage', limit: 500 })
+		).toMatchObject({
+			items: [
+				expect.objectContaining({ entityId: '2' }),
+				expect.objectContaining({ entityId: '1' })
+			]
+		});
+		expect(await listAuditEvents(context, { action, cursor: 'not-json', limit: 0 })).toMatchObject({
+			items: expect.any(Array)
+		});
+		expect(
+			await listAuditEvents(context, {
+				action,
+				cursor: Buffer.from(JSON.stringify({ id: -1 })).toString('base64url')
+			})
+		).toMatchObject({ items: expect.any(Array) });
+
+		const globalAction = `global.${randomUUID()}`;
+		await writeAuditEvent({ action: globalAction, entityType: 'system' });
+		await expect(
+			db
+				.select({
+					workspaceId: auditEvent.workspaceId,
+					actorUserId: auditEvent.actorUserId,
+					entityId: auditEvent.entityId,
+					metadata: auditEvent.metadata
+				})
+				.from(auditEvent)
+				.where(eq(auditEvent.action, globalAction))
+		).resolves.toEqual([{ workspaceId: null, actorUserId: null, entityId: null, metadata: null }]);
+		await db.delete(auditEvent).where(eq(auditEvent.action, globalAction));
+	});
+});
+
+async function createUser(prefix: string) {
+	const id = `${prefix}-${randomUUID()}`;
+	const email = `${id}@example.com`;
+	await db.insert(user).values({ id, name: prefix, email, emailVerified: true });
+	userIds.push(id);
+	return { id, name: prefix, email };
+}
+
+async function createTrackedWorkspace(userId: string, name: string) {
+	const created = await createWorkspace(userId, { name, weekStartsOn: 0, currency: 'USD' });
+	workspaceIds.push(created.id);
+	return created;
+}
+
+function workspaceContext(
+	userId: string,
+	workspaceId: number,
+	workspaceName: string
+): WorkspaceContext {
+	return {
+		userId,
+		workspaceId,
+		workspaceName,
+		currency: 'USD',
+		locale: 'en',
+		weekStartsOn: 0,
+		role: 'owner'
+	};
+}
+
+function cookieJar(initial: Record<string, string> = {}) {
+	const values = new Map(Object.entries(initial));
+	return {
+		get: vi.fn((name: string) => values.get(name)),
+		set: vi.fn((name: string, value: string) => values.set(name, value)),
+		delete: vi.fn((name: string) => values.delete(name))
+	} as unknown as Cookies & {
+		set: ReturnType<typeof vi.fn>;
+		delete: ReturnType<typeof vi.fn>;
+	};
+}
+
+function requestEvent(
+	input: { user?: { id: string; name: string; email: string }; cookies?: Cookies } = {}
+) {
+	return {
+		url: new URL('http://localhost/app/expenses?page=2'),
+		request: new Request('http://localhost/app/expenses?page=2'),
+		cookies: input.cookies ?? cookieJar(),
+		locals: { user: input.user ?? null, locale: 'en' }
+	} as unknown as RequestEvent;
+}

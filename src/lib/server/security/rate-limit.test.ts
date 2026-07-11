@@ -1,10 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RequestEvent } from '@sveltejs/kit';
+import { eq } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 
 const privateEnv = vi.hoisted(() => ({}) as Record<string, string | undefined>);
 
 vi.mock('$env/dynamic/private', () => ({ env: privateEnv }));
 
 import { getClientIp } from './client-ip';
+import { assertRateLimit } from './rate-limit';
+import { db } from '$lib/server/db';
+import { rateLimitBucket } from '$lib/server/db/schema';
+import { sha256 } from '$lib/server/utils/crypto';
 
 function requestWithHeaders(headers: Record<string, string>) {
 	return {
@@ -91,5 +98,42 @@ describe('rate limit client IP resolution', () => {
 
 			expect(getClientIp(requestWithHeaders({ 'x-real-ip': '  ' }))).toBe('198.51.100.10');
 		});
+	});
+});
+
+describe('rate limit persistence', () => {
+	it('normalizes identifiers, resets expired buckets and rejects excess attempts', async () => {
+		privateEnv.TRUST_PROXY_HEADERS = 'false';
+		const scope = `coverage-${randomUUID()}`;
+		const identifier = 'Person@Example.COM';
+		const key = sha256(`${scope}:198.51.100.10:${identifier.toLowerCase()}`);
+		const event = {
+			request: new Request('http://localhost/login'),
+			getClientAddress: () => '198.51.100.10',
+			locals: { locale: 'en' }
+		} as unknown as RequestEvent;
+		try {
+			await expect(
+				assertRateLimit(event, { scope, identifier, windowSeconds: 60, max: 1 })
+			).resolves.toBeUndefined();
+			await expect(
+				assertRateLimit(event, { scope, identifier, windowSeconds: 60, max: 1 })
+			).rejects.toMatchObject({ status: 429 });
+			await db
+				.update(rateLimitBucket)
+				.set({ resetAt: new Date(Date.now() - 1_000) })
+				.where(eq(rateLimitBucket.key, key));
+			await expect(
+				assertRateLimit(event, { scope, identifier, windowSeconds: 60, max: 1 })
+			).resolves.toBeUndefined();
+			await expect(
+				db
+					.select({ count: rateLimitBucket.count })
+					.from(rateLimitBucket)
+					.where(eq(rateLimitBucket.key, key))
+			).resolves.toEqual([{ count: 1 }]);
+		} finally {
+			await db.delete(rateLimitBucket).where(eq(rateLimitBucket.key, key));
+		}
 	});
 });

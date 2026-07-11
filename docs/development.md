@@ -20,6 +20,28 @@ Open `http://localhost:5173`.
 podman compose -f .devcontainer/compose.yml exec app pnpm verify
 ```
 
+### Server coverage
+
+Run the coverage gate independently while developing server behavior:
+
+```bash
+podman compose -f .devcontainer/compose.yml exec app pnpm test:coverage
+```
+
+Coverage automatically instruments all TypeScript under `src/lib/server/` plus
+the shared category and formatting utilities. Tests, declarative Drizzle table
+schemas, and the database/authentication framework bootstrap modules are the
+only exclusions because they are test inputs or composition entry points rather
+than executable business behavior. Do not add a business service to the
+exclusion list to make the gate pass; a new server service enters the gate
+automatically.
+
+The terminal summary shows per-file and aggregate results, and
+`coverage/lcov.info` contains the machine-readable report. Lines, functions,
+branches, and statements must each remain at or above 90%. Database integration
+tests use isolated users, workspaces, and temporary upload directories so they
+remain independent when Vitest executes files concurrently.
+
 ## Test Database Upgrades
 
 Run the migration upgrade test after adding or changing a migration:
