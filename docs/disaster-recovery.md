@@ -81,6 +81,12 @@ docker compose run --rm --no-deps \
 sha256sum -c restore/path/from/restic/*.sha256
 pg_restore --list restore/path/from/restic/expense_manager_YYYYMMDDTHHMMSSZ.dump >/dev/null
 
+RECOVERY_DATABASE_URL="$DATABASE_URL" \
+scripts/ops/verify-attachment-recovery.sh \
+  restore/path/from/restic/expense_manager_YYYYMMDDTHHMMSSZ.dump \
+  restore/path/from/restic/uploads_YYYYMMDDTHHMMSSZ.tar.gz \
+  restore/path/from/restic/attachment_manifest_YYYYMMDDTHHMMSSZ.tsv
+
 docker compose exec -T postgres pg_restore \
   -U "$POSTGRES_USER" \
   -d "$POSTGRES_DB" \
@@ -96,6 +102,12 @@ curl -fsS "$ORIGIN/api/health"
 
 Restore the upload archive matching the same timestamp as the database restore
 whenever possible.
+
+Do not copy an archive into the live uploads volume until the disposable
+verification above confirms that every active or retained deletion-tombstone
+reference in the restored database has a matching file, size and checksum. An
+unknown extra file is reported for investigation and is not a reason to delete
+it automatically.
 
 ```bash
 cd "$DEPLOY_PATH"

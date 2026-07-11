@@ -106,6 +106,16 @@ get_env_value() {
 }
 
 run_unit app_restore_test expense-manager-nas-restore-test.service
+
+if [ -n "${RECOVERY_DB_DUMP:-}" ] && [ -n "${RECOVERY_ATTACHMENT_MANIFEST:-}" ]; then
+  verifier="${ATTACHMENT_RECOVERY_VERIFIER:-${APP_PATH}/scripts/ops/verify-attachment-recovery.sh}"
+  if "${verifier}" "${RECOVERY_DB_DUMP}" "${RECOVERY_UPLOADS_ARCHIVE:-}" "${RECOVERY_ATTACHMENT_MANIFEST}"; then
+    record_check attachment_snapshot 1
+  else
+    record_check attachment_snapshot 0
+  fi
+fi
+
 run_unit monitoring_restore_test expense-manager-monitoring-restore-test.service
 run_unit post_reboot_healthcheck expense-manager-post-reboot-healthcheck.service
 

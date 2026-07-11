@@ -9,11 +9,12 @@ import { env } from '$env/dynamic/private';
 import { and, eq, isNull } from 'drizzle-orm';
 import { maxAttachmentBytes } from '$lib/attachment-limits';
 import { db } from '$lib/server/db';
-import { auditEvent, expense, expenseAttachment } from '$lib/server/db/schema';
+import { attachmentDeletion, auditEvent, expense, expenseAttachment } from '$lib/server/db/schema';
 import { canWriteExpenses } from '$lib/server/security/roles';
 import { randomToken } from '$lib/server/utils/crypto';
 import type { WorkspaceContext } from './workspaces';
 import { translate } from '$lib/i18n';
+import { buildAttachmentDeletionRows } from './attachment-deletion';
 
 export { maxAttachmentBytes };
 
@@ -124,6 +125,7 @@ export async function getAttachmentForDownload(context: WorkspaceContext, id: nu
 				eq(expenseAttachment.id, id),
 				eq(expenseAttachment.workspaceId, context.workspaceId),
 				eq(expense.workspaceId, context.workspaceId),
+				isNull(expenseAttachment.deletedAt),
 				isNull(expense.deletedAt)
 			)
 		)
@@ -164,7 +166,8 @@ export async function deleteExpenseAttachment(context: WorkspaceContext, attachm
 			and(
 				eq(expenseAttachment.id, attachmentId),
 				eq(expenseAttachment.workspaceId, context.workspaceId),
-				eq(expense.workspaceId, context.workspaceId)
+				eq(expense.workspaceId, context.workspaceId),
+				isNull(expenseAttachment.deletedAt)
 				// Intentionally no isNull(expense.deletedAt): we must be able to
 				// clean up attachments on soft-deleted expenses too.
 			)
@@ -173,10 +176,29 @@ export async function deleteExpenseAttachment(context: WorkspaceContext, attachm
 
 	if (!attachment) throw error(404, translate(context.locale, 'Attachment not found.'));
 
-	const filePath = safeStoragePath(getUploadDir(), attachment.storageKey, context.locale);
-
 	await db.transaction(async (tx) => {
-		await tx.delete(expenseAttachment).where(eq(expenseAttachment.id, attachment.id));
+		const deletedAt = new Date();
+		const [hidden] = await tx
+			.update(expenseAttachment)
+			.set({ deletedAt })
+			.where(
+				and(
+					eq(expenseAttachment.id, attachment.id),
+					eq(expenseAttachment.workspaceId, context.workspaceId),
+					isNull(expenseAttachment.deletedAt)
+				)
+			)
+			.returning({
+				id: expenseAttachment.id,
+				workspaceId: expenseAttachment.workspaceId,
+				expenseId: expenseAttachment.expenseId,
+				storageKey: expenseAttachment.storageKey,
+				sizeBytes: expenseAttachment.sizeBytes,
+				sha256: expenseAttachment.sha256
+			});
+
+		if (!hidden) throw error(404, translate(context.locale, 'Attachment not found.'));
+		await tx.insert(attachmentDeletion).values(buildAttachmentDeletionRows([hidden], deletedAt));
 
 		await tx.insert(auditEvent).values({
 			workspaceId: context.workspaceId,
@@ -191,10 +213,6 @@ export async function deleteExpenseAttachment(context: WorkspaceContext, attachm
 			}
 		});
 	});
-
-	// Remove the file from disk after the DB transaction succeeds.
-	// Failure here leaves an orphaned file but won't corrupt DB state.
-	await rm(filePath, { force: true }).catch(() => {});
 }
 
 export function attachmentContentDisposition(fileName: string) {

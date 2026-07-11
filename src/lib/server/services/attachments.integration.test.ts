@@ -1,12 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { user } from '$lib/server/db/auth.schema';
-import { category, expense, workspace, workspaceMember } from '$lib/server/db/schema';
-import { db } from '$lib/server/db';
+import {
+	attachmentDeletion,
+	category,
+	expense,
+	expenseAttachment,
+	workspace,
+	workspaceMember
+} from '$lib/server/db/schema';
+import { client, db } from '$lib/server/db';
 import {
 	attachmentContentDisposition,
 	deleteExpenseAttachment,
@@ -18,6 +25,15 @@ import {
 	sanitizeFileName,
 	saveExpenseAttachment
 } from './attachments';
+import {
+	attachmentDeletionGraceMs,
+	attachmentDeletionMaxAttempts,
+	attachmentStorageLockKey,
+	classifyAttachmentDeletionError,
+	reconcileAttachmentStorage,
+	resolveAttachmentWorkerWorkspaceId,
+	runAttachmentDeletionWorker
+} from './attachment-deletion';
 import type { WorkspaceContext } from './workspaces';
 
 const workspaceIds: number[] = [];
@@ -29,6 +45,7 @@ describe('attachment service integration', () => {
 		delete process.env.UPLOAD_DIR;
 		for (const workspaceId of workspaceIds.splice(0)) {
 			await db.delete(workspace).where(eq(workspace.id, workspaceId));
+			await db.delete(attachmentDeletion).where(eq(attachmentDeletion.workspaceId, workspaceId));
 		}
 		for (const userId of userIds.splice(0)) {
 			await db.delete(user).where(eq(user.id, userId));
@@ -51,6 +68,39 @@ describe('attachment service integration', () => {
 			path.resolve('/tmp/uploads/1/2/receipt.txt')
 		);
 		expect(() => safeStoragePath('/tmp/uploads', '../secret.txt')).toThrow();
+		expect(classifyAttachmentDeletionError({ status: 400 })).toBe('path_invalid');
+		expect(
+			classifyAttachmentDeletionError(Object.assign(new Error('denied'), { code: 'EPERM' }))
+		).toBe('permission');
+		expect(classifyAttachmentDeletionError(new Error('generic I/O failure'))).toBe('io');
+		expect(classifyAttachmentDeletionError(new Error('attachment path is invalid'))).toBe(
+			'path_invalid'
+		);
+		expect(classifyAttachmentDeletionError('unexpected')).toBe('unknown');
+		process.env.ATTACHMENT_WORKER_TEST_WORKSPACE_ID = '123';
+		delete process.env.ATTACHMENT_WORKER_TEST_SCOPE_SENTINEL;
+		expect(resolveAttachmentWorkerWorkspaceId()).toBeUndefined();
+		process.env.ATTACHMENT_WORKER_TEST_SCOPE_SENTINEL = 'infrastructure-test-only';
+		expect(resolveAttachmentWorkerWorkspaceId()).toBe(123);
+		delete process.env.ATTACHMENT_WORKER_TEST_WORKSPACE_ID;
+		delete process.env.ATTACHMENT_WORKER_TEST_SCOPE_SENTINEL;
+	});
+
+	it('skips while the backup owns the storage advisory lock', async () => {
+		const reserved = await client.reserve();
+		try {
+			await reserved`select pg_advisory_lock(${attachmentStorageLockKey})`;
+			await expect(runAttachmentDeletionWorker()).resolves.toMatchObject({
+				processed: 0,
+				completed: 0,
+				failed: 0,
+				pending: 0,
+				skipped: true
+			});
+		} finally {
+			await reserved`select pg_advisory_unlock(${attachmentStorageLockKey})`;
+			reserved.release();
+		}
 	});
 
 	it('handles empty, unauthorized and missing-expense uploads without writing files', async () => {
@@ -98,6 +148,21 @@ describe('attachment service integration', () => {
 		await expect(getAttachmentForDownload(fixture.context, saved!.id)).rejects.toMatchObject({
 			status: 404
 		});
+		const [intent] = await db
+			.select({ storageKey: attachmentDeletion.storageKey, status: attachmentDeletion.status })
+			.from(attachmentDeletion)
+			.where(eq(attachmentDeletion.attachmentId, saved!.id));
+		expect(intent.status).toBe('pending');
+		const retainedPath = safeStoragePath(getUploadDir(), intent.storageKey);
+		await expect(stat(retainedPath)).resolves.toMatchObject({ size: 12 });
+		await expect(
+			runAttachmentDeletionWorker({
+				now: new Date(Date.now() + attachmentDeletionGraceMs + 1),
+				workspaceId: fixture.context.workspaceId,
+				reconcile: false
+			})
+		).resolves.toMatchObject({ processed: 1, completed: 1, failed: 0 });
+		await expect(stat(retainedPath)).rejects.toMatchObject({ code: 'ENOENT' });
 		await expect(deleteExpenseAttachment(fixture.context, saved!.id)).rejects.toMatchObject({
 			status: 404
 		});
@@ -117,6 +182,14 @@ describe('attachment service integration', () => {
 		await expect(getAttachmentForDownload(fixture.context, missingFile!.id)).rejects.toMatchObject({
 			status: 404
 		});
+		await deleteExpenseAttachment(fixture.context, missingFile!.id);
+		await expect(
+			runAttachmentDeletionWorker({
+				now: new Date(Date.now() + attachmentDeletionGraceMs + 1),
+				workspaceId: fixture.context.workspaceId,
+				reconcile: false
+			})
+		).resolves.toMatchObject({ processed: 1, completed: 1, failed: 0 });
 	});
 
 	it('removes temporary and final files when streaming or persistence fails', async () => {
@@ -141,11 +214,263 @@ describe('attachment service integration', () => {
 		const entries = await readdir(process.env.UPLOAD_DIR!, { recursive: true });
 		expect(entries.some((entry) => entry.endsWith('.tmp') || entry.endsWith('.txt'))).toBe(false);
 	});
+
+	it('rolls back the tombstone and intent when the audit write fails', async () => {
+		const fixture = await createFixture();
+		const saved = await saveExpenseAttachment(
+			fixture.context,
+			fixture.expenseId,
+			new File(['rollback'], 'rollback.txt', { type: 'text/plain' })
+		);
+
+		await expect(
+			deleteExpenseAttachment({ ...fixture.context, userId: `missing-${randomUUID()}` }, saved!.id)
+		).rejects.toThrow();
+		await expect(
+			db
+				.select({ deletedAt: expenseAttachment.deletedAt })
+				.from(expenseAttachment)
+				.where(eq(expenseAttachment.id, saved!.id))
+		).resolves.toEqual([{ deletedAt: null }]);
+		await expect(
+			db
+				.select({ id: attachmentDeletion.id })
+				.from(attachmentDeletion)
+				.where(eq(attachmentDeletion.attachmentId, saved!.id))
+		).resolves.toEqual([]);
+	});
+
+	it('retries permission failures to the cap without losing the retained file', async () => {
+		const fixture = await createFixture();
+		const saved = await saveExpenseAttachment(
+			fixture.context,
+			fixture.expenseId,
+			new File(['protected'], 'protected.txt', { type: 'text/plain' })
+		);
+		await deleteExpenseAttachment(fixture.context, saved!.id);
+		const logger = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const firstDue = Date.now() + attachmentDeletionGraceMs + 1;
+		const permissionError = Object.assign(new Error('denied'), { code: 'EACCES' });
+
+		for (let attempt = 0; attempt < attachmentDeletionMaxAttempts; attempt++) {
+			await runAttachmentDeletionWorker({
+				now: new Date(firstDue + attempt * 24 * 60 * 60 * 1000),
+				workspaceId: fixture.context.workspaceId,
+				removeFile: async () => {
+					throw permissionError;
+				},
+				reconcile: false
+			});
+		}
+
+		const [intent] = await db
+			.select({
+				status: attachmentDeletion.status,
+				attemptCount: attachmentDeletion.attemptCount,
+				category: attachmentDeletion.lastErrorCategory,
+				storageKey: attachmentDeletion.storageKey
+			})
+			.from(attachmentDeletion)
+			.where(eq(attachmentDeletion.attachmentId, saved!.id));
+		expect(intent).toMatchObject({
+			status: 'failed',
+			attemptCount: attachmentDeletionMaxAttempts,
+			category: 'permission'
+		});
+		await expect(stat(safeStoragePath(getUploadDir(), intent.storageKey))).resolves.toBeDefined();
+		expect(logger).toHaveBeenCalledTimes(attachmentDeletionMaxAttempts);
+		logger.mockRestore();
+	});
+
+	it('serializes concurrent workers and rejects a traversal key without touching outside files', async () => {
+		const fixture = await createFixture();
+		const saved = await saveExpenseAttachment(
+			fixture.context,
+			fixture.expenseId,
+			new File(['concurrent'], 'concurrent.txt', { type: 'text/plain' })
+		);
+		await deleteExpenseAttachment(fixture.context, saved!.id);
+		const due = new Date(Date.now() + attachmentDeletionGraceMs + 1);
+		let removals = 0;
+		const results = await Promise.all([
+			runAttachmentDeletionWorker({
+				now: due,
+				workspaceId: fixture.context.workspaceId,
+				removeFile: async (filePath) => {
+					removals++;
+					await rm(filePath);
+				},
+				reconcile: false
+			}),
+			runAttachmentDeletionWorker({
+				now: due,
+				workspaceId: fixture.context.workspaceId,
+				reconcile: false
+			})
+		]);
+		expect(results.reduce((sum, result) => sum + result.completed, 0)).toBe(1);
+		expect(removals).toBe(1);
+
+		const traversal = await saveExpenseAttachment(
+			fixture.context,
+			fixture.expenseId,
+			new File(['traversal'], 'traversal.txt', { type: 'text/plain' })
+		);
+		await deleteExpenseAttachment(fixture.context, traversal!.id);
+		const sentinel = path.resolve(getUploadDir(), '..', 'keep.txt');
+		await writeFile(sentinel, 'keep');
+		await db
+			.update(attachmentDeletion)
+			.set({ storageKey: '../keep.txt' })
+			.where(eq(attachmentDeletion.attachmentId, traversal!.id));
+		const logger = vi.spyOn(console, 'error').mockImplementation(() => {});
+		await runAttachmentDeletionWorker({
+			now: new Date(due.getTime() + 60_000),
+			workspaceId: fixture.context.workspaceId,
+			reconcile: false
+		});
+		await expect(stat(sentinel)).resolves.toMatchObject({ size: 4 });
+		await expect(
+			db
+				.select({ category: attachmentDeletion.lastErrorCategory })
+				.from(attachmentDeletion)
+				.where(eq(attachmentDeletion.attachmentId, traversal!.id))
+		).resolves.toEqual([{ category: 'path_invalid' }]);
+		logger.mockRestore();
+	});
+
+	it('enqueues an intent when a hard-delete cascade removes attachment metadata', async () => {
+		const fixture = await createFixture();
+		const saved = await saveExpenseAttachment(
+			fixture.context,
+			fixture.expenseId,
+			new File(['cascade'], 'cascade.txt', { type: 'text/plain' })
+		);
+		await db.delete(expense).where(eq(expense.id, fixture.expenseId));
+
+		await expect(
+			db
+				.select({ id: expenseAttachment.id })
+				.from(expenseAttachment)
+				.where(eq(expenseAttachment.id, saved!.id))
+		).resolves.toEqual([]);
+		const [intent] = await db
+			.select({
+				status: attachmentDeletion.status,
+				storageKey: attachmentDeletion.storageKey
+			})
+			.from(attachmentDeletion)
+			.where(eq(attachmentDeletion.attachmentId, saved!.id));
+		expect(intent.status).toBe('pending');
+		await expect(stat(safeStoragePath(getUploadDir(), intent.storageKey))).resolves.toMatchObject({
+			size: 7
+		});
+	});
+
+	it('scopes claims and queue counts to one workspace', async () => {
+		const first = await createFixture();
+		const firstAttachment = await saveExpenseAttachment(
+			first.context,
+			first.expenseId,
+			new File(['first'], 'first.txt', { type: 'text/plain' })
+		);
+		await deleteExpenseAttachment(first.context, firstAttachment!.id);
+		const second = await createFixture();
+		const secondAttachment = await saveExpenseAttachment(
+			second.context,
+			second.expenseId,
+			new File(['second'], 'second.txt', { type: 'text/plain' })
+		);
+		await deleteExpenseAttachment(second.context, secondAttachment!.id);
+
+		const result = await runAttachmentDeletionWorker({
+			now: new Date(Date.now() + attachmentDeletionGraceMs + 1),
+			workspaceId: first.context.workspaceId,
+			removeFile: async () => {},
+			reconcile: false
+		});
+		expect(result).toMatchObject({ processed: 1, completed: 1, pending: 0, failed: 0 });
+		await expect(
+			db
+				.select({ status: attachmentDeletion.status })
+				.from(attachmentDeletion)
+				.where(eq(attachmentDeletion.attachmentId, secondAttachment!.id))
+		).resolves.toEqual([{ status: 'pending' }]);
+	});
+
+	it('reconciles active, retained and unknown files without deleting any of them', async () => {
+		const fixture = await createFixture();
+		const active = await saveExpenseAttachment(
+			fixture.context,
+			fixture.expenseId,
+			new File(['active'], 'active.txt', { type: 'text/plain' })
+		);
+		const retained = await saveExpenseAttachment(
+			fixture.context,
+			fixture.expenseId,
+			new File(['retained'], 'retained.txt', { type: 'text/plain' })
+		);
+		await deleteExpenseAttachment(fixture.context, retained!.id);
+		const unknownPath = safeStoragePath(getUploadDir(), 'unknown/file.txt');
+		await mkdir(path.dirname(unknownPath), { recursive: true });
+		await writeFile(unknownPath, 'unknown');
+
+		await expect(
+			reconcileAttachmentStorage({ workspaceId: fixture.context.workspaceId })
+		).resolves.toMatchObject({
+			active: 1,
+			retained: 1,
+			disk: 3,
+			missingActive: 0,
+			missingRetained: 0,
+			unknownDisk: 1,
+			scanFailed: false
+		});
+		const [activeRow] = await db
+			.select({ storageKey: expenseAttachment.storageKey })
+			.from(expenseAttachment)
+			.where(eq(expenseAttachment.id, active!.id));
+		await rm(safeStoragePath(getUploadDir(), activeRow.storageKey));
+		await expect(
+			reconcileAttachmentStorage({ workspaceId: fixture.context.workspaceId })
+		).resolves.toMatchObject({
+			missingActive: 1,
+			missingRetained: 0,
+			unknownDisk: 1
+		});
+		await expect(stat(unknownPath)).resolves.toMatchObject({ size: 7 });
+		const [retainedRow] = await db
+			.select({ storageKey: attachmentDeletion.storageKey })
+			.from(attachmentDeletion)
+			.where(eq(attachmentDeletion.attachmentId, retained!.id));
+		await rm(safeStoragePath(getUploadDir(), retainedRow.storageKey));
+		await expect(
+			runAttachmentDeletionWorker({
+				uploadDir: getUploadDir(),
+				workspaceId: fixture.context.workspaceId
+			})
+		).resolves.toMatchObject({ failed: 2 });
+		await expect(
+			reconcileAttachmentStorage({
+				uploadDir: path.join(getUploadDir(), 'does-not-exist'),
+				workspaceId: fixture.context.workspaceId
+			})
+		).resolves.toMatchObject({ disk: 0, missingActive: 1 });
+		await expect(
+			runAttachmentDeletionWorker({
+				uploadDir: getUploadDir(),
+				limit: 0,
+				workspaceId: fixture.context.workspaceId
+			})
+		).resolves.toHaveProperty('reconciliation');
+	});
 });
 
 async function createFixture() {
-	const uploadDir = await mkdtemp(path.join(tmpdir(), 'coverage-attachments-'));
-	uploadDirs.push(uploadDir);
+	const storageRoot = await mkdtemp(path.join(tmpdir(), 'coverage-attachments-'));
+	const uploadDir = path.join(storageRoot, 'uploads');
+	await mkdir(uploadDir);
+	uploadDirs.push(storageRoot);
 	process.env.UPLOAD_DIR = uploadDir;
 	const id = `attachment-${randomUUID()}`;
 	await db
