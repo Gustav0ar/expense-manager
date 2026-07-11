@@ -363,6 +363,100 @@ describe('server service integration', () => {
 		expect(batchImport.duplicateCount).toBe(0);
 	});
 
+	it('preserves mixed-batch counts and ignores soft-deleted matches', async () => {
+		const fixture = await createWorkspaceFixture();
+		const existingCsv = 'date,description,amount\n2026-06-27,Existing row,10.00\n';
+		const deletedCsv = 'date,description,amount\n2026-06-27,Deleted row,20.00\n';
+		const existingImport = await importExpenses(fixture.context, {
+			sourceType: 'csv',
+			defaultCategoryId: fixture.categoryId,
+			file: new File([existingCsv], 'existing.csv', { type: 'text/csv' })
+		});
+		const deletedImport = await importExpenses(fixture.context, {
+			sourceType: 'csv',
+			defaultCategoryId: fixture.categoryId,
+			file: new File([deletedCsv], 'deleted.csv', { type: 'text/csv' })
+		});
+		await db
+			.update(expense)
+			.set({ deletedAt: new Date() })
+			.where(eq(expense.importBatchId, deletedImport.importBatchId));
+
+		const mixedRows = [
+			'2026-06-27,Existing row,10.00',
+			'2026-06-27,Existing row,10.00',
+			'2026-06-27,New row,30.00',
+			'2026-06-27,New row,30.00',
+			'2026-06-27,Deleted row,20.00',
+			'2026-06-27,Deleted row,20.00'
+		].join('\n');
+		const result = await importExpenses(fixture.context, {
+			sourceType: 'csv',
+			defaultCategoryId: fixture.categoryId,
+			file: new File([`date,description,amount\n${mixedRows}\n`], 'mixed.csv', {
+				type: 'text/csv'
+			})
+		});
+
+		expect(existingImport.importedCount).toBe(1);
+		expect(result).toMatchObject({ importedCount: 4, duplicateCount: 2, failedCount: 0 });
+		const created = await db
+			.select({ description: expense.description })
+			.from(expense)
+			.where(eq(expense.importBatchId, result.importBatchId));
+		expect(created.filter((row) => row.description === 'New row')).toHaveLength(2);
+		expect(created.filter((row) => row.description === 'Deleted row')).toHaveLength(2);
+	});
+
+	it('bounds database statements for a 500-row import', async () => {
+		const fixture = await createWorkspaceFixture();
+		const rows = Array.from(
+			{ length: 500 },
+			(_, index) =>
+				`2026-07-11,Statement row ${index},1.00,Method ${index},Vendor ${index},Center ${index}`
+		).join('\n');
+		const statements: string[] = [];
+		const originalDebug = client.options.debug;
+		client.options.debug = (_connection, query) => statements.push(query);
+
+		let result: Awaited<ReturnType<typeof importExpenses>>;
+		const startedAt = performance.now();
+		try {
+			result = await importExpenses(fixture.context, {
+				sourceType: 'csv',
+				defaultCategoryId: fixture.categoryId,
+				file: new File(
+					[`date,description,amount,payment_method,vendor,cost_center\n${rows}\n`],
+					'statements.csv',
+					{ type: 'text/csv' }
+				)
+			});
+		} finally {
+			client.options.debug = originalDebug;
+		}
+		const elapsedMs = performance.now() - startedAt;
+		const normalized = statements.map((statement) => statement.replace(/\s+/g, ' ').trim());
+		const expenseDuplicateQueries = normalized.filter(
+			(statement) => statement.startsWith('select distinct') && statement.includes('from "expense"')
+		);
+		const expenseInsertQueries = normalized.filter((statement) =>
+			statement.startsWith('insert into "expense"')
+		);
+		const catalogUpsertQueries = normalized.filter((statement) =>
+			/insert into (payment_method|vendor|cost_center)/.test(statement)
+		);
+
+		expect(result).toMatchObject({ importedCount: 500, duplicateCount: 0, failedCount: 0 });
+		expect(expenseDuplicateQueries).toHaveLength(5);
+		expect(expenseInsertQueries).toHaveLength(5);
+		expect(catalogUpsertQueries).toHaveLength(15);
+		expect(
+			expenseDuplicateQueries.length + expenseInsertQueries.length + catalogUpsertQueries.length,
+			'import statements should remain chunk-bounded instead of row-linear'
+		).toBe(25);
+		expect(elapsedMs, '500-row service import duration').toBeLessThan(5_000);
+	});
+
 	it('serializes concurrent imports in the same workspace', async () => {
 		const fixture = await createWorkspaceFixture();
 		const csv = 'Data;Descrição;Valor\n28/06/2026;Importação concorrente;12,50\n';

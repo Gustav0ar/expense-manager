@@ -172,3 +172,25 @@ test('keeps core pages and mobile navigation within runtime budgets', async ({ p
 		expect(Date.now() - startedAt, `${target.nav} mobile navigation`).toBeLessThanOrEqual(1000);
 	}
 });
+
+test('imports the maximum 500-row batch within a generous runtime budget', async ({ page }) => {
+	await registerAndSeed(page);
+	await page.goto('/app/planning');
+
+	const importForm = page.locator('form[action="?/importExpenses"]');
+	await importForm.getByLabel('Default category').selectOption({ label: '🧰 Operations' });
+	const rows = Array.from(
+		{ length: 500 },
+		(_, index) => `2026-07-11,Performance import ${index},1.00`
+	).join('\n');
+	await importForm.locator('input[type="file"]').setInputFiles({
+		name: 'performance-500.csv',
+		mimeType: 'text/csv',
+		buffer: Buffer.from(`date,description,amount\n${rows}\n`)
+	});
+
+	const startedAt = Date.now();
+	await importForm.getByRole('button', { name: 'Import' }).click();
+	await expect(page.getByText('500 expenses imported.')).toBeVisible();
+	expect(Date.now() - startedAt, '500-row browser import duration').toBeLessThan(10_000);
+});
