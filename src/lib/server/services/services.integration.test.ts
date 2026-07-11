@@ -17,6 +17,7 @@ import {
 	expense,
 	expenseAttachment,
 	importBatch,
+	importPreview,
 	paymentMethod,
 	recurringExpense,
 	vendor,
@@ -76,7 +77,14 @@ import {
 	removeExpenseCatalogItem,
 	updateExpenseCatalogItem
 } from './expense-catalogs';
-import { importExpenses, listImportBatches } from './imports';
+import {
+	confirmImportPreview,
+	importExpenses,
+	importPreviewTtlMs,
+	listImportBatches,
+	previewImportExpenses,
+	undoImportBatch
+} from './imports';
 import {
 	parseMailjetWebhookPayload,
 	pruneEmailDeliveryEvents,
@@ -256,6 +264,190 @@ describe('server service integration', () => {
 			failedCount: 1,
 			failedRows: result.failedRows
 		});
+	});
+
+	it('previews without expense writes and enforces ownership, expiry and checksum on confirm', async () => {
+		const fixture = await createWorkspaceFixture();
+		const memberContext = await createMemberContext(fixture, 'member');
+		const content = 'date,description,amount\n2026-07-11,Preview only,12.00\n';
+		const now = new Date('2026-07-11T12:00:00.000Z');
+		const preview = await previewImportExpenses(
+			fixture.context,
+			{
+				sourceType: 'csv',
+				defaultCategoryId: fixture.categoryId,
+				file: new File([content], 'preview.csv', { type: 'text/csv' })
+			},
+			{ now }
+		);
+
+		expect(preview.rows[0]).toMatchObject({
+			sourceRowId: 'csv:2',
+			description: 'Preview only',
+			categoryName: 'Limpeza',
+			isDuplicate: false
+		});
+		await expect(
+			db.select().from(expense).where(eq(expense.description, 'Preview only'))
+		).resolves.toHaveLength(0);
+		await expect(
+			confirmImportPreview(memberContext, {
+				previewId: preview.previewId,
+				sourceChecksum: preview.sourceChecksum
+			})
+		).rejects.toMatchObject({ status: 404 });
+		await expect(
+			confirmImportPreview(fixture.context, {
+				previewId: preview.previewId,
+				sourceChecksum: '0'.repeat(64)
+			})
+		).rejects.toMatchObject({ status: 409 });
+		await expect(
+			confirmImportPreview(
+				fixture.context,
+				{ previewId: preview.previewId, sourceChecksum: preview.sourceChecksum },
+				{ now: new Date(now.getTime() + importPreviewTtlMs + 1) }
+			)
+		).rejects.toMatchObject({ status: 410 });
+	});
+
+	it('confirms a preview exactly once across repeated and concurrent submissions', async () => {
+		const fixture = await createWorkspaceFixture();
+		const preview = await previewImportExpenses(fixture.context, {
+			sourceType: 'csv',
+			defaultCategoryId: fixture.categoryId,
+			file: new File(
+				['date,description,amount\n2026-07-11,Idempotent preview,18.00\n'],
+				'idempotent.csv',
+				{ type: 'text/csv' }
+			)
+		});
+		const input = { previewId: preview.previewId, sourceChecksum: preview.sourceChecksum };
+		const [first, concurrent] = await Promise.all([
+			confirmImportPreview(fixture.context, input),
+			confirmImportPreview(fixture.context, input)
+		]);
+		const repeated = await confirmImportPreview(fixture.context, input);
+
+		expect(concurrent.importBatchId).toBe(first.importBatchId);
+		expect(repeated).toEqual(first);
+		await expect(
+			db.select().from(expense).where(eq(expense.description, 'Idempotent preview'))
+		).resolves.toHaveLength(1);
+		const [storedPreview] = await db
+			.select({ status: importPreview.status, batchId: importPreview.confirmedBatchId })
+			.from(importPreview)
+			.where(eq(importPreview.id, preview.previewId));
+		expect(storedPreview).toEqual({ status: 'confirmed', batchId: first.importBatchId });
+	});
+
+	it('undoes only unchanged unpaid rows and is scoped and repeat-safe', async () => {
+		const fixture = await createWorkspaceFixture();
+		const otherWorkspace = await createWorkspaceFixture();
+		const result = await importExpenses(fixture.context, {
+			sourceType: 'csv',
+			defaultCategoryId: fixture.categoryId,
+			file: new File(
+				[
+					[
+						'date,description,amount',
+						'2026-07-11,Undo eligible,10.00',
+						'2026-07-11,Undo edited,20.00',
+						'2026-07-11,Undo paid,30.00'
+					].join('\n')
+				],
+				'undo.csv',
+				{ type: 'text/csv' }
+			)
+		});
+		const imported = await db
+			.select({ id: expense.id, description: expense.description })
+			.from(expense)
+			.where(eq(expense.importBatchId, result.importBatchId));
+		const edited = imported.find((row) => row.description === 'Undo edited')!;
+		const paid = imported.find((row) => row.description === 'Undo paid')!;
+		await db
+			.update(expense)
+			.set({ description: 'Materially edited' })
+			.where(eq(expense.id, edited.id));
+		await db
+			.update(expense)
+			.set({ paymentStatus: 'paid', paidAt: '2026-07-11' })
+			.where(eq(expense.id, paid.id));
+
+		await expect(
+			undoImportBatch(otherWorkspace.context, result.importBatchId)
+		).rejects.toMatchObject({
+			status: 404
+		});
+		const undone = await undoImportBatch(fixture.context, result.importBatchId);
+		expect(undone).toEqual({ undoneCount: 1, skippedCount: 2 });
+		await expect(undoImportBatch(fixture.context, result.importBatchId)).resolves.toEqual(undone);
+
+		const rows = await db
+			.select({ description: expense.description, deletedAt: expense.deletedAt })
+			.from(expense)
+			.where(eq(expense.importBatchId, result.importBatchId));
+		expect(rows.find((row) => row.description === 'Undo eligible')?.deletedAt).toBeInstanceOf(Date);
+		expect(rows.find((row) => row.description === 'Materially edited')?.deletedAt).toBeNull();
+		expect(rows.find((row) => row.description === 'Undo paid')?.deletedAt).toBeNull();
+	});
+
+	it('atomically tombstones attachments and enqueues deletion when undoing an import', async () => {
+		const fixture = await createWorkspaceFixture();
+		const uploadDir = await mkdtemp(path.join(tmpdir(), 'expense-import-undo-'));
+		uploadDirs.push(uploadDir);
+		const previousUploadDir = process.env.UPLOAD_DIR;
+		process.env.UPLOAD_DIR = uploadDir;
+		try {
+			const imported = await importExpenses(fixture.context, {
+				sourceType: 'csv',
+				defaultCategoryId: fixture.categoryId,
+				file: new File(
+					['date,description,amount\n2026-07-11,Undo attachment,15.00\n'],
+					'undo-attachment.csv',
+					{ type: 'text/csv' }
+				)
+			});
+			const [expenseRow] = await db
+				.select({ id: expense.id })
+				.from(expense)
+				.where(eq(expense.importBatchId, imported.importBatchId));
+			const saved = await saveExpenseAttachment(
+				fixture.context,
+				expenseRow.id,
+				new File(['receipt'], 'receipt.txt', { type: 'text/plain' })
+			);
+
+			await expect(undoImportBatch(fixture.context, imported.importBatchId)).resolves.toEqual({
+				undoneCount: 1,
+				skippedCount: 0
+			});
+			const [attachment] = await db
+				.select({
+					deletedAt: expenseAttachment.deletedAt,
+					storageKey: expenseAttachment.storageKey
+				})
+				.from(expenseAttachment)
+				.where(eq(expenseAttachment.id, saved!.id));
+			const [intent] = await db
+				.select({
+					attachmentId: attachmentDeletion.attachmentId,
+					status: attachmentDeletion.status,
+					storageKey: attachmentDeletion.storageKey
+				})
+				.from(attachmentDeletion)
+				.where(eq(attachmentDeletion.attachmentId, saved!.id));
+			expect(attachment.deletedAt).toBeInstanceOf(Date);
+			expect(intent).toEqual({
+				attachmentId: saved!.id,
+				status: 'pending',
+				storageKey: attachment.storageKey
+			});
+		} finally {
+			if (previousUploadDir === undefined) delete process.env.UPLOAD_DIR;
+			else process.env.UPLOAD_DIR = previousUploadDir;
+		}
 	});
 
 	it('records valid import rows rejected by business validation', async () => {
@@ -447,13 +639,14 @@ describe('server service integration', () => {
 		);
 
 		expect(result).toMatchObject({ importedCount: 500, duplicateCount: 0, failedCount: 0 });
-		expect(expenseDuplicateQueries).toHaveLength(5);
+		// Preview and confirm each perform one bounded, server-authoritative duplicate pass.
+		expect(expenseDuplicateQueries).toHaveLength(10);
 		expect(expenseInsertQueries).toHaveLength(5);
 		expect(catalogUpsertQueries).toHaveLength(15);
 		expect(
 			expenseDuplicateQueries.length + expenseInsertQueries.length + catalogUpsertQueries.length,
 			'import statements should remain chunk-bounded instead of row-linear'
-		).toBe(25);
+		).toBe(30);
 		expect(elapsedMs, '500-row service import duration').toBeLessThan(5_000);
 	});
 

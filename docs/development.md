@@ -93,6 +93,12 @@ The support-catalog picker follows the ARIA tab pattern: one tab is in the keybo
 
 The expense list is exposed as an ARIA table with explicit column indexes, expandable rows and a full-width details row. Responsive CSS may visually hide the header, but must keep it in the accessibility tree so column relationships remain available to assistive technology.
 
+### Import safety contracts
+
+File upload creates a short-lived, user- and workspace-owned preview and must not create expenses or auxiliary catalog entries. Confirmation accepts only stable source row IDs, reloads normalized rows from the server-owned preview, validates its expiry and source checksum, and reruns duplicate detection while holding the workspace import lock. Keep confirmation idempotent: repeated or concurrent submissions must return the one linked import batch.
+
+Imported expenses store a baseline hash of their material fields. Batch undo locks the batch and its expenses and soft-deletes only rows that are still unpaid, unreconciled, active and baseline-identical. Edited or financially protected rows are counted as skipped. Attachment tombstones, durable deletion intents, expense changes, batch counters and audit events belong to the same transaction; never hard-delete imported expenses during undo.
+
 ### CSS ownership
 
 `src/routes/layout.css` contains application-wide primitives and styles shared by multiple routes. Expense-page, support-catalog, attachment and bulk-review rules live in `src/routes/(protected)/app/expenses/expenses.css`, which is imported by the expense page and emitted as a route-only CSS asset. Add new expense-specific responsive rules there instead of growing the global stylesheet.

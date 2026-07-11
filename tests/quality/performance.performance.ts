@@ -24,11 +24,13 @@ type RuntimeBudget = {
 const assetBudget: AssetBudget = {
 	largestJsBytes: 90 * kib,
 	totalCssBytes: 80 * kib,
-	totalGzipJsBytes: 140 * kib,
-	// Durable invitation delivery adds localized status and resend UX. The previous
-	// 380 KiB ceiling was 389,120 bytes; the reviewed production build measured
-	// 391,433 bytes. Keep the gzip, largest-asset and runtime budgets unchanged.
-	totalJsBytes: 384 * kib
+	// The localized import review ledger moved the prior 140 KiB gzip ceiling
+	// (143,360 bytes) to a reviewed 145,503-byte build.
+	totalGzipJsBytes: 144 * kib,
+	// Import preview adds the localized, selectable review ledger. The previous
+	// 384 KiB ceiling was 393,216 bytes; the reviewed production build measured
+	// 400,607 bytes. Keep the largest-asset and runtime budgets unchanged.
+	totalJsBytes: 392 * kib
 };
 
 const runtimeBudget: RuntimeBudget = {
@@ -191,6 +193,7 @@ test('imports the maximum 500-row batch within a generous runtime budget', async
 
 	const startedAt = Date.now();
 	await importForm.getByRole('button', { name: 'Import' }).click();
+	await page.getByRole('button', { name: 'Confirm selected expenses' }).click();
 	await expect(page.getByText('500 expenses imported.')).toBeVisible();
 	expect(Date.now() - startedAt, '500-row browser import duration').toBeLessThan(10_000);
 });

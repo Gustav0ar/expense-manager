@@ -839,6 +839,16 @@ test('enforces expense, review, payment, catalog, recurrence and import permissi
 			await importExpensesRequest(invited.viewer.page, baseCategoryId, 'Viewer Imported Expense'),
 			'viewer cannot import expenses'
 		);
+		await invited.member.page.goto('/app/planning');
+		const importForm = invited.member.page.locator('form[action="?/importExpenses"]');
+		await importForm.locator('select[name="defaultCategoryId"]').selectOption(baseCategoryId);
+		await importForm.locator('input[type="file"]').setInputFiles({
+			name: 'role-permissions.csv',
+			mimeType: 'text/csv',
+			buffer: Buffer.from('date,description,amount\n2026-06-22,Member Imported Expense,44.00\n')
+		});
+		await importForm.getByRole('button', { name: 'Import' }).click();
+		await invited.member.page.getByRole('button', { name: 'Confirm selected expenses' }).click();
 		await owner.page.goto('/app/expenses?q=Member%20Imported%20Expense');
 		await expect(
 			owner.page.locator('.expense-table-item').filter({ hasText: 'Member Imported Expense' })

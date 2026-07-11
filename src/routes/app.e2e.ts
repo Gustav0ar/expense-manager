@@ -1127,16 +1127,20 @@ test('covers planning, imports, attachments and audit flows', async ({ page }) =
 		buffer: Buffer.from('Data;Descrição;Valor\nbad;;abc\n')
 	});
 	await importForm.getByRole('button', { name: 'Importar' }).click();
-	await expect(page.getByText('Nenhuma despesa importada.')).toBeVisible();
+	await expect(
+		page.getByText('Prévia da importação pronta. Revise antes de confirmar.')
+	).toBeVisible();
 	await expect(
 		page
 			.locator('.import-errors')
 			.getByText(/Linha -: Linha 2: data, descri[cç][aã]o ou valor inv[aá]lido\./)
 	).toBeVisible();
-	await expect(page.getByRole('cell', { name: 'falhas.csv' })).toBeVisible();
-	await expect(
-		page.locator('.import-failure-details').filter({ hasText: '1 falha' })
-	).toBeVisible();
+	const cancelPreview = page.getByRole('button', { name: 'Cancelar prévia' });
+	await cancelPreview.focus();
+	await expect(cancelPreview).toBeFocused();
+	await cancelPreview.press('Enter');
+	await expect(page).toHaveURL(/\/app\/planning\?periodMonth=2026-07$/);
+	await expect(page.getByRole('heading', { name: 'Prévia da importação' })).toBeHidden();
 
 	await page.goto('/app/categories');
 	const ruleForm = page.locator('form[action="?/createRule"]');
@@ -1157,6 +1161,7 @@ test('covers planning, imports, attachments and audit flows', async ({ page }) =
 		)
 	});
 	await importFormWithRule.getByRole('button', { name: 'Importar' }).click();
+	await page.getByRole('button', { name: 'Confirmar despesas selecionadas' }).click();
 	await expect(page.getByText('1 despesas importadas.')).toBeVisible();
 	await expect(page.getByRole('cell', { name: 'despesas.csv' })).toBeVisible();
 
@@ -1194,10 +1199,72 @@ test('covers planning, imports, attachments and audit flows', async ({ page }) =
 	expect((await page.request.get(attachmentHref!)).status()).toBe(404);
 
 	await page.goto('/app/settings/audit');
-	await expect(page.getByRole('cell', { name: 'expense_import.completed' })).toBeVisible();
+	await expect(page.getByRole('cell', { name: 'expense_import.completed' }).first()).toBeVisible();
 	await page.getByLabel('Ação').fill('expense_attachment.created');
 	await page.getByRole('button', { name: 'Filtrar' }).click();
 	await expect(page.getByRole('cell', { name: 'expense_attachment.created' })).toBeVisible();
+});
+
+test('fully and partially undoes guarded import batches', async ({ page }) => {
+	await registerAndCreateWorkspace(page, 'Undo de importações');
+	await createCategory(page, { name: 'Limpeza', emoji: '🧼', color: '#0f766e' });
+
+	await page.goto('/app/planning?periodMonth=2026-06');
+	let undoImportForm = page.locator('form[action="?/importExpenses"]');
+	await undoImportForm.getByLabel('Categoria padrão').selectOption({ label: '🧼 Limpeza' });
+	await undoImportForm.locator('input[type="file"]').setInputFiles({
+		name: 'undo-completo.csv',
+		mimeType: 'text/csv',
+		buffer: Buffer.from('date,description,amount\n2026-06-28,Undo E2E completo,11.00\n')
+	});
+	await undoImportForm.getByRole('button', { name: 'Importar' }).click();
+	await page.getByRole('button', { name: 'Confirmar despesas selecionadas' }).click();
+	let undoBatchRow = page.locator('tbody tr').filter({ hasText: 'undo-completo.csv' });
+	page.once('dialog', (dialog) => dialog.accept());
+	await undoBatchRow.getByRole('button', { name: 'Desfazer importação' }).click();
+	await expect(
+		page.getByText('Despesas importadas desfeitas: 1. Despesas protegidas ignoradas: 0.')
+	).toBeVisible();
+	await page.goto('/app/expenses?q=Undo%20E2E%20completo');
+	await expect(page.getByText('Nenhuma despesa encontrada.')).toBeVisible();
+
+	await page.goto('/app/planning?periodMonth=2026-06');
+	undoImportForm = page.locator('form[action="?/importExpenses"]');
+	await undoImportForm.getByLabel('Categoria padrão').selectOption({ label: '🧼 Limpeza' });
+	await undoImportForm.locator('input[type="file"]').setInputFiles({
+		name: 'undo-parcial.csv',
+		mimeType: 'text/csv',
+		buffer: Buffer.from(
+			[
+				'date,description,amount',
+				'2026-06-29,Undo E2E editada,12.00',
+				'2026-06-29,Undo E2E elegível,13.00'
+			].join('\n')
+		)
+	});
+	await undoImportForm.getByRole('button', { name: 'Importar' }).click();
+	await page.getByRole('button', { name: 'Confirmar despesas selecionadas' }).click();
+	await page.goto('/app/expenses?q=Undo%20E2E%20editada');
+	const protectedImportRow = page
+		.locator('.expense-table-item')
+		.filter({ hasText: 'Undo E2E editada' });
+	await protectedImportRow.locator('summary').click();
+	await protectedImportRow.getByLabel('Descrição').fill('Undo E2E protegida');
+	await protectedImportRow.getByRole('button', { name: 'Atualizar' }).click();
+
+	await page.goto('/app/planning?periodMonth=2026-06');
+	undoBatchRow = page.locator('tbody tr').filter({ hasText: 'undo-parcial.csv' });
+	page.once('dialog', (dialog) => dialog.accept());
+	await undoBatchRow.getByRole('button', { name: 'Desfazer importação' }).click();
+	await expect(
+		page.getByText('Despesas importadas desfeitas: 1. Despesas protegidas ignoradas: 1.')
+	).toBeVisible();
+	await page.goto('/app/expenses?q=Undo%20E2E%20eleg%C3%ADvel');
+	await expect(page.getByText('Nenhuma despesa encontrada.')).toBeVisible();
+	await page.goto('/app/expenses?q=Undo%20E2E%20protegida');
+	await expect(
+		page.locator('.expense-table-item').filter({ hasText: 'Undo E2E protegida' })
+	).toBeVisible();
 });
 
 test('enforces review-sensitive business rules for members, recurrences and imports', async ({
@@ -1340,6 +1407,7 @@ test('enforces review-sensitive business rules for members, recurrences and impo
 		)
 	});
 	await importForm.getByRole('button', { name: 'Importar' }).click();
+	await page.getByRole('button', { name: 'Confirmar despesas selecionadas' }).click();
 	await expect(page.getByText('1 despesas importadas.')).toBeVisible();
 
 	await page.goto('/app/expenses?from=2026-06-01&to=2026-06-30&q=Compra%20regra%20padr%C3%A3o');
@@ -1362,6 +1430,7 @@ test('enforces review-sensitive business rules for members, recurrences and impo
 		</BANKTRANLIST></OFX>`)
 	});
 	await importForm.getByRole('button', { name: 'Importar' }).click();
+	await page.getByRole('button', { name: 'Confirmar despesas selecionadas' }).click();
 	await expect(page.getByText('1 despesas importadas.')).toBeVisible();
 	await expect(page.locator('.import-errors')).toContainText(
 		'Lançamento OFX 1: data ou valor inválido.'
