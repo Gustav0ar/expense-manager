@@ -91,7 +91,28 @@ test('captures stable desktop and mobile app surfaces', async ({ page }) => {
 	await capture(page, page.locator('.app-shell'), 'reports-analytical-desktop.png');
 
 	await page.goto('/app/planning?periodMonth=2026-06');
-	const importForm = page.locator('form[action="?/importExpenses"]');
+	let importForm = page.locator('form[action="?/importExpenses"]');
+	await importForm.getByLabel('Format').selectOption('ofx');
+	await importForm.locator('input[type="file"]').setInputFiles({
+		name: 'visual-reconciliation.ofx',
+		mimeType: 'application/x-ofx',
+		buffer: Buffer.from(
+			'<OFX><BANKACCTFROM><BANKID>001<ACCTID>visual</BANKACCTFROM><BANKTRANLIST><STMTTRN><DTPOSTED>20260625<TRNAMT>-125.40<FITID>visual-match<NAME>Visual expense</STMTTRN></BANKTRANLIST></OFX>'
+		)
+	});
+	await importForm.getByRole('button', { name: 'Import' }).click();
+	const reconciliation = page.locator('.reconciliation-workspace');
+	await expect(
+		reconciliation.getByRole('heading', { name: 'Reconcile OFX transactions' })
+	).toBeVisible();
+	await capture(page, reconciliation, 'ofx-reconciliation-desktop.png');
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390);
+	await capture(page, reconciliation, 'ofx-reconciliation-mobile.png');
+	await page.setViewportSize({ width: 1280, height: 900 });
+	await reconciliation.getByRole('button', { name: 'Match' }).click();
+
+	importForm = page.locator('form[action="?/importExpenses"]');
 	await importForm.getByLabel('Default category').selectOption({ label: '🧰 Operations' });
 	await importForm.locator('input[type="file"]').setInputFiles({
 		name: 'visual-preview.csv',

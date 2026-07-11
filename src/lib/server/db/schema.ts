@@ -45,6 +45,8 @@ export type ImportPreviewAnalysis = {
 	failedRows: ImportBatchFailedRow[];
 };
 
+export type BankTransactionStatus = 'pending' | 'matched' | 'created' | 'ignored';
+
 const validMoneyAmount = (column: AnyPgColumn) =>
 	sql`${column} > 0 and ${column} <= ${sql.raw(String(maxMoneyCents))}`;
 
@@ -719,6 +721,68 @@ export const expense = pgTable(
 	]
 );
 
+export const bankTransaction = pgTable(
+	'bank_transaction',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		workspaceId: bigint('workspace_id', { mode: 'number' })
+			.notNull()
+			.references(() => workspace.id, { onDelete: 'cascade' }),
+		uploadedByUserId: text('uploaded_by_user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'restrict' }),
+		sourceAccountFingerprint: char('source_account_fingerprint', { length: 64 }).notNull(),
+		sourceIdentity: char('source_identity', { length: 64 }).notNull(),
+		sourceChecksum: char('source_checksum', { length: 64 }).notNull(),
+		sourceCurrency: char('source_currency', { length: 3 }),
+		providerTransactionId: text('provider_transaction_id'),
+		fileName: text('file_name').notNull(),
+		postedDate: date('posted_date', { mode: 'string' }).notNull(),
+		signedAmountCents: bigint('signed_amount_cents', { mode: 'number' }).notNull(),
+		description: text('description').notNull(),
+		memo: text('memo'),
+		status: text('status').notNull().default('pending'),
+		expenseId: bigint('expense_id', { mode: 'number' }).references(() => expense.id, {
+			onDelete: 'set null'
+		}),
+		decidedByUserId: text('decided_by_user_id').references(() => user.id, {
+			onDelete: 'set null'
+		}),
+		decidedAt: timestamp('decided_at', { withTimezone: true }),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(table) => [
+		check(
+			'bank_transaction_amount_cents_check',
+			sql`${table.signedAmountCents} <> 0 and abs(${table.signedAmountCents}) <= ${sql.raw(String(maxMoneyCents))}`
+		),
+		check(
+			'bank_transaction_status_check',
+			sql`${table.status} in ('pending', 'matched', 'created', 'ignored')`
+		),
+		check(
+			'bank_transaction_source_currency_check',
+			sql`${table.sourceCurrency} is null or ${table.sourceCurrency} ~ '^[A-Z]{3}$'`
+		),
+		check(
+			'bank_transaction_decision_check',
+			sql`(${table.status} = 'pending' and ${table.expenseId} is null and ${table.decidedAt} is null) or (${table.status} = 'ignored' and ${table.expenseId} is null and ${table.decidedAt} is not null) or (${table.status} in ('matched', 'created') and ${table.decidedAt} is not null)`
+		),
+		uniqueIndex('bank_transaction_workspace_source_unique_idx').on(
+			table.workspaceId,
+			table.sourceIdentity
+		),
+		uniqueIndex('bank_transaction_expense_unique_idx')
+			.on(table.expenseId)
+			.where(sql`${table.expenseId} is not null`),
+		index('bank_transaction_workspace_pending_idx')
+			.on(table.workspaceId, table.postedDate, table.id)
+			.where(sql`${table.status} = 'pending'`),
+		index('bank_transaction_uploaded_by_idx').on(table.uploadedByUserId),
+		index('bank_transaction_decided_by_idx').on(table.decidedByUserId)
+	]
+);
+
 export const expenseAttachment = pgTable(
 	'expense_attachment',
 	{
@@ -1021,6 +1085,25 @@ export const expenseRelations = relations(expense, ({ one }) => ({
 	importBatch: one(importBatch, {
 		fields: [expense.importBatchId],
 		references: [importBatch.id]
+	})
+}));
+
+export const bankTransactionRelations = relations(bankTransaction, ({ one }) => ({
+	workspace: one(workspace, {
+		fields: [bankTransaction.workspaceId],
+		references: [workspace.id]
+	}),
+	uploadedBy: one(user, {
+		fields: [bankTransaction.uploadedByUserId],
+		references: [user.id]
+	}),
+	expense: one(expense, {
+		fields: [bankTransaction.expenseId],
+		references: [expense.id]
+	}),
+	decidedBy: one(user, {
+		fields: [bankTransaction.decidedByUserId],
+		references: [user.id]
 	})
 }));
 

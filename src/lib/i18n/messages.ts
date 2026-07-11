@@ -617,5 +617,47 @@ export const ptBrMessages = {
 	'You cannot change your own role.': 'Você não pode alterar seu próprio papel.',
 	'You cannot remove yourself.': 'Você não pode remover a si mesmo.',
 	'Cannot change currency: this workspace has {count} expense(s). Delete all expenses first.':
-		'Não é possível alterar a moeda: este workspace tem {count} despesa(s). Exclua todas as despesas primeiro.'
+		'Não é possível alterar a moeda: este workspace tem {count} despesa(s). Exclua todas as despesas primeiro.',
+	'Bank ledger': 'Livro bancário',
+	'Bank transaction ignored.': 'Lançamento bancário ignorado.',
+	'Bank transaction currency does not match the workspace currency.':
+		'A moeda do lançamento bancário não corresponde à moeda do workspace.',
+	'Bank transaction matched and reconciled.': 'Lançamento bancário associado e conciliado.',
+	'Bank transaction not found.': 'Lançamento bancário não encontrado.',
+	'Bank transaction was already decided.': 'O lançamento bancário já foi decidido.',
+	'Category for new expense': 'Categoria da nova despesa',
+	Credit: 'Crédito',
+	'Credit transactions can only be ignored.': 'Lançamentos de crédito só podem ser ignorados.',
+	'Credits are staged for visibility and cannot create or match expenses.':
+		'Créditos são preparados para visibilidade e não podem criar nem associar despesas.',
+	'Create and reconcile': 'Criar e conciliar',
+	Debit: 'Débito',
+	'Exact amount': 'Valor exato',
+	'Exact amount candidates': 'Candidatas com valor exato',
+	'Expense created and reconciled.': 'Despesa criada e conciliada.',
+	'Expense is no longer eligible for this match.':
+		'A despesa não está mais elegível para esta associação.',
+	Ignore: 'Ignorar',
+	Match: 'Associar',
+	'No eligible expense found within the date window.':
+		'Nenhuma despesa elegível encontrada no intervalo de datas.',
+	'OFX transaction {rowNumber}: date, amount or description is invalid.':
+		'Lançamento OFX {rowNumber}: data, valor ou descrição inválidos.',
+	'OFX statement currency is invalid.': 'A moeda do extrato OFX é inválida.',
+	'OFX staging failures': 'Falhas na preparação do OFX',
+	'Reconcile OFX transactions': 'Conciliar lançamentos OFX',
+	'Reconciliation choice is invalid.': 'A escolha de conciliação é inválida.',
+	'Same date': 'Mesma data',
+	'Search description': 'Buscar descrição',
+	'Search staged transactions': 'Buscar lançamentos preparados',
+	'Select category': 'Selecione a categoria',
+	'Suggestions never change expenses until you confirm a decision.':
+		'Sugestões nunca alteram despesas até que você confirme uma decisão.',
+	'This statement currency does not match the workspace. You can only ignore this transaction.':
+		'A moeda deste extrato não corresponde à do workspace. Você só pode ignorar este lançamento.',
+	'{count} days apart': '{count} dias de diferença',
+	'{count} transactions shown': '{count} lançamentos exibidos',
+	'{score}% description overlap': '{score}% de semelhança na descrição',
+	'{stagedCount} bank transactions staged; {duplicateCount} duplicates and {failedCount} failures.':
+		'{stagedCount} lançamentos bancários preparados; {duplicateCount} duplicatas e {failedCount} falhas.'
 } as const;

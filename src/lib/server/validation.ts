@@ -273,6 +273,18 @@ export const confirmImportPreviewSchema = z.object({
 
 export const undoImportBatchSchema = z.object({ batchId: idSchema });
 
+export const reconciliationMatchSchema = z.object({
+	transactionId: idSchema,
+	expenseId: idSchema
+});
+
+export const reconciliationCreateSchema = z.object({
+	transactionId: idSchema,
+	categoryId: idSchema
+});
+
+export const reconciliationIgnoreSchema = z.object({ transactionId: idSchema });
+
 export const categoryRuleSchema = z.object({
 	name: z.string().trim().min(2).max(80),
 	categoryId: idSchema,

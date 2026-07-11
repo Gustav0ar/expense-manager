@@ -183,6 +183,46 @@ assert_attachment_deletion_outbox() {
 	fi
 }
 
+assert_ofx_reconciliation() {
+	local target_url="$1"
+	local target_label="$2"
+	local schema_count
+	schema_count="$(
+		psql "${target_url}" -v ON_ERROR_STOP=1 -Atqc \
+			"SELECT
+			   (SELECT count(*) FROM information_schema.columns
+			    WHERE table_schema = 'public' AND table_name = 'bank_transaction'
+			      AND column_name IN (
+			        'workspace_id', 'uploaded_by_user_id', 'source_account_fingerprint',
+			        'source_identity', 'source_checksum', 'provider_transaction_id',
+			        'source_currency',
+			        'posted_date', 'signed_amount_cents', 'description', 'status',
+			        'expense_id', 'decided_by_user_id', 'decided_at'
+			      ))
+			 + (SELECT count(*) FROM pg_constraint
+			    WHERE conname IN (
+			      'bank_transaction_amount_cents_check',
+			      'bank_transaction_status_check',
+			      'bank_transaction_source_currency_check',
+			      'bank_transaction_decision_check'
+			    ) AND contype = 'c' AND convalidated)
+			 + (SELECT count(*) FROM pg_indexes
+			    WHERE schemaname = 'public' AND tablename = 'bank_transaction'
+			      AND indexname IN (
+			        'bank_transaction_workspace_source_unique_idx',
+			        'bank_transaction_expense_unique_idx',
+			        'bank_transaction_workspace_pending_idx'
+			      ))
+			 + (SELECT count(*) FROM pg_constraint
+			    WHERE conname = 'bank_transaction_expense_id_expense_id_fk'
+			      AND contype = 'f' AND confdeltype = 'n')"
+	)"
+	if [ "${schema_count}" != "22" ]; then
+		echo "${target_label} does not have the guarded OFX reconciliation schema." >&2
+		exit 1
+	fi
+}
+
 mkdir -p "${legacy_migrations}/meta"
 cp "${repo_root}"/drizzle/000[0-8]_*.sql "${legacy_migrations}/"
 
@@ -245,6 +285,7 @@ DATABASE_URL="${upgrade_database_url}" pnpm exec drizzle-kit migrate --config "$
 assert_money_constraints "${upgrade_database_url}" "Upgraded database"
 assert_invitation_delivery_outbox "${upgrade_database_url}" "Upgraded database"
 assert_attachment_deletion_outbox "${upgrade_database_url}" "Upgraded database"
+assert_ofx_reconciliation "${upgrade_database_url}" "Upgraded database"
 
 fresh_database_created=true
 createdb --maintenance-db="${maintenance_url}" "${fresh_database}"
@@ -266,6 +307,7 @@ DATABASE_URL="${fresh_database_url}" pnpm exec drizzle-kit migrate --config "${r
 assert_money_constraints "${fresh_database_url}" "Fresh database"
 assert_invitation_delivery_outbox "${fresh_database_url}" "Fresh database"
 assert_attachment_deletion_outbox "${fresh_database_url}" "Fresh database"
+assert_ofx_reconciliation "${fresh_database_url}" "Fresh database"
 
 cleanup
 trap - EXIT INT TERM

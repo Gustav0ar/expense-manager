@@ -99,6 +99,33 @@ File upload creates a short-lived, user- and workspace-owned preview and must no
 
 Imported expenses store a baseline hash of their material fields. Batch undo locks the batch and its expenses and soft-deletes only rows that are still unpaid, unreconciled, active and baseline-identical. Edited or financially protected rows are counted as skipped. Attachment tombstones, durable deletion intents, expense changes, batch counters and audit events belong to the same transaction; never hard-delete imported expenses during undo.
 
+OFX uploads follow a separate reconciliation contract. The server parses the
+original file, fingerprints the source account, and stages signed transactions
+using FITID when available or a deterministic checksum plus occurrence number
+when it is not. Re-uploading the same statement must not duplicate staged rows.
+Credits remain visible but can only be ignored. Debit suggestions require an
+exact amount and a small date window; normalized description overlap only
+orders otherwise eligible candidates and is always shown as an explanation.
+
+CURDEF is normalized and stored with each row. A statement currency that does
+not match the workspace remains visible but can only be ignored; it cannot
+match or create an expense. Legacy OFX files with no CURDEF are accepted for
+compatibility and use the workspace currency, so operators should verify such
+files before confirming. Without FITID, identical date/amount/text rows are
+distinguished by their occurrence within one file. A truly new, identical row
+in a later no-FITID statement can therefore be treated as a re-upload; this is
+an unavoidable conservative false-positive until the provider supplies stable
+transaction identifiers.
+
+Suggestions are read-only. Only admins and owners can confirm match, create or
+ignore decisions. Confirmation locks the staged transaction and candidate
+expense, then writes the payment-state transition, one-to-one transaction link
+and audit event in one database transaction. Never accept normalized OFX rows,
+amounts, dates or eligibility claims from the browser, and never auto-reconcile.
+The ledger-to-expense foreign key uses `ON DELETE SET NULL`: ordinary soft
+deletion preserves the link, while a later retention purge may remove the
+expense without erasing the decided bank ledger row or its audit history.
+
 ### CSS ownership
 
 `src/routes/layout.css` contains application-wide primitives and styles shared by multiple routes. Expense-page, support-catalog, attachment and bulk-review rules live in `src/routes/(protected)/app/expenses/expenses.css`, which is imported by the expense page and emitted as a route-only CSS asset. Add new expense-specific responsive rules there instead of growing the global stylesheet.

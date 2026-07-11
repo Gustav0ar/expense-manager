@@ -1044,6 +1044,22 @@ test('covers workspace settings, theme, invitations and workspace switching', as
 test('covers planning, imports, attachments and audit flows', async ({ page }) => {
 	await registerAndCreateWorkspace(page);
 	await createCategory(page, { name: 'Limpeza', emoji: '🧼', color: '#0f766e' });
+	await createExpense(page, {
+		description: 'Café Central mensal',
+		amount: '42,35',
+		date: '2026-07-10',
+		categoryLabel: '🧼 Limpeza',
+		payment: 'Boleto',
+		notes: 'Candidata OFX A'
+	});
+	await createExpense(page, {
+		description: 'Café Central alternativo',
+		amount: '42,35',
+		date: '2026-07-10',
+		categoryLabel: '🧼 Limpeza',
+		payment: 'Boleto',
+		notes: 'Candidata OFX B'
+	});
 
 	await page.goto('/app/planning?periodMonth=2026-06-01');
 	const budgetForm = page.locator('form[action="?/upsertBudget"]').first();
@@ -1114,6 +1130,56 @@ test('covers planning, imports, attachments and audit flows', async ({ page }) =
 	await page.goto('/app/planning');
 	await page.getByRole('button', { name: 'Gerar vencidas' }).click();
 	await expect(page.getByText('Nenhuma recorrência vencida para gerar.')).toBeVisible();
+
+	await page.goto('/app/planning');
+	const reconciliationUpload = page.locator('form[action="?/importExpenses"]');
+	await reconciliationUpload.getByLabel('Formato').selectOption('ofx');
+	await reconciliationUpload.locator('input[type="file"]').setInputFiles({
+		name: 'conciliacao.ofx',
+		mimeType: 'application/x-ofx',
+		buffer: Buffer.from(
+			`<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><CURDEF>BRL<BANKACCTFROM><BANKID>001<ACCTID>1234<ACCTTYPE>CHECKING</BANKACCTFROM><BANKTRANLIST>
+			<STMTTRN><DTPOSTED>20260710<TRNAMT>-42.35<FITID>e2e-match<NAME>Café Central</STMTTRN>
+			<STMTTRN><DTPOSTED>20260711<TRNAMT>-18.20<FITID>e2e-create<NAME>Táxi sem despesa</STMTTRN>
+			<STMTTRN><DTPOSTED>20260712<TRNAMT>7.50<FITID>e2e-credit<NAME>Estorno</STMTTRN>
+			</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>`
+		)
+	});
+	await reconciliationUpload.getByRole('button', { name: 'Importar' }).click();
+	await expect(
+		page.getByText('3 lançamentos bancários preparados; 0 duplicatas e 0 falhas.')
+	).toBeVisible();
+	const reconciliation = page.locator('.reconciliation-workspace');
+	await expect(
+		reconciliation.getByRole('heading', { name: 'Conciliar lançamentos OFX' })
+	).toBeVisible();
+	const ambiguous = reconciliation
+		.locator('.reconciliation-item')
+		.filter({ hasText: 'Café Central' });
+	await expect(ambiguous.getByRole('button', { name: 'Associar' })).toHaveCount(2);
+	await ambiguous.getByRole('button', { name: 'Associar' }).first().focus();
+	await expect(ambiguous.getByRole('button', { name: 'Associar' }).first()).toBeFocused();
+	await ambiguous.getByRole('button', { name: 'Associar' }).first().press('Enter');
+	await expect(page.getByText('Lançamento bancário associado e conciliado.')).toBeVisible();
+
+	let unmatched = page.locator('.reconciliation-item').filter({ hasText: 'Táxi sem despesa' });
+	await expect(
+		unmatched.getByText('Nenhuma despesa elegível encontrada no intervalo de datas.')
+	).toBeVisible();
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expectNoHorizontalOverflow(page);
+	await expect(unmatched.locator('.bank-side')).toBeVisible();
+	await expect(unmatched.locator('.candidate-side')).toBeVisible();
+	await page.setViewportSize({ width: 1280, height: 900 });
+	unmatched = page.locator('.reconciliation-item').filter({ hasText: 'Táxi sem despesa' });
+	await unmatched.getByLabel('Categoria da nova despesa').selectOption({ label: '🧼 Limpeza' });
+	await unmatched.getByRole('button', { name: 'Criar e conciliar' }).click();
+	await expect(page.getByText('Despesa criada e conciliada.')).toBeVisible();
+	const credit = page.locator('.reconciliation-item').filter({ hasText: 'Estorno' });
+	await expect(credit.getByText('Crédito', { exact: true })).toBeVisible();
+	await expect(credit.getByRole('button', { name: 'Criar e conciliar' })).toHaveCount(0);
+	await credit.getByRole('button', { name: 'Ignorar' }).click();
+	await expect(page.getByText('Lançamento bancário ignorado.')).toBeVisible();
 
 	await page.goto('/app/planning');
 	const importForm = page.locator('form[action="?/importExpenses"]');
@@ -1430,11 +1496,16 @@ test('enforces review-sensitive business rules for members, recurrences and impo
 		</BANKTRANLIST></OFX>`)
 	});
 	await importForm.getByRole('button', { name: 'Importar' }).click();
-	await page.getByRole('button', { name: 'Confirmar despesas selecionadas' }).click();
-	await expect(page.getByText('1 despesas importadas.')).toBeVisible();
-	await expect(page.locator('.import-errors')).toContainText(
-		'Lançamento OFX 1: data ou valor inválido.'
-	);
+	await expect(
+		page.getByText('2 lançamentos bancários preparados; 0 duplicatas e 0 falhas.')
+	).toBeVisible();
+	const stagedCredit = page.locator('.reconciliation-item').filter({ hasText: 'Estorno' });
+	await expect(stagedCredit.getByText('Crédito', { exact: true })).toBeVisible();
+	await stagedCredit.getByRole('button', { name: 'Ignorar' }).click();
+	const stagedDebit = page.locator('.reconciliation-item').filter({ hasText: 'Despesa OFX' });
+	await stagedDebit.getByLabel('Categoria da nova despesa').selectOption({ label: '🧼 Limpeza' });
+	await stagedDebit.getByRole('button', { name: 'Criar e conciliar' }).click();
+	await expect(page.getByText('Despesa criada e conciliada.')).toBeVisible();
 
 	await page.goto('/app/expenses?from=2026-06-01&to=2026-06-30&q=Despesa%20OFX');
 	await expect(

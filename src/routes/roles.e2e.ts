@@ -338,6 +338,21 @@ function importExpensesRequest(page: Page, categoryId: string, description: stri
 	});
 }
 
+function stageOfxRequest(page: Page, fitId: string) {
+	return page.request.post('/app/planning?/importExpenses', {
+		multipart: {
+			sourceType: 'ofx',
+			file: {
+				name: 'role-reconciliation.ofx',
+				mimeType: 'application/x-ofx',
+				buffer: Buffer.from(
+					`<OFX><BANKACCTFROM><BANKID>001<ACCTID>roles</BANKACCTFROM><BANKTRANLIST><STMTTRN><DTPOSTED>20260622<TRNAMT>-15.00<FITID>${fitId}<NAME>Role reconciliation</STMTTRN></BANKTRANLIST></OFX>`
+				)
+			}
+		}
+	});
+}
+
 function membersPanel(page: Page) {
 	return page
 		.locator('section.panel')
@@ -838,6 +853,18 @@ test('enforces expense, review, payment, catalog, recurrence and import permissi
 		await expectDenied(
 			await importExpensesRequest(invited.viewer.page, baseCategoryId, 'Viewer Imported Expense'),
 			'viewer cannot import expenses'
+		);
+		await expectAllowed(
+			await stageOfxRequest(invited.admin.page, 'admin-reconciliation'),
+			'admin stages OFX reconciliation'
+		);
+		await expectDenied(
+			await stageOfxRequest(invited.member.page, 'member-reconciliation'),
+			'member cannot stage OFX reconciliation'
+		);
+		await expectDenied(
+			await stageOfxRequest(invited.viewer.page, 'viewer-reconciliation'),
+			'viewer cannot stage OFX reconciliation'
 		);
 		await invited.member.page.goto('/app/planning');
 		const importForm = invited.member.page.locator('form[action="?/importExpenses"]');
