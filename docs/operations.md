@@ -67,6 +67,25 @@ or push data over the private tailnet.
 Loki uses local filesystem storage with short retention. It is for operational
 debugging, not long-term audit storage.
 
+### Request correlation IDs
+
+The application treats an inbound `X-Request-Id` as untrusted correlation input,
+not as its authoritative request ID. Every request receives a new internal UUID.
+That UUID is returned as `X-Request-Id`, written to structured logs as
+`requestId` and attached to its server span as `app.request_id`.
+
+An inbound value is retained only as `externalRequestId` in error logs and
+`app.external_request_id` in traces when it contains 1–64 ASCII letters, digits
+or hyphens. Invalid, oversized, control-character and Unicode values are ignored
+without being logged or reflected in the response. W3C trace-context extraction
+is independent of this header and remains unchanged.
+
+An ingress proxy may send its own correlation value if it follows this format,
+but it must not expect the application to echo it. The proxy should keep its
+value in its own access log and record the application's response
+`X-Request-Id` when end-to-end correlation is required. Enabling trusted client
+IP proxy headers does not make an inbound request ID authoritative.
+
 Default log retention policy:
 
 - Loki deletes logs older than `168h` (`7` days).

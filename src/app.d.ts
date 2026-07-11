@@ -8,6 +8,7 @@ declare global {
 			user?: User;
 			session?: Session;
 			requestId?: string;
+			externalRequestId?: string;
 			locale: import('$lib/i18n').SupportedLocale;
 			localePreference: import('$lib/i18n').LocalePreference;
 			workspaceContext?: import('$lib/server/services/workspaces').WorkspaceContext | null;

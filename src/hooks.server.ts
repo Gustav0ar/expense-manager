@@ -8,12 +8,12 @@ import { error, redirect, type HandleServerError } from '@sveltejs/kit';
 import { getThemePreference } from '$lib/server/theme';
 import { internalErrorMessage, resolveRequestLocale } from '$lib/server/i18n';
 import { translate } from '$lib/i18n';
-import { randomUUID } from 'node:crypto';
 import { isMfaEnabled, isMfaSessionVerified } from '$lib/server/services/mfa';
 import { isTrustedOrigin } from '$lib/server/security/origin';
 import { assertProxyTrustConfig } from '$lib/server/security/client-ip';
 import { isRegistrationEnabled } from '$lib/server/registration';
 import { traceRequest } from '$lib/server/observability/tracing';
+import { createRequestIdentity } from '$lib/server/observability/request-id';
 import { startBackgroundJobs, triggerBackgroundJobs } from '$lib/server/background-jobs';
 import { registerGracefulShutdown } from '$lib/server/shutdown';
 
@@ -44,9 +44,7 @@ function setSecurityHeaders(response: Response) {
 
 const handleBetterAuth: Handle = async ({ event, resolve }) => {
 	const startedAt = performance.now();
-	const requestId =
-		event.locals.requestId || event.request.headers.get('x-request-id') || randomUUID();
-	event.locals.requestId = requestId;
+	const requestId = event.locals.requestId!;
 	const themePreference = getThemePreference(event.cookies);
 	const { locale, preference: localePreference } = resolveRequestLocale(event);
 	event.locals.locale = locale;
@@ -116,7 +114,7 @@ const handleBetterAuth: Handle = async ({ event, resolve }) => {
 };
 
 export const handle: Handle = async ({ event, resolve }) => {
-	event.locals.requestId = event.request.headers.get('x-request-id') || randomUUID();
+	Object.assign(event.locals, createRequestIdentity(event.request.headers.get('x-request-id')));
 	return traceRequest(event, () => handleBetterAuth({ event, resolve }));
 };
 
@@ -154,11 +152,17 @@ function isMailjetWebhook(pathname: string) {
 }
 
 export const handleError: HandleServerError = ({ error, event, status, message }) => {
-	const requestId = event.locals.requestId || randomUUID();
+	if (!event.locals.requestId) {
+		Object.assign(event.locals, createRequestIdentity(event.request.headers.get('x-request-id')));
+	}
+	const requestId = event.locals.requestId!;
 	console.error(
 		JSON.stringify({
 			level: 'error',
 			requestId,
+			...(event.locals.externalRequestId
+				? { externalRequestId: event.locals.externalRequestId }
+				: {}),
 			status,
 			path: event.url.pathname,
 			message,
