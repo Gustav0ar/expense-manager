@@ -131,6 +131,9 @@ export async function traceRequest(
 					'url.path': event.url.pathname,
 					'http.route': routeId,
 					'app.request_id': event.locals.requestId || '',
+					...(event.locals.externalRequestId
+						? { 'app.external_request_id': event.locals.externalRequestId }
+						: {}),
 					'app.authenticated': Boolean(event.locals.user)
 				}
 			},

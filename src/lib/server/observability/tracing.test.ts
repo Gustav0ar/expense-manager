@@ -107,17 +107,28 @@ describe('tracing configuration', () => {
 			spanContext: () => ({ traceId: '0123456789abcdef0123456789abcdef' }),
 			end: vi.fn()
 		};
+		const spanOptions: Array<{ attributes: Record<string, unknown> }> = [];
 		vi.spyOn(trace, 'getTracer').mockReturnValue({
 			startActiveSpan: (
 				_name: string,
-				_options: unknown,
+				options: { attributes: Record<string, unknown> },
 				callback: (span: typeof fakeSpan) => unknown
-			) => callback(fakeSpan)
+			) => {
+				spanOptions.push(options);
+				return callback(fakeSpan);
+			}
 		} as never);
 
 		try {
-			const ok = await traceRequest(createRequestEvent(), async () => new Response('ok'));
+			const ok = await traceRequest(
+				createRequestEvent({ externalRequestId: 'external-request-1' }),
+				async () => new Response('ok')
+			);
 			expect(ok.headers.get('X-Trace-Id')).toBe('0123456789abcdef0123456789abcdef');
+			expect(spanOptions[0].attributes).toMatchObject({
+				'app.request_id': 'request-1',
+				'app.external_request_id': 'external-request-1'
+			});
 			const unavailable = await traceRequest(
 				createRequestEvent({ routeId: null, authenticated: true }),
 				async () => new Response('down', { status: 503 })
@@ -183,11 +194,17 @@ describe('tracing configuration', () => {
 	});
 });
 
-function createRequestEvent(input: { routeId?: string | null; authenticated?: boolean } = {}) {
+function createRequestEvent(
+	input: { routeId?: string | null; authenticated?: boolean; externalRequestId?: string } = {}
+) {
 	return {
 		request: new Request('http://localhost/app/dashboard'),
 		url: new URL('http://localhost/app/dashboard'),
 		route: { id: input.routeId === undefined ? '/app/dashboard' : input.routeId },
-		locals: input.authenticated ? { user: { id: 'user-1' }, requestId: 'request-1' } : {}
+		locals: {
+			...(input.authenticated ? { user: { id: 'user-1' } } : {}),
+			requestId: 'request-1',
+			...(input.externalRequestId ? { externalRequestId: input.externalRequestId } : {})
+		}
 	} as unknown as RequestEvent;
 }

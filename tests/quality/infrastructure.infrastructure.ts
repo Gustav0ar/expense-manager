@@ -140,6 +140,27 @@ test('reports a real database outage through the health endpoint', async () => {
 				timestamp: expect.any(String)
 			})
 		);
+
+		const validExternalId = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+		const correlated = await fetch(`${baseURL}/api/health`, {
+			headers: { 'X-Request-Id': validExternalId }
+		});
+		const correlatedRequestId = correlated.headers.get('X-Request-Id');
+		expect(correlatedRequestId).toMatch(
+			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+		);
+		expect(correlatedRequestId).not.toBe(validExternalId);
+
+		const invalidExternalId = 'invalid/request';
+		const hostile = await fetch(`${baseURL}/api/health`, {
+			headers: { 'X-Request-Id': invalidExternalId }
+		});
+		const hostileRequestId = hostile.headers.get('X-Request-Id');
+		expect(hostileRequestId).toMatch(
+			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+		);
+		expect(hostileRequestId).not.toBe(invalidExternalId);
+		expect(logs.join('')).not.toContain(invalidExternalId);
 	} finally {
 		await stopChild(child);
 	}
