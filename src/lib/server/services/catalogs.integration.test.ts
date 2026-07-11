@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { user } from '$lib/server/db/auth.schema';
-import { category, expense, workspace, workspaceMember } from '$lib/server/db/schema';
+import { auditEvent, category, expense, workspace, workspaceMember } from '$lib/server/db/schema';
 import { db } from '$lib/server/db';
 import {
 	createCategory,
@@ -80,6 +80,32 @@ describe('category and expense catalog integration', () => {
 		await expect(unarchiveCategory(fixture.context, 2_147_483_647)).rejects.toMatchObject({
 			status: 404
 		});
+	});
+
+	it('rolls back category creation when its audit event cannot be inserted', async () => {
+		const fixture = await createFixture();
+		const categoryName = `Atomic category ${randomUUID()}`;
+		const invalidActor = { ...fixture.context, userId: `missing-${randomUUID()}` };
+
+		await expect(
+			createCategory(invalidActor, { name: categoryName, color: '#123456' })
+		).rejects.toMatchObject({ cause: { code: '23503' } });
+		expect(await listCategories(fixture.context, true)).not.toContainEqual(
+			expect.objectContaining({ name: categoryName })
+		);
+
+		const created = await createCategory(fixture.context, { name: categoryName, color: '#123456' });
+		const events = await db
+			.select({ entityId: auditEvent.entityId })
+			.from(auditEvent)
+			.where(
+				and(
+					eq(auditEvent.workspaceId, fixture.context.workspaceId),
+					eq(auditEvent.action, 'category.created'),
+					eq(auditEvent.entityId, String(created.id))
+				)
+			);
+		expect(events).toEqual([{ entityId: String(created.id) }]);
 	});
 
 	it('archives associated categories and prevents unarchiving a duplicate active name', async () => {

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Cookies, RequestEvent } from '@sveltejs/kit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { user } from '$lib/server/db/auth.schema';
 import {
 	category,
@@ -195,6 +195,37 @@ describe('workspace service integration', () => {
 		await expect(removeMember(context, 2_147_483_647)).rejects.toMatchObject({ status: 404 });
 		await expect(removeMember(context, memberRow.id)).resolves.toBeUndefined();
 		expect(await listMembers(context)).toHaveLength(1);
+	});
+
+	it('rolls back a member role change when its audit event cannot be inserted', async () => {
+		const owner = await createUser('atomic-role-owner');
+		const member = await createUser('atomic-role-member');
+		const created = await createTrackedWorkspace(owner.id, 'Atomic role workspace');
+		const context = workspaceContext(owner.id, created.id, created.name);
+		const [memberRow] = await db
+			.insert(workspaceMember)
+			.values({ workspaceId: created.id, userId: member.id, role: 'member', status: 'active' })
+			.returning({ id: workspaceMember.id });
+
+		await expect(
+			changeMemberRole({ ...context, userId: `missing-${randomUUID()}` }, memberRow.id, 'admin')
+		).rejects.toMatchObject({ cause: { code: '23503' } });
+		expect(await listMembers(context)).toContainEqual(
+			expect.objectContaining({ id: memberRow.id, role: 'member' })
+		);
+
+		await changeMemberRole(context, memberRow.id, 'admin');
+		const events = await db
+			.select({ entityId: auditEvent.entityId })
+			.from(auditEvent)
+			.where(
+				and(
+					eq(auditEvent.workspaceId, created.id),
+					eq(auditEvent.action, 'workspace_member.role_changed'),
+					eq(auditEvent.entityId, String(memberRow.id))
+				)
+			);
+		expect(events).toEqual([{ entityId: String(memberRow.id) }]);
 	});
 
 	it('writes and filters a stable, cursor-paginated audit trail', async () => {

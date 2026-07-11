@@ -4,7 +4,7 @@ import { db } from '$lib/server/db';
 import { category } from '$lib/server/db/schema';
 import type { WorkspaceContext } from './workspaces';
 import { canManageCategories } from '$lib/server/security/roles';
-import { writeAuditEvent } from './audit';
+import { insertAuditEvent } from './audit';
 import { translate } from '$lib/i18n';
 
 type CategoryUsageRow = {
@@ -66,22 +66,26 @@ export async function createCategory(
 	if (!canManageCategories(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
-	const [created] = await db
-		.insert(category)
-		.values({
-			workspaceId: context.workspaceId,
-			name: input.name,
-			color: input.color,
-			icon: input.icon || null
-		})
-		.returning({ id: category.id });
+	const created = await db.transaction(async (tx) => {
+		const [row] = await tx
+			.insert(category)
+			.values({
+				workspaceId: context.workspaceId,
+				name: input.name,
+				color: input.color,
+				icon: input.icon || null
+			})
+			.returning({ id: category.id });
 
-	await writeAuditEvent({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: 'category.created',
-		entityType: 'category',
-		entityId: created.id
+		await insertAuditEvent(tx, {
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: 'category.created',
+			entityType: 'category',
+			entityId: row.id
+		});
+
+		return row;
 	});
 
 	return created;
@@ -95,20 +99,22 @@ export async function updateCategory(
 	if (!canManageCategories(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
-	const [updated] = await db
-		.update(category)
-		.set({ name: input.name, color: input.color, icon: input.icon || null })
-		.where(and(eq(category.id, id), eq(category.workspaceId, context.workspaceId)))
-		.returning({ id: category.id });
+	await db.transaction(async (tx) => {
+		const [updated] = await tx
+			.update(category)
+			.set({ name: input.name, color: input.color, icon: input.icon || null })
+			.where(and(eq(category.id, id), eq(category.workspaceId, context.workspaceId)))
+			.returning({ id: category.id });
 
-	if (!updated) throw error(404, translate(context.locale, 'Category not found.'));
+		if (!updated) throw error(404, translate(context.locale, 'Category not found.'));
 
-	await writeAuditEvent({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: 'category.updated',
-		entityType: 'category',
-		entityId: id
+		await insertAuditEvent(tx, {
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: 'category.updated',
+			entityType: 'category',
+			entityId: id
+		});
 	});
 }
 
@@ -137,7 +143,7 @@ export async function removeCategory(context: WorkspaceContext, id: number) {
 
 		if (!item) throw error(404, translate(context.locale, 'Category not found.'));
 
-		return {
+		const result = {
 			mode,
 			item: {
 				...item,
@@ -145,22 +151,24 @@ export async function removeCategory(context: WorkspaceContext, id: number) {
 				associationCount
 			}
 		};
-	});
 
-	await writeAuditEvent({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: `category.${removed.mode}`,
-		entityType: 'category',
-		entityId: removed.item.id,
-		metadata: {
-			name: removed.item.name,
-			expenseCount: removed.item.expenseCount,
-			recurringCount: removed.item.recurringCount,
-			budgetCount: removed.item.budgetCount,
-			ruleCount: removed.item.ruleCount,
-			childCount: removed.item.childCount
-		}
+		await insertAuditEvent(tx, {
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: `category.${result.mode}`,
+			entityType: 'category',
+			entityId: result.item.id,
+			metadata: {
+				name: result.item.name,
+				expenseCount: result.item.expenseCount,
+				recurringCount: result.item.recurringCount,
+				budgetCount: result.item.budgetCount,
+				ruleCount: result.item.ruleCount,
+				childCount: result.item.childCount
+			}
+		});
+
+		return result;
 	});
 
 	return removed;
@@ -171,26 +179,28 @@ export async function unarchiveCategory(context: WorkspaceContext, id: number) {
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	try {
-		const [updated] = await db
-			.update(category)
-			.set({ isArchived: false })
-			.where(and(eq(category.id, id), eq(category.workspaceId, context.workspaceId)))
-			.returning({ id: category.id });
+		await db.transaction(async (tx) => {
+			const [updated] = await tx
+				.update(category)
+				.set({ isArchived: false })
+				.where(and(eq(category.id, id), eq(category.workspaceId, context.workspaceId)))
+				.returning({ id: category.id });
 
-		if (!updated) throw error(404, translate(context.locale, 'Category not found.'));
+			if (!updated) throw error(404, translate(context.locale, 'Category not found.'));
+
+			await insertAuditEvent(tx, {
+				workspaceId: context.workspaceId,
+				actorUserId: context.userId,
+				action: 'category.unarchived',
+				entityType: 'category',
+				entityId: id
+			});
+		});
 	} catch (categoryError) {
 		if (isUniqueViolation(categoryError))
 			throw error(409, translate(context.locale, 'Category already exists.'));
 		throw categoryError;
 	}
-
-	await writeAuditEvent({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: 'category.unarchived',
-		entityType: 'category',
-		entityId: id
-	});
 }
 
 function categoryUsageSql(workspaceId: number, id: number) {

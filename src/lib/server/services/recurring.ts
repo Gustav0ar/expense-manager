@@ -17,6 +17,7 @@ import { assertCategoryInWorkspace } from '$lib/server/utils/category';
 import { translate } from '$lib/i18n';
 import type { WorkspaceContext } from './workspaces';
 import { resolveExpenseCatalogSelection } from './expense-catalogs';
+import { insertAuditEvent } from './audit';
 
 export type RecurringExpenseInput = {
 	categoryId: number;
@@ -113,20 +114,24 @@ export async function setRecurringExpenseStatus(
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
-	const [updated] = await db
-		.update(recurringExpense)
-		.set({ status })
-		.where(and(eq(recurringExpense.id, id), eq(recurringExpense.workspaceId, context.workspaceId)))
-		.returning({ id: recurringExpense.id });
+	await db.transaction(async (tx) => {
+		const [updated] = await tx
+			.update(recurringExpense)
+			.set({ status })
+			.where(
+				and(eq(recurringExpense.id, id), eq(recurringExpense.workspaceId, context.workspaceId))
+			)
+			.returning({ id: recurringExpense.id });
 
-	if (!updated) throw error(404, translate(context.locale, 'Recurring expense not found.'));
+		if (!updated) throw error(404, translate(context.locale, 'Recurring expense not found.'));
 
-	await db.insert(auditEvent).values({
-		workspaceId: context.workspaceId,
-		actorUserId: context.userId,
-		action: status === 'active' ? 'recurring_expense.resumed' : 'recurring_expense.paused',
-		entityType: 'recurring_expense',
-		entityId: String(id)
+		await insertAuditEvent(tx, {
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: status === 'active' ? 'recurring_expense.resumed' : 'recurring_expense.paused',
+			entityType: 'recurring_expense',
+			entityId: id
+		});
 	});
 }
 
