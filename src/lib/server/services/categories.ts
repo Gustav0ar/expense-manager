@@ -22,39 +22,9 @@ type CategoryUsageRow = {
 };
 
 export async function listCategories(context: WorkspaceContext, includeArchived = false) {
-	const rows = await db.execute<CategoryUsageRow>(sql`
-		select c.id,
-			c.name,
-			c.color,
-			c.icon,
-			c.is_archived,
-			c.created_at,
-			count(distinct e.id)::int as expense_count,
-			count(distinct re.id)::int as recurring_count,
-			count(distinct cb.id)::int as budget_count,
-			count(distinct cr.id)::int as rule_count,
-			count(distinct child.id)::int as child_count
-		from category c
-		left join expense e
-			on e.workspace_id = c.workspace_id
-			and e.category_id = c.id
-		left join recurring_expense re
-			on re.workspace_id = c.workspace_id
-			and re.category_id = c.id
-		left join category_budget cb
-			on cb.workspace_id = c.workspace_id
-			and cb.category_id = c.id
-		left join category_rule cr
-			on cr.workspace_id = c.workspace_id
-			and cr.category_id = c.id
-		left join category child
-			on child.workspace_id = c.workspace_id
-			and child.parent_category_id = c.id
-		where c.workspace_id = ${context.workspaceId}
-			${includeArchived ? sql`` : sql`and c.is_archived = false`}
-		group by c.id, c.name, c.color, c.icon, c.is_archived, c.created_at
-		order by c.is_archived asc, c.name asc
-	`);
+	const rows = await db.execute<CategoryUsageRow>(
+		categoryUsageSql(context.workspaceId, { includeArchived })
+	);
 
 	return rows.map(categoryFromUsageRow);
 }
@@ -123,7 +93,9 @@ export async function removeCategory(context: WorkspaceContext, id: number) {
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const removed = await db.transaction(async (tx) => {
-		const [usage] = await tx.execute<CategoryUsageRow>(categoryUsageSql(context.workspaceId, id));
+		const [usage] = await tx.execute<CategoryUsageRow>(
+			categoryUsageSql(context.workspaceId, { id })
+		);
 		if (!usage) throw error(404, translate(context.locale, 'Category not found.'));
 
 		const usageCounts = usageCountsFromRow(usage);
@@ -203,39 +175,68 @@ export async function unarchiveCategory(context: WorkspaceContext, id: number) {
 	}
 }
 
-function categoryUsageSql(workspaceId: number, id: number) {
+function categoryUsageSql(
+	workspaceId: number,
+	options: { id?: number; includeArchived?: boolean } = {}
+) {
+	const categoryIdFilter = options.id == null ? sql`` : sql`and category_id = ${options.id}`;
+	const parentCategoryIdFilter =
+		options.id == null ? sql`` : sql`and parent_category_id = ${options.id}`;
+
 	return sql`
+		with expense_usage as (
+			select category_id, count(*)::int as expense_count
+			from expense
+			where workspace_id = ${workspaceId}
+				${categoryIdFilter}
+			group by category_id
+		), recurring_usage as (
+			select category_id, count(*)::int as recurring_count
+			from recurring_expense
+			where workspace_id = ${workspaceId}
+				${categoryIdFilter}
+			group by category_id
+		), budget_usage as (
+			select category_id, count(*)::int as budget_count
+			from category_budget
+			where workspace_id = ${workspaceId}
+				${categoryIdFilter}
+			group by category_id
+		), rule_usage as (
+			select category_id, count(*)::int as rule_count
+			from category_rule
+			where workspace_id = ${workspaceId}
+				${categoryIdFilter}
+			group by category_id
+		), child_usage as (
+			select parent_category_id, count(*)::int as child_count
+			from category
+			where workspace_id = ${workspaceId}
+				and parent_category_id is not null
+				${parentCategoryIdFilter}
+			group by parent_category_id
+		)
 		select c.id,
 			c.name,
 			c.color,
 			c.icon,
 			c.is_archived,
 			c.created_at,
-			count(distinct e.id)::int as expense_count,
-			count(distinct re.id)::int as recurring_count,
-			count(distinct cb.id)::int as budget_count,
-			count(distinct cr.id)::int as rule_count,
-			count(distinct child.id)::int as child_count
+			coalesce(eu.expense_count, 0)::int as expense_count,
+			coalesce(ru.recurring_count, 0)::int as recurring_count,
+			coalesce(bu.budget_count, 0)::int as budget_count,
+			coalesce(cu.rule_count, 0)::int as rule_count,
+			coalesce(chu.child_count, 0)::int as child_count
 		from category c
-		left join expense e
-			on e.workspace_id = c.workspace_id
-			and e.category_id = c.id
-		left join recurring_expense re
-			on re.workspace_id = c.workspace_id
-			and re.category_id = c.id
-		left join category_budget cb
-			on cb.workspace_id = c.workspace_id
-			and cb.category_id = c.id
-		left join category_rule cr
-			on cr.workspace_id = c.workspace_id
-			and cr.category_id = c.id
-		left join category child
-			on child.workspace_id = c.workspace_id
-			and child.parent_category_id = c.id
+		left join expense_usage eu on eu.category_id = c.id
+		left join recurring_usage ru on ru.category_id = c.id
+		left join budget_usage bu on bu.category_id = c.id
+		left join rule_usage cu on cu.category_id = c.id
+		left join child_usage chu on chu.parent_category_id = c.id
 		where c.workspace_id = ${workspaceId}
-			and c.id = ${id}
-		group by c.id, c.name, c.color, c.icon, c.is_archived, c.created_at
-		limit 1
+			${options.id == null ? sql`` : sql`and c.id = ${options.id}`}
+			${options.id != null || options.includeArchived ? sql`` : sql`and c.is_archived = false`}
+		${options.id == null ? sql`order by c.is_archived asc, c.name asc` : sql`limit 1`}
 	`;
 }
 

@@ -13,7 +13,7 @@ describe('quality gate configuration', () => {
 		};
 
 		expect(packageJson.scripts['test:quality']).toBe(
-			'pnpm test:visual && pnpm test:performance && pnpm test:infrastructure && pnpm test:smoke && pnpm test:prometheus-rules'
+			'pnpm test:visual && pnpm test:performance && pnpm test:query-plans && pnpm test:infrastructure && pnpm test:smoke && pnpm test:prometheus-rules'
 		);
 		expect(packageJson.scripts.verify).toContain('pnpm test:quality');
 		expect(packageJson.scripts.verify).toContain('pnpm test:attachment-recovery');
@@ -37,10 +37,10 @@ describe('quality gate configuration', () => {
 		);
 	});
 
-	it('runs browser quality suites and Prometheus validation as independent CI gates', () => {
+	it('runs quality suites and Prometheus validation as independent CI gates', () => {
 		const workflow = readProjectFile('.github/workflows/ci.yml');
 
-		expect(workflow).toContain('suite: [visual, performance, infrastructure, smoke]');
+		expect(workflow).toContain('suite: [visual, performance, query-plans, infrastructure, smoke]');
 		expect(workflow).toContain('run: pnpm test:${{ matrix.suite }}');
 		expect(workflow).toContain('prometheus-rules:');
 		expect(workflow).toContain('run: scripts/ops/test-prometheus-rules.sh');

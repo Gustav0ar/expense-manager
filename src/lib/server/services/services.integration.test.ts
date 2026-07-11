@@ -1499,6 +1499,197 @@ describe('server service integration', () => {
 		);
 	});
 
+	it('reports exact mixed category and payment-method usage without multiplying associations', async () => {
+		const fixture = await createWorkspaceFixture();
+		const usedCategory = await createCategory(fixture.context, {
+			name: 'A mixed usage',
+			color: '#2563eb'
+		});
+		const unusedCategory = await createCategory(fixture.context, {
+			name: 'Z unused usage',
+			color: '#2563eb'
+		});
+		const usedPaymentMethod = await getOrCreateCatalogItem(
+			db,
+			fixture.context.workspaceId,
+			'paymentMethod',
+			'A mixed method'
+		);
+		const unusedPaymentMethod = await getOrCreateCatalogItem(
+			db,
+			fixture.context.workspaceId,
+			'paymentMethod',
+			'Z unused method'
+		);
+
+		await db.insert(category).values([
+			{
+				workspaceId: fixture.context.workspaceId,
+				name: 'Mixed child one',
+				color: '#2563eb',
+				parentCategoryId: usedCategory.id
+			},
+			{
+				workspaceId: fixture.context.workspaceId,
+				name: 'Mixed child two',
+				color: '#2563eb',
+				parentCategoryId: usedCategory.id
+			}
+		]);
+		await db.insert(expense).values([
+			{
+				workspaceId: fixture.context.workspaceId,
+				categoryId: usedCategory.id,
+				createdByUserId: fixture.context.userId,
+				description: 'Mixed active one',
+				amountCents: 100,
+				expenseDate: '2026-06-01',
+				paymentMethodId: usedPaymentMethod.id,
+				paymentMethod: usedPaymentMethod.name
+			},
+			{
+				workspaceId: fixture.context.workspaceId,
+				categoryId: usedCategory.id,
+				createdByUserId: fixture.context.userId,
+				description: 'Mixed active two',
+				amountCents: 200,
+				expenseDate: '2026-06-02',
+				paymentMethodId: usedPaymentMethod.id,
+				paymentMethod: usedPaymentMethod.name
+			},
+			{
+				workspaceId: fixture.context.workspaceId,
+				categoryId: usedCategory.id,
+				createdByUserId: fixture.context.userId,
+				description: 'Mixed deleted',
+				amountCents: 300,
+				expenseDate: '2026-06-03',
+				paymentMethodId: usedPaymentMethod.id,
+				paymentMethod: usedPaymentMethod.name,
+				deletedAt: new Date('2026-06-04T00:00:00.000Z')
+			}
+		]);
+		await db.insert(recurringExpense).values([
+			{
+				workspaceId: fixture.context.workspaceId,
+				categoryId: usedCategory.id,
+				createdByUserId: fixture.context.userId,
+				description: 'Mixed recurrence one',
+				amountCents: 400,
+				startDate: '2026-06-01',
+				nextRunDate: '2026-07-01',
+				paymentMethodId: usedPaymentMethod.id,
+				paymentMethod: usedPaymentMethod.name
+			},
+			{
+				workspaceId: fixture.context.workspaceId,
+				categoryId: usedCategory.id,
+				createdByUserId: fixture.context.userId,
+				description: 'Mixed recurrence two',
+				amountCents: 500,
+				startDate: '2026-06-02',
+				nextRunDate: '2026-07-02',
+				paymentMethodId: usedPaymentMethod.id,
+				paymentMethod: usedPaymentMethod.name
+			}
+		]);
+		await db.insert(categoryBudget).values([
+			{
+				workspaceId: fixture.context.workspaceId,
+				categoryId: usedCategory.id,
+				periodMonth: '2026-06-01',
+				amountCents: 10_000,
+				createdByUserId: fixture.context.userId
+			},
+			{
+				workspaceId: fixture.context.workspaceId,
+				categoryId: usedCategory.id,
+				periodMonth: '2026-07-01',
+				amountCents: 20_000,
+				createdByUserId: fixture.context.userId
+			}
+		]);
+		await db.insert(categoryRule).values([
+			{
+				workspaceId: fixture.context.workspaceId,
+				categoryId: usedCategory.id,
+				createdByUserId: fixture.context.userId,
+				name: 'Mixed rule one',
+				pattern: 'one'
+			},
+			{
+				workspaceId: fixture.context.workspaceId,
+				categoryId: usedCategory.id,
+				createdByUserId: fixture.context.userId,
+				name: 'Mixed rule two',
+				pattern: 'two'
+			}
+		]);
+
+		const categories = (await listCategories(fixture.context)).filter((item) =>
+			[usedCategory.id, unusedCategory.id].includes(item.id)
+		);
+		expect(categories).toEqual([
+			expect.objectContaining({
+				id: usedCategory.id,
+				expenseCount: 3,
+				recurringCount: 2,
+				budgetCount: 2,
+				ruleCount: 2,
+				childCount: 2,
+				associationCount: 11
+			}),
+			expect.objectContaining({
+				id: unusedCategory.id,
+				expenseCount: 0,
+				recurringCount: 0,
+				budgetCount: 0,
+				ruleCount: 0,
+				childCount: 0,
+				associationCount: 0
+			})
+		]);
+
+		const paymentMethods = (await listExpenseCatalogs(fixture.context)).paymentMethods.filter(
+			(item) => [usedPaymentMethod.id, unusedPaymentMethod.id].includes(item.id)
+		);
+		expect(paymentMethods).toEqual([
+			expect.objectContaining({
+				id: usedPaymentMethod.id,
+				expenseCount: 2,
+				recurringCount: 2
+			}),
+			expect.objectContaining({
+				id: unusedPaymentMethod.id,
+				expenseCount: 0,
+				recurringCount: 0
+			})
+		]);
+
+		await expect(removeCategory(fixture.context, usedCategory.id)).resolves.toMatchObject({
+			mode: 'archived',
+			item: expect.objectContaining({ associationCount: 11 })
+		});
+		await expect(removeCategory(fixture.context, unusedCategory.id)).resolves.toMatchObject({
+			mode: 'deleted'
+		});
+		await expect(
+			removeExpenseCatalogItem(fixture.context, {
+				kind: 'paymentMethod',
+				id: usedPaymentMethod.id
+			})
+		).resolves.toMatchObject({
+			mode: 'archived',
+			item: expect.objectContaining({ expenseCount: 2, recurringCount: 2 })
+		});
+		await expect(
+			removeExpenseCatalogItem(fixture.context, {
+				kind: 'paymentMethod',
+				id: unusedPaymentMethod.id
+			})
+		).resolves.toMatchObject({ mode: 'deleted' });
+	});
+
 	it('sends budget alerts from approved spending only', async () => {
 		const previousDeliveryMode = process.env.EMAIL_DELIVERY;
 		process.env.EMAIL_DELIVERY = 'log';
