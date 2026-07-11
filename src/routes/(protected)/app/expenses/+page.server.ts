@@ -1,6 +1,10 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { handleServiceError, expenseFormValues } from '$lib/server/action-utils';
+import {
+	handleServiceError,
+	expenseFormValues,
+	localizedFormFieldErrors
+} from '$lib/server/action-utils';
 import {
 	createCategory as createCategoryService,
 	listCategories,
@@ -76,13 +80,9 @@ export const actions: Actions = {
 		const formData = await event.request.formData();
 		const parsed = parseForm(formData, expenseSchema);
 		if (!parsed.success) {
-			const fieldErrors: Record<string, string> = {};
-			for (const [field, errors] of Object.entries(parsed.error.flatten().fieldErrors)) {
-				fieldErrors[field] = errors[0] ?? 'Invalid';
-			}
 			return fail(400, {
 				message: translate(event.locals.locale, 'Check expense data.'),
-				fieldErrors,
+				fieldErrors: localizedFormFieldErrors(parsed.error, event.locals.locale),
 				values: expenseFormValues(formData)
 			});
 		}

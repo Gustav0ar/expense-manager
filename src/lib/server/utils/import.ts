@@ -1,4 +1,5 @@
 import { defaultLocale, translate } from '$lib/i18n';
+import { parseCurrencyToCents } from '$lib/server/utils/money';
 
 export type ExpenseImportSource = 'csv' | 'ofx';
 
@@ -245,14 +246,17 @@ function normalizeAmount(input: string, options: { positiveMeansCredit?: boolean
 	if (!value) return null;
 	const signedValue = value.replace(/[^\d,.\-+]/g, '');
 	if (signedValue.startsWith('+')) return null;
-	const numeric = signedValue
-		.replace(/\+/g, '')
-		.replace(/\.(?=\d{3}(,|$))/g, '')
-		.replace(',', '.');
-	const parsed = Number(numeric);
-	if (!Number.isFinite(parsed) || parsed === 0) return null;
-	if (options.positiveMeansCredit && parsed > 0) return null;
-	return Math.abs(parsed).toFixed(2).replace('.', ',');
+	const isNegative = signedValue.startsWith('-');
+	if (options.positiveMeansCredit && !isNegative) return null;
+	const unsignedValue = isNegative ? signedValue.slice(1) : signedValue;
+	if (/[+-]/.test(unsignedValue)) return null;
+
+	try {
+		const cents = parseCurrencyToCents(unsignedValue);
+		return `${Math.floor(cents / 100)},${String(cents % 100).padStart(2, '0')}`;
+	} catch {
+		return null;
+	}
 }
 
 function readOfxTag(block: string, tag: string) {

@@ -9,7 +9,8 @@
 - Rate limiting uses forwarded client addresses only when `TRUST_PROXY_HEADERS=true` and the immediate peer matches `TRUSTED_PROXY_CIDR`
 - Isolation by `workspace_id` in all domain services
 - Workspace-scoped RBAC
-- Financial values stored in cents
+- Financial values stored in cents, with each persisted amount capped at 100,000,000,000 cents
+  so PostgreSQL `bigint` values remain exact when mapped to JavaScript numbers
 - Invitations with hashed tokens
 - Optional per-user MFA/TOTP with encrypted secret, hashed recovery codes and a global gate for authenticated sessions
 - Attachments with size limit, MIME allowlist, authenticated download and blocking when the expense was removed

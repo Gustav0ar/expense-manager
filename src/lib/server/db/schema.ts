@@ -17,12 +17,16 @@ import {
 	uuid,
 	uniqueIndex
 } from 'drizzle-orm/pg-core';
+import { maxMoneyCents } from '../../money-limits';
 import { session, user } from './auth.schema';
 
 export type ImportBatchFailedRow = {
 	rowNumber: number;
 	message: string;
 };
+
+const validMoneyAmount = (column: AnyPgColumn) =>
+	sql`${column} > 0 and ${column} <= ${sql.raw(String(maxMoneyCents))}`;
 
 export const workspace = pgTable(
 	'workspace',
@@ -239,7 +243,7 @@ export const categoryBudget = pgTable(
 			.$onUpdate(() => new Date())
 	},
 	(table) => [
-		check('category_budget_amount_cents_check', sql`${table.amountCents} > 0`),
+		check('category_budget_amount_cents_check', validMoneyAmount(table.amountCents)),
 		check(
 			'category_budget_warning_threshold_check',
 			sql`${table.warningThresholdPct} between 1 and 100`
@@ -440,7 +444,7 @@ export const recurringExpense = pgTable(
 			.$onUpdate(() => new Date())
 	},
 	(table) => [
-		check('recurring_expense_amount_cents_check', sql`${table.amountCents} > 0`),
+		check('recurring_expense_amount_cents_check', validMoneyAmount(table.amountCents)),
 		check(
 			'recurring_expense_frequency_check',
 			sql`${table.frequency} in ('weekly', 'monthly', 'yearly')`
@@ -548,7 +552,7 @@ export const expense = pgTable(
 		deletedAt: timestamp('deleted_at', { withTimezone: true })
 	},
 	(table) => [
-		check('expense_amount_cents_check', sql`${table.amountCents} > 0`),
+		check('expense_amount_cents_check', validMoneyAmount(table.amountCents)),
 		check('expense_status_check', sql`${table.status} in ('posted', 'void')`),
 		check(
 			'expense_review_status_check',

@@ -22,6 +22,12 @@ describe('server error localization', () => {
 			'Não foi possível atualizar o workspace.'
 		);
 		expect(ptBrMessages['Could not update the workspace.']).toBeTruthy();
+		expect(translate('en', 'Amount exceeds the maximum allowed.')).toBe(
+			'Amount exceeds the maximum allowed.'
+		);
+		expect(translate('pt-BR', 'Amount exceeds the maximum allowed.')).toBe(
+			'Valor excede o máximo permitido.'
+		);
 	});
 
 	it('localizes generic internal errors without exposing implementation details', () => {

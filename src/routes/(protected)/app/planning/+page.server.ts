@@ -1,5 +1,6 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
+import { budgetFormValues, localizedFormFieldErrors } from '$lib/server/action-utils';
 import { listCategories } from '$lib/server/services/categories';
 import {
 	deleteBudget,
@@ -67,9 +68,15 @@ export const load: PageServerLoad = async (event) => {
 export const actions: Actions = {
 	upsertBudget: async (event) => {
 		const context = await requireWorkspaceContext(event);
-		const parsed = parseForm(await event.request.formData(), budgetSchema);
-		if (!parsed.success)
-			return fail(400, { message: translate(event.locals.locale, 'Check budget data.') });
+		const formData = await event.request.formData();
+		const parsed = parseForm(formData, budgetSchema);
+		if (!parsed.success) {
+			const fieldErrors = localizedFormFieldErrors(parsed.error, event.locals.locale);
+			return fail(400, {
+				message: fieldErrors.amount ?? translate(event.locals.locale, 'Check budget data.'),
+				budgetValues: budgetFormValues(formData)
+			});
+		}
 
 		await upsertBudget(context, parsed.data);
 		throw redirect(303, `/app/planning?periodMonth=${parsed.data.periodMonth}`);
