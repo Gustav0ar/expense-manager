@@ -219,11 +219,18 @@ test('covers login validation, invalid credentials, rate limiting, success and r
 	await page.goto('/login');
 	const form = loginForm(page);
 	await form.evaluate((element) => element.setAttribute('novalidate', ''));
+	const rejectedPassword = ['browser', 'response', 'secret', 'must', 'not', 'leak'].join('-');
 	await form.getByLabel('Email').fill('email-invalido');
-	await form.getByLabel('Senha').fill('');
+	await form.getByLabel('Senha').fill(rejectedPassword);
+	const invalidResponsePromise = page.waitForResponse(
+		(response) => response.url().endsWith('/login') && response.request().method() === 'POST'
+	);
 	await form.getByRole('button', { name: 'Entrar' }).click();
+	const invalidResponseBody = await (await invalidResponsePromise).text();
 	await expect(page.getByText('Confira email e senha.')).toBeVisible();
 	await expect(form.getByLabel('Email')).toHaveValue('email-invalido');
+	await expect(form.getByLabel('Senha')).toHaveValue('');
+	expect(invalidResponseBody).not.toContain(rejectedPassword);
 
 	await page.goto('/login?next=/app/reports');
 	await page.getByLabel('Email').fill(email);
