@@ -67,6 +67,7 @@ jobs:
       - run: docker compose -f docker-compose.traefik.yml config
       - run: docker compose -f docker-compose.traefik.yml --profile tools config
       - run: pnpm db:migrate
+      - run: pnpm test:migrations
       - run: pnpm check
       - run: pnpm lint
       - run: pnpm test:coverage

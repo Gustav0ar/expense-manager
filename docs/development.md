@@ -20,6 +20,22 @@ Open `http://localhost:5173`.
 podman compose -f .devcontainer/compose.yml exec app pnpm verify
 ```
 
+## Test Database Upgrades
+
+Run the migration upgrade test after adding or changing a migration:
+
+```bash
+podman compose -f .devcontainer/compose.yml exec app pnpm test:migrations
+```
+
+The test creates an isolated temporary PostgreSQL database, migrates it through
+the historical `0000`-`0008` state, upgrades it through the complete migration
+ledger, verifies the MFA replay-prevention column, checks a second migration run
+is idempotent, and removes the temporary database. It never targets the normal
+development database. Keep migration journal timestamps increasing and add
+forward-only repair migrations instead of rewriting migrations that may already
+have run in deployed databases.
+
 ## Run E2E Tests
 
 ```bash
