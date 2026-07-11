@@ -1,5 +1,7 @@
 import type { Cookies, RequestEvent } from '@sveltejs/kit';
 import { describe, expect, it, vi } from 'vitest';
+import { ptBrMessages } from '$lib/i18n/messages';
+import { translate } from '$lib/i18n';
 import {
 	getLocalePreference,
 	internalErrorMessage,
@@ -8,6 +10,20 @@ import {
 } from './i18n';
 
 describe('server error localization', () => {
+	it('contains stable translations for provider and workspace fallbacks', () => {
+		expect(translate('en', 'Could not create the account.')).toBe('Could not create the account.');
+		expect(translate('pt-BR', 'Could not create the account.')).toBe(
+			'Não foi possível criar a conta.'
+		);
+		expect(translate('en', 'Could not update the workspace.')).toBe(
+			'Could not update the workspace.'
+		);
+		expect(translate('pt-BR', 'Could not update the workspace.')).toBe(
+			'Não foi possível atualizar o workspace.'
+		);
+		expect(ptBrMessages['Could not update the workspace.']).toBeTruthy();
+	});
+
 	it('localizes generic internal errors without exposing implementation details', () => {
 		expect(internalErrorMessage('en')).toBe('Internal error.');
 		expect(internalErrorMessage('pt-BR')).toBe('Erro interno.');

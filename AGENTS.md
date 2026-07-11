@@ -141,9 +141,15 @@ When a service function does not receive a `WorkspaceContext`, add a `locale: Su
 
 ### Checking your work
 
-After any change that introduces user-visible text, search for bare English strings in your diff:
+Run `pnpm lint` after changing server actions or errors. The AST-aware
+`i18n-local/require-translated-server-messages` rule rejects direct string literals passed to
+SvelteKit `error()`, literal `fail()` message fields, and caught provider `.message` values returned
+to users. Comparisons against provider protocol values, technical logs, and translated internal
+`HttpError.body.message` values are intentionally outside the rule.
+
+Automated checks intentionally stop at reliable server AST patterns. After any change that
+introduces user-visible text, continue reviewing the following by hand:
 
 - In `.svelte` templates, any visible text not inside `{t('...')}` is a bug
-- In server `.ts` files, any `throw error(N, 'English string')` without `translate()` is a bug
-
-The build does not enforce translation coverage, so this must be done by code review.
+- Dynamic translation keys must exist in `src/lib/i18n/messages.ts`
+- Provider protocol strings and technical identifiers must never be rendered directly

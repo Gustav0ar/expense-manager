@@ -98,7 +98,7 @@ export const actions: Actions = {
 				}
 
 				return fail(400, {
-					message: err.message || translate(event.locals.locale, 'Could not create the account.'),
+					message: translate(event.locals.locale, 'Could not create the account.'),
 					values: { name: parsed.data.name, email: parsed.data.email }
 				});
 			}

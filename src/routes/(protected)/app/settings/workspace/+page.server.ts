@@ -35,7 +35,10 @@ export const actions: Actions = {
 			// Re-throw 4xx errors that should propagate as real HTTP responses (e.g. 403 Permission denied)
 			// Only intercept 422 (currency guard) to surface as a form failure message
 			if (isHttpError(e) && e.status === 422) {
-				return fail(422, { message: e.body?.message ?? 'Update failed.' });
+				return fail(422, {
+					message:
+						e.body?.message ?? translate(event.locals.locale, 'Could not update the workspace.')
+				});
 			}
 			throw e;
 		}

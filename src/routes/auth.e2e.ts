@@ -151,6 +151,41 @@ test.describe('english auth screens', () => {
 		await expect(page.getByLabel('Confirm password')).toBeVisible();
 		await expect(page.getByRole('link', { name: 'I already have an account' })).toBeVisible();
 	});
+
+	test('maps registration provider errors to stable English app messages', async ({ browser }) => {
+		const email = uniqueEmail('auth-provider-en');
+		const firstContext = await browser.newContext({
+			locale: 'en-US',
+			extraHTTPHeaders: { 'Accept-Language': 'en-US,en;q=0.9' }
+		});
+		const duplicateContext = await browser.newContext({
+			locale: 'en-US',
+			extraHTTPHeaders: { 'Accept-Language': 'en-US,en;q=0.9' }
+		});
+
+		try {
+			const firstPage = await firstContext.newPage();
+			await firstPage.goto('/register');
+			await firstPage.getByLabel('Name').fill('English Provider User');
+			await firstPage.getByLabel('Email').fill(email);
+			await firstPage.locator('input[name="password"]').fill(password);
+			await firstPage.locator('input[name="passwordConfirmation"]').fill(password);
+			await firstPage.getByRole('button', { name: 'Create account' }).click();
+			await expect(firstPage).toHaveURL(/\/app\/onboarding/);
+
+			const duplicatePage = await duplicateContext.newPage();
+			await duplicatePage.goto('/register');
+			await duplicatePage.getByLabel('Name').fill('Duplicate English User');
+			await duplicatePage.getByLabel('Email').fill(email);
+			await duplicatePage.locator('input[name="password"]').fill(password);
+			await duplicatePage.locator('input[name="passwordConfirmation"]').fill(password);
+			await duplicatePage.getByRole('button', { name: 'Create account' }).click();
+			await expect(duplicatePage.getByText('Could not create the account.')).toBeVisible();
+		} finally {
+			await firstContext.close();
+			await duplicateContext.close();
+		}
+	});
 });
 
 test('covers register validation, duplicate accounts, success and logged-in redirects', async ({
@@ -192,7 +227,7 @@ test('covers register validation, duplicate accounts, success and logged-in redi
 		const duplicatePage = await duplicateContext.newPage();
 		await registerAccount(duplicatePage, { email, name: 'Duplicate User' });
 		await expect(duplicatePage.getByRole('heading', { name: 'Criar conta' })).toBeVisible();
-		await expect(duplicatePage.locator('.notice.danger')).toBeVisible();
+		await expect(duplicatePage.getByText('Não foi possível criar a conta.')).toBeVisible();
 		await expect(registerForm(duplicatePage).getByLabel('Nome')).toHaveValue('Duplicate User');
 		await expect(registerForm(duplicatePage).getByLabel('Email')).toHaveValue(email);
 	} finally {
