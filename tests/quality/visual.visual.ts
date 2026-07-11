@@ -90,7 +90,38 @@ test('captures stable desktop and mobile app surfaces', async ({ page }) => {
 	await expect(page.getByRole('heading', { name: 'Analytical' })).toBeVisible();
 	await capture(page, page.locator('.app-shell'), 'reports-analytical-desktop.png');
 
+	await page.goto('/app/planning?periodMonth=2026-06');
+	const importForm = page.locator('form[action="?/importExpenses"]');
+	await importForm.getByLabel('Default category').selectOption({ label: '🧰 Operations' });
+	await importForm.locator('input[type="file"]').setInputFiles({
+		name: 'visual-preview.csv',
+		mimeType: 'text/csv',
+		buffer: Buffer.from(
+			[
+				'date,description,amount',
+				'2026-06-25,Visual expense,125.40',
+				'2026-06-26,Preview proposal,42.75',
+				'2026-06-27,Invalid preview row,'
+			].join('\n')
+		)
+	});
+	await importForm.getByRole('button', { name: 'Import' }).click();
+	const preview = page.locator('.import-preview');
+	await expect(preview.getByRole('heading', { name: 'Import preview' })).toBeVisible();
+	await expect(preview.getByRole('checkbox')).toHaveCount(2);
+	const selectProposed = preview.getByRole('button', { name: 'Select proposed' });
+	await selectProposed.focus();
+	await selectProposed.press('Tab');
+	await expect(preview.getByRole('button', { name: 'Clear selection' })).toBeFocused();
+	await expect(preview).toContainText('1 duplicates');
+	await expect(preview).toContainText('1 failures');
+	await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 1280);
+	await capture(page, preview, 'import-preview-desktop.png');
+
 	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390);
+	await capture(page, preview, 'import-preview-mobile.png');
+
 	await page.goto('/app/expenses?from=2026-06-01&to=2026-06-30');
 	await expect(page.getByRole('heading', { exact: true, name: 'Expenses' })).toBeVisible();
 	await capture(page, page.locator('.app-shell'), 'expenses-mobile.png');

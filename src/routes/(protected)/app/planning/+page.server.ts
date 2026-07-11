@@ -10,7 +10,12 @@ import {
 	setBudgetAlertPreference,
 	upsertBudget
 } from '$lib/server/services/budgets';
-import { importExpenses, listImportBatches } from '$lib/server/services/imports';
+import {
+	confirmImportPreview,
+	listImportBatches,
+	previewImportExpenses,
+	undoImportBatch
+} from '$lib/server/services/imports';
 import {
 	createExpenseCatalogItem,
 	listExpenseCatalogs
@@ -27,12 +32,14 @@ import {
 	budgetSchema,
 	budgetAlertSchema,
 	budgetAlertPreferenceSchema,
+	confirmImportPreviewSchema,
 	idSchema,
 	expenseCatalogSchema,
 	importExpenseSchema,
 	parseForm,
 	planningFilterSchema,
-	recurringExpenseSchema
+	recurringExpenseSchema,
+	undoImportBatchSchema
 } from '$lib/server/validation';
 import { translate } from '$lib/i18n';
 
@@ -222,7 +229,23 @@ export const actions: Actions = {
 			return fail(400, { message: translate(event.locals.locale, 'Check file and format.') });
 		}
 
-		const result = await importExpenses(context, { ...parsed.data, file });
+		const result = await previewImportExpenses(context, { ...parsed.data, file });
+		return {
+			message: translate(event.locals.locale, 'Import preview ready. Review before confirming.'),
+			importPreview: result,
+			tone: 'success'
+		};
+	},
+	confirmImport: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const formData = await event.request.formData();
+		const parsed = parseForm(formData, confirmImportPreviewSchema);
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Import preview is invalid.') });
+		const result = await confirmImportPreview(context, {
+			...parsed.data,
+			selectedSourceRowIds: formData.getAll('selectedSourceRowId').map(String)
+		});
 		const parts: string[] = [];
 		if (result.importedCount > 0) {
 			parts.push(
@@ -246,6 +269,22 @@ export const actions: Actions = {
 					: translate(event.locals.locale, 'No expenses imported.'),
 			importResult: result,
 			tone: isSuccess ? 'success' : 'danger'
+		};
+	},
+	undoImport: async (event) => {
+		const context = await requireWorkspaceContext(event);
+		const parsed = parseForm(await event.request.formData(), undoImportBatchSchema);
+		if (!parsed.success)
+			return fail(400, { message: translate(event.locals.locale, 'Import batch is invalid.') });
+		const result = await undoImportBatch(context, parsed.data.batchId);
+		return {
+			tone: 'success',
+			message: translate(
+				event.locals.locale,
+				'Imported expenses undone: {undoneCount}. Protected expenses skipped: {skippedCount}.',
+				result
+			),
+			undoResult: result
 		};
 	}
 };

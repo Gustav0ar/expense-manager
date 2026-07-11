@@ -266,6 +266,13 @@ export const importExpenseSchema = z.object({
 	)
 });
 
+export const confirmImportPreviewSchema = z.object({
+	previewId: idSchema,
+	sourceChecksum: z.string().regex(/^[a-f0-9]{64}$/)
+});
+
+export const undoImportBatchSchema = z.object({ batchId: idSchema });
+
 export const categoryRuleSchema = z.object({
 	name: z.string().trim().min(2).max(80),
 	categoryId: idSchema,

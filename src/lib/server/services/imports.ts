@@ -1,23 +1,29 @@
 import { error } from '@sveltejs/kit';
-import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { translate } from '$lib/i18n';
 import { db } from '$lib/server/db';
 import {
+	attachmentDeletion,
 	auditEvent,
 	category,
 	expense,
+	expenseAttachment,
 	importBatch,
-	type ImportBatchFailedRow
+	importPreview,
+	type ImportBatchFailedRow,
+	type ImportPreviewAnalysis,
+	type ImportPreviewRow
 } from '$lib/server/db/schema';
 import { canReviewExpenses, canWriteExpenses } from '$lib/server/security/roles';
+import { sha256 } from '$lib/server/utils/crypto';
 import {
 	parseExpenseImport,
-	type ExpenseImportSource,
-	type ImportedExpenseRow
+	type ExpenseImportParseResult,
+	type ExpenseImportSource
 } from '$lib/server/utils/import';
 import { parseCurrencyToCents } from '$lib/server/utils/money';
-import type { WorkspaceContext } from './workspaces';
+import { buildAttachmentDeletionRows } from './attachment-deletion';
 import { getActiveRules, matchCategoryRuleFromRules } from './category-rules';
-import { translate } from '$lib/i18n';
 import {
 	assertCatalogName,
 	catalogKindLabel,
@@ -36,10 +42,11 @@ import {
 	uniqueImportExpenseIdentities,
 	type ImportExpenseIdentity
 } from './import-batching';
+import type { WorkspaceContext } from './workspaces';
 
 const maxImportBytes = 1 * 1024 * 1024;
 const maxImportRows = 500;
-
+export const importPreviewTtlMs = 15 * 60 * 1000;
 const importLockNamespace = 'expense-manager:workspace-import:v1';
 
 export type ImportExpensesInput = {
@@ -50,6 +57,11 @@ export type ImportExpensesInput = {
 
 export type FailedImportRow = ImportBatchFailedRow;
 
+type ActiveCategory = { id: number; name: string; isArchived: boolean };
+type CategoryRule = Awaited<ReturnType<typeof getActiveRules>>[number];
+type NormalizedPreviewRow = Omit<ImportPreviewRow, 'categoryName' | 'isDuplicate'>;
+type ImportExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 export async function listImportBatches(context: WorkspaceContext) {
 	return db
 		.select({
@@ -58,8 +70,12 @@ export async function listImportBatches(context: WorkspaceContext) {
 			fileName: importBatch.fileName,
 			rowCount: importBatch.rowCount,
 			importedCount: importBatch.importedCount,
+			duplicateCount: importBatch.duplicateCount,
 			failedCount: importBatch.failedCount,
 			failedRows: importBatch.failedRows,
+			undoneCount: importBatch.undoneCount,
+			undoSkippedCount: importBatch.undoSkippedCount,
+			undoneAt: importBatch.undoneAt,
 			createdAt: importBatch.createdAt
 		})
 		.from(importBatch)
@@ -68,14 +84,109 @@ export async function listImportBatches(context: WorkspaceContext) {
 		.limit(20);
 }
 
-export async function importExpenses(context: WorkspaceContext, input: ImportExpensesInput) {
-	if (!canWriteExpenses(context.role))
-		throw error(403, translate(context.locale, 'Permission denied.'));
-	if (!input.file || input.file.size === 0)
-		throw error(400, translate(context.locale, 'File is required.'));
-	if (input.file.size > maxImportBytes)
-		throw error(400, translate(context.locale, 'File is larger than 1 MB.'));
+/** Pure import analysis. All database-derived inputs are explicit and the returned rows are stable. */
+export function analyzeExpenseImport(input: {
+	sourceType: ExpenseImportSource;
+	parsed: ExpenseImportParseResult;
+	categories: ActiveCategory[];
+	rules: CategoryRule[];
+	defaultCategoryId?: number;
+	existingRows: ImportExpenseIdentity[];
+	locale?: string;
+}): ImportPreviewAnalysis {
+	const locale = input.locale ?? 'en';
+	const activeCategories = input.categories.filter((item) => !item.isArchived);
+	const categoriesByName = new Map(
+		activeCategories.map((item) => [normalizeCatalogName(item.name).toLowerCase(), item])
+	);
+	const categoriesById = new Map(activeCategories.map((item) => [item.id, item]));
+	const defaultCategory = input.defaultCategoryId
+		? categoriesById.get(input.defaultCategoryId)
+		: undefined;
 
+	if (input.defaultCategoryId && !defaultCategory)
+		throw error(400, translate(locale, 'Default category is invalid.'));
+
+	const failedRows: FailedImportRow[] = input.parsed.errors.map((message) => ({
+		rowNumber: 0,
+		message
+	}));
+	const normalizedRows: NormalizedPreviewRow[] = [];
+
+	for (const row of input.parsed.rows) {
+		const proposedCategory =
+			(row.categoryName
+				? categoriesByName.get(normalizeCatalogName(row.categoryName).toLowerCase())
+				: undefined) ??
+			categoriesById.get(
+				matchCategoryRuleFromRules(input.rules, {
+					description: row.description,
+					vendor: row.vendor,
+					paymentMethod: row.paymentMethod
+				}) ?? -1
+			) ??
+			defaultCategory;
+
+		if (!proposedCategory) {
+			failedRows.push({
+				rowNumber: row.rowNumber,
+				message: translate(locale, 'Category not found and no default category was selected.')
+			});
+			continue;
+		}
+
+		let amountCents: number;
+		try {
+			amountCents = parseCurrencyToCents(row.amount);
+		} catch {
+			failedRows.push({
+				rowNumber: row.rowNumber,
+				message: translate(locale, 'Amount is invalid.')
+			});
+			continue;
+		}
+
+		try {
+			normalizedRows.push({
+				sourceRowId: `${input.sourceType}:${row.rowNumber}`,
+				rowNumber: row.rowNumber,
+				expenseDate: row.expenseDate,
+				description: row.description,
+				amountCents,
+				paymentMethod: normalizeOptionalImportedCatalogName('paymentMethod', row.paymentMethod),
+				vendor: normalizeOptionalImportedCatalogName('vendor', row.vendor),
+				costCenter: normalizeOptionalImportedCatalogName('costCenter', row.costCenter),
+				notes: row.notes,
+				categoryId: proposedCategory.id
+			});
+		} catch (catalogError) {
+			failedRows.push({
+				rowNumber: row.rowNumber,
+				message:
+					catalogError instanceof Error
+						? translateCatalogError(locale, catalogError.message)
+						: translate(locale, 'Invalid auxiliary catalog.')
+			});
+		}
+	}
+
+	const duplicateKeys = new Set(input.existingRows.map(importIdentityKey));
+	return {
+		rows: normalizedRows.map((row) => ({
+			...row,
+			categoryName: categoriesById.get(row.categoryId)?.name ?? '',
+			isDuplicate: duplicateKeys.has(importIdentityKey(row))
+		})),
+		failedRows
+	};
+}
+
+export async function previewImportExpenses(
+	context: WorkspaceContext,
+	input: ImportExpensesInput,
+	options: { now?: Date } = {}
+) {
+	assertImportInput(context, input);
 	const content = await input.file.text();
 	const parsed = parseExpenseImport(input.sourceType, content, context.locale);
 	if (parsed.rows.length > maxImportRows) {
@@ -85,274 +196,506 @@ export async function importExpenses(context: WorkspaceContext, input: ImportExp
 		);
 	}
 
-	const categories = await db
-		.select({
-			id: category.id,
-			name: category.name,
-			isArchived: category.isArchived
-		})
-		.from(category)
-		.where(eq(category.workspaceId, context.workspaceId));
-
-	const activeCategories = categories.filter((item) => !item.isArchived);
-	const categoriesByName = new Map(
-		activeCategories.map((item) => [normalizeCatalogName(item.name).toLowerCase(), item.id])
+	const [categories, rules] = await Promise.all([
+		listWorkspaceCategories(context.workspaceId),
+		getActiveRules(context.workspaceId)
+	]);
+	const provisional = analyzeExpenseImport({
+		sourceType: input.sourceType,
+		parsed,
+		categories,
+		rules,
+		defaultCategoryId: input.defaultCategoryId,
+		existingRows: [],
+		locale: context.locale
+	});
+	const existingRows = await findExistingExpenseIdentities(
+		db,
+		context.workspaceId,
+		provisional.rows
 	);
-	const defaultCategory = input.defaultCategoryId
-		? activeCategories.find((item) => item.id === input.defaultCategoryId)
-		: null;
+	const analysis = analyzeExpenseImport({
+		sourceType: input.sourceType,
+		parsed,
+		categories,
+		rules,
+		defaultCategoryId: input.defaultCategoryId,
+		existingRows,
+		locale: context.locale
+	});
+	const now = options.now ?? new Date();
+	const sourceChecksum = sha256(content);
+	const [preview] = await db
+		.insert(importPreview)
+		.values({
+			workspaceId: context.workspaceId,
+			uploadedByUserId: context.userId,
+			sourceType: input.sourceType,
+			fileName: input.file.name.slice(0, 180) || `import.${input.sourceType}`,
+			sourceChecksum,
+			rowCount: parsed.rows.length + parsed.errors.length,
+			analysis,
+			expiresAt: new Date(now.getTime() + importPreviewTtlMs),
+			createdAt: now
+		})
+		.returning({ id: importPreview.id, expiresAt: importPreview.expiresAt });
 
-	if (input.defaultCategoryId && !defaultCategory)
-		throw error(400, translate(context.locale, 'Default category is invalid.'));
+	return {
+		previewId: preview.id,
+		sourceChecksum,
+		expiresAt: preview.expiresAt,
+		rowCount: parsed.rows.length + parsed.errors.length,
+		proposedCount: analysis.rows.filter((row) => !row.isDuplicate).length,
+		duplicateCount: analysis.rows.filter((row) => row.isDuplicate).length,
+		failedCount: analysis.failedRows.length,
+		rows: analysis.rows,
+		failedRows: analysis.failedRows
+	};
+}
 
-	const rules = await getActiveRules(context.workspaceId);
-	const failedRows: FailedImportRow[] = parsed.errors.map((message) => ({
-		rowNumber: 0,
-		message
-	}));
-	const validRows: Array<ImportedExpenseRow & { categoryId: number }> = [];
+export async function confirmImportPreview(
+	context: WorkspaceContext,
+	input: { previewId: number; sourceChecksum: string; selectedSourceRowIds?: string[] },
+	options: { now?: Date } = {}
+) {
+	if (!canWriteExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
+	const now = options.now ?? new Date();
 
-	for (const row of parsed.rows) {
-		const categoryId =
-			(row.categoryName
-				? categoriesByName.get(normalizeCatalogName(row.categoryName).toLowerCase())
-				: undefined) ??
-			matchCategoryRuleFromRules(rules, {
-				description: row.description,
-				vendor: row.vendor,
-				paymentMethod: row.paymentMethod
-			}) ??
-			defaultCategory?.id;
-
-		if (!categoryId) {
-			failedRows.push({
-				rowNumber: row.rowNumber,
-				message: translate(
-					context.locale,
-					'Category not found and no default category was selected.'
+	return db.transaction(async (tx) => {
+		await lockWorkspaceImport(tx, context.workspaceId);
+		const [preview] = await tx
+			.select()
+			.from(importPreview)
+			.where(
+				and(
+					eq(importPreview.id, input.previewId),
+					eq(importPreview.workspaceId, context.workspaceId),
+					eq(importPreview.uploadedByUserId, context.userId)
 				)
-			});
-			continue;
+			)
+			.limit(1)
+			.for('update');
+		if (!preview) throw error(404, translate(context.locale, 'Import preview not found.'));
+		if (preview.sourceChecksum !== input.sourceChecksum)
+			throw error(409, translate(context.locale, 'Import preview checksum does not match.'));
+		if (preview.status === 'confirmed' && preview.confirmedBatchId) {
+			return loadConfirmedBatchResult(
+				tx,
+				preview.confirmedBatchId,
+				context.workspaceId,
+				context.locale
+			);
 		}
+		if (preview.expiresAt <= now)
+			throw error(410, translate(context.locale, 'Import preview expired. Upload the file again.'));
 
-		try {
-			parseCurrencyToCents(row.amount);
-		} catch {
-			failedRows.push({
-				rowNumber: row.rowNumber,
-				message: translate(context.locale, 'Amount is invalid.')
-			});
-			continue;
-		}
-
-		try {
-			validRows.push({
-				...row,
-				paymentMethod: normalizeOptionalImportedCatalogName('paymentMethod', row.paymentMethod),
-				vendor: normalizeOptionalImportedCatalogName('vendor', row.vendor),
-				costCenter: normalizeOptionalImportedCatalogName('costCenter', row.costCenter),
-				categoryId
-			});
-		} catch (catalogError) {
-			failedRows.push({
-				rowNumber: row.rowNumber,
-				message:
-					catalogError instanceof Error
-						? translateCatalogError(context.locale, catalogError.message)
-						: translate(context.locale, 'Invalid auxiliary catalog.')
-			});
-		}
-	}
-
-	const reviewStatus = canReviewExpenses(context.role) ? 'approved' : 'pending';
-	const reviewedByUserId = reviewStatus === 'approved' ? context.userId : null;
-	const reviewedAt = reviewStatus === 'approved' ? new Date() : null;
-	let duplicateCount = 0;
-	let insertedCount = 0;
-
-	const result = await db.transaction(async (tx) => {
-		// Serialize concurrent imports of the SAME workspace. pg_advisory_xact_lock is
-		// bound to this transaction and auto-releases on commit/rollback, and it runs on
-		// the transaction's own connection. This closes the TOCTOU window in the
-		// SELECT-then-INSERT dedup below: two concurrent imports of the same file can no
-		// longer both pass the duplicate check and insert the same row. Imports of
-		// different workspaces use different lock keys and never block each other.
-		// Hash the namespaced bigint workspace ID to one signed 64-bit lock key. This
-		// supports the full bigserial range used by the schema instead of truncating
-		// workspace IDs to PostgreSQL's two-argument lock form (int4, int4).
-		await tx.execute(
-			sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${importLockNamespace}:${context.workspaceId}`}, 0))`
+		const selectableIds = new Set(preview.analysis.rows.map((row) => row.sourceRowId));
+		const selectedIds = new Set(
+			input.selectedSourceRowIds ?? preview.analysis.rows.map((row) => row.sourceRowId)
 		);
+		if ([...selectedIds].some((id) => !selectableIds.has(id)))
+			throw error(400, translate(context.locale, 'Import row selection is invalid.'));
+		const selectedRows = preview.analysis.rows.filter((row) => selectedIds.has(row.sourceRowId));
+		const categoryIds = [...new Set(selectedRows.map((row) => row.categoryId))];
+		const activeCategories =
+			categoryIds.length === 0
+				? []
+				: await tx
+						.select({ id: category.id })
+						.from(category)
+						.where(
+							and(
+								eq(category.workspaceId, context.workspaceId),
+								eq(category.isArchived, false),
+								inArray(category.id, categoryIds)
+							)
+						);
+		if (activeCategories.length !== categoryIds.length)
+			throw error(409, translate(context.locale, 'A proposed category is no longer available.'));
 
-		// Create the import batch record first so we can reference its id on each expense row.
+		const existingRows = await findExistingExpenseIdentities(tx, context.workspaceId, selectedRows);
+		const classification = classifyImportExpenseRows(selectedRows, existingRows);
+		const acceptedRows = classification.acceptedRows;
+		const duplicateCount =
+			classification.duplicateCount +
+			preview.analysis.rows.filter((row) => row.isDuplicate && !selectedIds.has(row.sourceRowId))
+				.length;
+		const reviewStatus = canReviewExpenses(context.role) ? 'approved' : 'pending';
+		const reviewedByUserId = reviewStatus === 'approved' ? context.userId : null;
+		const reviewedAt = reviewStatus === 'approved' ? now : null;
 		const [batch] = await tx
 			.insert(importBatch)
 			.values({
 				workspaceId: context.workspaceId,
 				uploadedByUserId: context.userId,
-				sourceType: input.sourceType,
-				fileName: input.file.name.slice(0, 180) || `import.${input.sourceType}`,
-				rowCount: parsed.rows.length + parsed.errors.length,
-				// importedCount will be updated after the dedup loop; use 0 for now
-				importedCount: 0,
-				failedCount: failedRows.length,
-				failedRows
+				sourceType: preview.sourceType,
+				fileName: preview.fileName,
+				rowCount: preview.rowCount,
+				importedCount: acceptedRows.length,
+				duplicateCount,
+				failedCount: preview.analysis.failedRows.length,
+				failedRows: preview.analysis.failedRows,
+				createdAt: now
 			})
 			.returning({ id: importBatch.id });
 
-		if (validRows.length > 0) {
+		if (acceptedRows.length > 0) {
 			const [paymentMethods, vendors, costCenters] = await Promise.all([
 				buildCatalogLookup(
 					tx,
 					context.workspaceId,
 					'paymentMethod',
-					validRows.map((row) => row.paymentMethod),
+					acceptedRows.map((row) => row.paymentMethod),
 					context.locale
 				),
 				buildCatalogLookup(
 					tx,
 					context.workspaceId,
 					'vendor',
-					validRows.map((row) => row.vendor),
+					acceptedRows.map((row) => row.vendor),
 					context.locale
 				),
 				buildCatalogLookup(
 					tx,
 					context.workspaceId,
 					'costCenter',
-					validRows.map((row) => row.costCenter),
+					acceptedRows.map((row) => row.costCenter),
 					context.locale
 				)
 			]);
-
-			const preparedRows = validRows.map((row) => ({
-				...row,
-				amountCents: parseCurrencyToCents(row.amount)
-			}));
-			const existingRows: ImportExpenseIdentity[] = [];
-			const uniqueIdentities = uniqueImportExpenseIdentities(preparedRows);
-
-			// Each chunk uses at most 301 bind parameters (workspace plus three per
-			// identity), comfortably below PostgreSQL's parameter limit. DISTINCT and
-			// LIMIT bound the result to one exact triple per requested identity even if
-			// historical data itself contains duplicates.
-			for (const identityChunk of chunkImportValues(
-				uniqueIdentities,
-				importDuplicateLookupChunkSize
-			)) {
-				const candidates = await tx
-					.selectDistinct({
-						amountCents: expense.amountCents,
-						expenseDate: expense.expenseDate,
-						description: expense.description
-					})
-					.from(expense)
-					.where(
-						and(
-							eq(expense.workspaceId, context.workspaceId),
-							isNull(expense.deletedAt),
-							or(
-								...identityChunk.map((identity) =>
-									and(
-										eq(expense.amountCents, identity.amountCents),
-										eq(expense.expenseDate, identity.expenseDate),
-										eq(expense.description, identity.description)
-									)
-								)
-							)
-						)
-					)
-					.limit(identityChunk.length);
-				existingRows.push(...candidates);
-			}
-
-			// Compare every occurrence against the snapshot taken after acquiring the
-			// workspace lock. Thus a pre-existing triple skips every matching file row,
-			// while repeated rows that are new in this file are all retained.
-			const classification = classifyImportExpenseRows(preparedRows, existingRows);
-			duplicateCount = classification.duplicateCount;
-			const expenseValues: Array<typeof expense.$inferInsert> = [];
-
-			for (const row of classification.acceptedRows) {
-				const importedPaymentMethod = lookupCatalogItem(paymentMethods, row.paymentMethod);
+			const values: Array<typeof expense.$inferInsert> = acceptedRows.map((row) => {
+				const payment = lookupCatalogItem(paymentMethods, row.paymentMethod);
 				const importedVendor = lookupCatalogItem(vendors, row.vendor);
 				const importedCostCenter = lookupCatalogItem(costCenters, row.costCenter);
-
-				expenseValues.push({
-					workspaceId: context.workspaceId,
+				const material = {
 					categoryId: row.categoryId,
-					createdByUserId: context.userId,
 					description: row.description,
 					amountCents: row.amountCents,
 					currency: context.currency,
 					expenseDate: row.expenseDate,
-					paymentMethodId: importedPaymentMethod?.id ?? null,
-					paymentMethod: importedPaymentMethod?.name ?? null,
+					paymentMethodId: payment?.id ?? null,
+					paymentMethod: payment?.name ?? null,
 					vendorId: importedVendor?.id ?? null,
 					vendor: importedVendor?.name ?? null,
 					costCenterId: importedCostCenter?.id ?? null,
 					costCenter: importedCostCenter?.name ?? null,
+					competencyMonth: null,
 					notes: row.notes || null,
-					importBatchId: batch.id,
+					status: 'posted',
 					reviewStatus,
 					reviewedByUserId,
-					reviewedAt
-				});
+					reviewedAt,
+					reviewRejectionReason: null
+				};
+				return {
+					workspaceId: context.workspaceId,
+					createdByUserId: context.userId,
+					importBatchId: batch.id,
+					...material,
+					importBaselineHash: importMaterialHash(material),
+					createdAt: now,
+					updatedAt: now
+				};
+			});
+			for (const chunk of chunkImportValues(values, importInsertChunkSize)) {
+				await tx.insert(expense).values(chunk);
 			}
-
-			// At the current 18 populated columns this binds at most 1,800 values per
-			// statement, keeping query text and parameters predictably bounded.
-			for (const insertChunk of chunkImportValues(expenseValues, importInsertChunkSize)) {
-				await tx.insert(expense).values(insertChunk);
-			}
-			insertedCount = expenseValues.length;
-
-			// Update the batch with the real imported count now that we know it.
-			await tx
-				.update(importBatch)
-				.set({ importedCount: insertedCount })
-				.where(eq(importBatch.id, batch.id));
 		}
 
+		await tx
+			.update(importPreview)
+			.set({ status: 'confirmed', confirmedBatchId: batch.id, confirmedAt: now })
+			.where(eq(importPreview.id, preview.id));
 		await tx.insert(auditEvent).values({
 			workspaceId: context.workspaceId,
 			actorUserId: context.userId,
-			action: insertedCount > 0 ? 'expense_import.completed' : 'expense_import.failed',
+			action: acceptedRows.length > 0 ? 'expense_import.completed' : 'expense_import.failed',
 			entityType: 'import_batch',
 			entityId: String(batch.id),
 			metadata: {
-				sourceType: input.sourceType,
-				importedCount: insertedCount,
+				previewId: preview.id,
+				sourceType: preview.sourceType,
+				importedCount: acceptedRows.length,
 				duplicateCount,
-				failedCount: failedRows.length,
-				rowCount: parsed.rows.length + parsed.errors.length,
+				failedCount: preview.analysis.failedRows.length,
+				rowCount: preview.rowCount,
 				reviewStatus
 			}
 		});
-
-		return batch;
+		return {
+			importBatchId: batch.id,
+			importedCount: acceptedRows.length,
+			duplicateCount,
+			failedCount: preview.analysis.failedRows.length,
+			failedRows: preview.analysis.failedRows
+		};
 	});
+}
 
+/** Compatibility service for non-UI callers; the upload action itself only creates a preview. */
+export async function importExpenses(context: WorkspaceContext, input: ImportExpensesInput) {
+	const preview = await previewImportExpenses(context, input);
+	return confirmImportPreview(context, {
+		previewId: preview.previewId,
+		sourceChecksum: preview.sourceChecksum
+	});
+}
+
+export async function undoImportBatch(context: WorkspaceContext, batchId: number) {
+	if (!canWriteExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
+	return db.transaction(async (tx) => {
+		const [batch] = await tx
+			.select()
+			.from(importBatch)
+			.where(and(eq(importBatch.id, batchId), eq(importBatch.workspaceId, context.workspaceId)))
+			.limit(1)
+			.for('update');
+		if (!batch) throw error(404, translate(context.locale, 'Import batch not found.'));
+		if (batch.undoneAt) {
+			return { undoneCount: batch.undoneCount, skippedCount: batch.undoSkippedCount };
+		}
+
+		const rows = await tx
+			.select({
+				id: expense.id,
+				categoryId: expense.categoryId,
+				description: expense.description,
+				amountCents: expense.amountCents,
+				currency: expense.currency,
+				expenseDate: expense.expenseDate,
+				paymentMethodId: expense.paymentMethodId,
+				paymentMethod: expense.paymentMethod,
+				vendorId: expense.vendorId,
+				vendor: expense.vendor,
+				costCenterId: expense.costCenterId,
+				costCenter: expense.costCenter,
+				competencyMonth: expense.competencyMonth,
+				notes: expense.notes,
+				status: expense.status,
+				reviewStatus: expense.reviewStatus,
+				reviewedByUserId: expense.reviewedByUserId,
+				reviewedAt: expense.reviewedAt,
+				reviewRejectionReason: expense.reviewRejectionReason,
+				paymentStatus: expense.paymentStatus,
+				reconciledAt: expense.reconciledAt,
+				deletedAt: expense.deletedAt,
+				importBaselineHash: expense.importBaselineHash
+			})
+			.from(expense)
+			.where(and(eq(expense.workspaceId, context.workspaceId), eq(expense.importBatchId, batch.id)))
+			.for('update');
+		const eligibleIds = rows
+			.filter(
+				(row) =>
+					row.deletedAt === null &&
+					row.paymentStatus === 'unpaid' &&
+					row.reconciledAt === null &&
+					row.importBaselineHash !== null &&
+					row.importBaselineHash === importMaterialHash(row)
+			)
+			.map((row) => row.id);
+		const deletedAt = new Date();
+		if (eligibleIds.length > 0) {
+			await tx
+				.update(expense)
+				.set({ deletedAt })
+				.where(
+					and(
+						eq(expense.workspaceId, context.workspaceId),
+						eq(expense.importBatchId, batch.id),
+						inArray(expense.id, eligibleIds),
+						isNull(expense.deletedAt),
+						eq(expense.paymentStatus, 'unpaid'),
+						isNull(expense.reconciledAt)
+					)
+				);
+			const attachments = await tx
+				.update(expenseAttachment)
+				.set({ deletedAt })
+				.where(
+					and(
+						inArray(expenseAttachment.expenseId, eligibleIds),
+						isNull(expenseAttachment.deletedAt)
+					)
+				)
+				.returning({
+					id: expenseAttachment.id,
+					workspaceId: expenseAttachment.workspaceId,
+					expenseId: expenseAttachment.expenseId,
+					storageKey: expenseAttachment.storageKey,
+					sizeBytes: expenseAttachment.sizeBytes,
+					sha256: expenseAttachment.sha256
+				});
+			if (attachments.length > 0) {
+				await tx
+					.insert(attachmentDeletion)
+					.values(buildAttachmentDeletionRows(attachments, deletedAt));
+				await tx.insert(auditEvent).values(
+					attachments.map((attachment) => ({
+						workspaceId: context.workspaceId,
+						actorUserId: context.userId,
+						action: 'expense_attachment.deleted',
+						entityType: 'expense_attachment',
+						entityId: String(attachment.id),
+						metadata: { expenseId: attachment.expenseId, reason: 'import_batch_undone' }
+					}))
+				);
+			}
+		}
+		const skippedCount = rows.length - eligibleIds.length;
+		await tx
+			.update(importBatch)
+			.set({
+				undoneCount: eligibleIds.length,
+				undoSkippedCount: skippedCount,
+				undoneByUserId: context.userId,
+				undoneAt: deletedAt
+			})
+			.where(eq(importBatch.id, batch.id));
+		await tx.insert(auditEvent).values({
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: 'expense_import.undone',
+			entityType: 'import_batch',
+			entityId: String(batch.id),
+			metadata: { undoneCount: eligibleIds.length, skippedCount }
+		});
+		return { undoneCount: eligibleIds.length, skippedCount };
+	});
+}
+
+function assertImportInput(context: WorkspaceContext, input: ImportExpensesInput) {
+	if (!canWriteExpenses(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
+	if (!input.file || input.file.size === 0)
+		throw error(400, translate(context.locale, 'File is required.'));
+	if (input.file.size > maxImportBytes)
+		throw error(400, translate(context.locale, 'File is larger than 1 MB.'));
+}
+
+function listWorkspaceCategories(workspaceId: number) {
+	return db
+		.select({ id: category.id, name: category.name, isArchived: category.isArchived })
+		.from(category)
+		.where(eq(category.workspaceId, workspaceId));
+}
+
+async function lockWorkspaceImport(executor: ImportExecutor, workspaceId: number) {
+	await executor.execute(
+		sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${importLockNamespace}:${workspaceId}`}, 0))`
+	);
+}
+
+async function findExistingExpenseIdentities(
+	executor: ImportExecutor,
+	workspaceId: number,
+	rows: ImportExpenseIdentity[]
+) {
+	const existingRows: ImportExpenseIdentity[] = [];
+	const identities = uniqueImportExpenseIdentities(rows);
+	for (const identityChunk of chunkImportValues(identities, importDuplicateLookupChunkSize)) {
+		if (identityChunk.length === 0) continue;
+		const candidates = await executor
+			.selectDistinct({
+				amountCents: expense.amountCents,
+				expenseDate: expense.expenseDate,
+				description: expense.description
+			})
+			.from(expense)
+			.where(
+				and(
+					eq(expense.workspaceId, workspaceId),
+					isNull(expense.deletedAt),
+					or(
+						...identityChunk.map((identity) =>
+							and(
+								eq(expense.amountCents, identity.amountCents),
+								eq(expense.expenseDate, identity.expenseDate),
+								eq(expense.description, identity.description)
+							)
+						)
+					)
+				)
+			)
+			.limit(identityChunk.length);
+		existingRows.push(...candidates);
+	}
+	return existingRows;
+}
+
+async function loadConfirmedBatchResult(
+	executor: ImportExecutor,
+	id: number,
+	workspaceId: number,
+	locale: string
+) {
+	const [batch] = await executor
+		.select({
+			id: importBatch.id,
+			importedCount: importBatch.importedCount,
+			duplicateCount: importBatch.duplicateCount,
+			failedCount: importBatch.failedCount,
+			failedRows: importBatch.failedRows
+		})
+		.from(importBatch)
+		.where(and(eq(importBatch.id, id), eq(importBatch.workspaceId, workspaceId)))
+		.limit(1);
+	if (!batch) throw error(409, translate(locale, 'Confirmed import batch is unavailable.'));
 	return {
-		importBatchId: result.id,
-		importedCount: insertedCount,
-		duplicateCount,
-		failedCount: failedRows.length,
-		failedRows
+		importBatchId: batch.id,
+		importedCount: batch.importedCount,
+		duplicateCount: batch.duplicateCount,
+		failedCount: batch.failedCount,
+		failedRows: batch.failedRows
 	};
+}
+
+function importMaterialHash(value: Record<string, unknown>) {
+	const fields = [
+		'categoryId',
+		'description',
+		'amountCents',
+		'currency',
+		'expenseDate',
+		'paymentMethodId',
+		'paymentMethod',
+		'vendorId',
+		'vendor',
+		'costCenterId',
+		'costCenter',
+		'competencyMonth',
+		'notes',
+		'status',
+		'reviewStatus',
+		'reviewedByUserId',
+		'reviewedAt',
+		'reviewRejectionReason'
+	];
+	return sha256(
+		JSON.stringify(
+			fields.map((field) => {
+				const current = value[field];
+				return current instanceof Date ? current.toISOString() : (current ?? null);
+			})
+		)
+	);
+}
+
+function importIdentityKey(row: ImportExpenseIdentity) {
+	return JSON.stringify([row.amountCents, row.expenseDate, row.description]);
 }
 
 function normalizeOptionalImportedCatalogName(kind: ExpenseCatalogKind, value?: string | null) {
 	if (!value) return undefined;
 	const normalized = normalizeCatalogName(value);
 	if (!normalized) return undefined;
-
 	try {
 		assertCatalogName(kind, normalized);
 	} catch {
 		throw new Error(`${catalogKindLabel(kind)} is invalid.`);
 	}
-
 	return normalized;
 }
 
@@ -365,18 +708,14 @@ async function buildCatalogLookup(
 ) {
 	const lookup = new Map<string, ExpenseCatalogItem>();
 	const uniqueNamesByKey = new Map<string, string>();
-	for (const name of names) {
-		if (name) uniqueNamesByKey.set(catalogLookupKey(name), name);
-	}
-
-	for (const nameChunk of chunkImportValues(
+	for (const name of names) if (name) uniqueNamesByKey.set(catalogLookupKey(name), name);
+	for (const chunk of chunkImportValues(
 		[...uniqueNamesByKey.values()],
 		importCatalogUpsertChunkSize
 	)) {
-		const items = await getOrCreateCatalogItems(executor, workspaceId, kind, nameChunk, locale);
+		const items = await getOrCreateCatalogItems(executor, workspaceId, kind, chunk, locale);
 		for (const item of items) lookup.set(catalogLookupKey(item.name), item);
 	}
-
 	return lookup;
 }
 
@@ -386,27 +725,22 @@ function lookupCatalogItem(lookup: Map<string, ExpenseCatalogItem>, name: string
 
 function translateCatalogError(locale: string, message: string) {
 	for (const kind of ['Payment method', 'Vendor', 'Cost center']) {
-		if (message === `${kind} is invalid.`) {
+		if (message === `${kind} is invalid.`)
 			return translate(locale, '{kind} is invalid.', { kind: translate(locale, kind) });
-		}
-		if (message === `${kind} must be at least 2 characters.`) {
+		if (message === `${kind} must be at least 2 characters.`)
 			return translate(locale, '{kind} must be at least 2 characters.', {
 				kind: translate(locale, kind)
 			});
-		}
 		const maxMatch = new RegExp(`^${kind} must be at most (\\d+) characters\\.$`).exec(message);
-		if (maxMatch) {
+		if (maxMatch)
 			return translate(locale, '{kind} must be at most {count} characters.', {
 				kind: translate(locale, kind),
 				count: maxMatch[1]
 			});
-		}
-		if (message === `${kind} contains invalid characters.`) {
+		if (message === `${kind} contains invalid characters.`)
 			return translate(locale, '{kind} contains invalid characters.', {
 				kind: translate(locale, kind)
 			});
-		}
 	}
-
 	return message;
 }

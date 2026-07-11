@@ -3,12 +3,32 @@
 	import LocalizedDateTime from '$lib/components/LocalizedDateTime.svelte';
 	import { translate } from '$lib/i18n';
 	import { formatCents } from '$lib/utils/format';
-	import { Bell, FileUp, Pause, Play, RefreshCw, Target, Trash2 } from '@lucide/svelte';
+	import { resolve } from '$app/paths';
+	import { Bell, FileUp, Pause, Play, RefreshCw, RotateCcw, Target, Trash2 } from '@lucide/svelte';
+	import { untrack } from 'svelte';
 	import type { ActionData, PageData } from './$types';
+	type PreviewRow = {
+		sourceRowId: string;
+		rowNumber: number;
+		description: string;
+		amountCents: number;
+		categoryName: string;
+		isDuplicate: boolean;
+	};
 
 	let { data, form } = $props<{ data: PageData; form: ActionData }>();
 	const currency = $derived(data.currentWorkspace?.currency ?? 'USD');
 	const amountPlaceholder = $derived(data.locale === 'pt-BR' ? '0,00' : '0.00');
+	let selectedPreviewRowIds = $state<string[]>(
+		untrack(() =>
+			((form?.importPreview?.rows ?? []) as PreviewRow[])
+				.filter((row) => !row.isDuplicate)
+				.map((row) => row.sourceRowId)
+		)
+	);
+	const selectedPreviewCount = $derived(selectedPreviewRowIds.length);
+	const previewRows = $derived((form?.importPreview?.rows ?? []) as PreviewRow[]);
+	const previewFailures = $derived(form?.importPreview?.failedRows ?? []);
 	const actionSucceeded = $derived(
 		form?.tone === 'success' ||
 			(form?.importResult?.importedCount ?? 0) > 0 ||
@@ -41,6 +61,16 @@
 
 	function money(cents: number) {
 		return formatCents(cents, currency, data.locale);
+	}
+
+	function selectAllProposedRows() {
+		selectedPreviewRowIds = previewRows
+			.filter((row) => !row.isDuplicate)
+			.map((row) => row.sourceRowId);
+	}
+
+	function clearPreviewSelection() {
+		selectedPreviewRowIds = [];
 	}
 </script>
 
@@ -363,9 +393,111 @@
 			<button class="button primary align-end" type="submit">{t('Import')}</button>
 		</form>
 
+		{#if form?.importPreview}
+			<section class="import-preview" aria-labelledby="import-preview-title">
+				<div class="panel-heading panel-heading-wrap">
+					<div>
+						<span class="eyebrow">{t('Review ledger')}</span>
+						<h4 id="import-preview-title">{t('Import preview')}</h4>
+					</div>
+					<div class="inline-actions">
+						<span class="status-pill success">
+							{t('{count} proposed', { count: form.importPreview.proposedCount })}
+						</span>
+						<span class="status-pill neutral">
+							{t('{count} duplicates', { count: form.importPreview.duplicateCount })}
+						</span>
+						<span class="status-pill neutral">
+							{t('{count} failures', { count: form.importPreview.failedCount })}
+						</span>
+					</div>
+				</div>
+
+				<div class="preview-selection-actions">
+					<p aria-live="polite">{t('{count} rows selected', { count: selectedPreviewCount })}</p>
+					<div class="inline-actions">
+						<button class="button secondary" type="button" onclick={selectAllProposedRows}>
+							{t('Select proposed')}
+						</button>
+						<button class="button secondary" type="button" onclick={clearPreviewSelection}>
+							{t('Clear selection')}
+						</button>
+					</div>
+				</div>
+
+				<div class="table-wrap import-preview-ledger">
+					<table>
+						<thead>
+							<tr>
+								<th scope="col">{t('Include')}</th>
+								<th scope="col">{t('Source row')}</th>
+								<th scope="col">{t('Description')}</th>
+								<th scope="col">{t('Amount')}</th>
+								<th scope="col">{t('Proposed category')}</th>
+								<th scope="col">{t('Result')}</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each previewRows as row (row.sourceRowId)}
+								<tr class:muted={row.isDuplicate}>
+									<td data-label={t('Include')}>
+										<input
+											type="checkbox"
+											name="previewSelection"
+											value={row.sourceRowId}
+											bind:group={selectedPreviewRowIds}
+											aria-label={t('Include row {rowNumber}', { rowNumber: row.rowNumber })}
+										/>
+									</td>
+									<td data-label={t('Source row')}>{row.rowNumber}</td>
+									<td data-label={t('Description')}>{row.description}</td>
+									<td data-label={t('Amount')}>{money(row.amountCents)}</td>
+									<td data-label={t('Proposed category')}>{row.categoryName}</td>
+									<td data-label={t('Result')}>
+										{row.isDuplicate ? t('Duplicate') : t('Ready')}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+
+				{#if previewFailures.length}
+					<div class="import-errors" role="region" aria-label={t('Import failures')}>
+						<h5>{t('Import failures')}</h5>
+						{#each previewFailures as row, index (`failure-${row.rowNumber}-${index}`)}
+							<p>
+								{t('Line {rowNumber}: {message}', {
+									rowNumber: row.rowNumber || '-',
+									message: row.message
+								})}
+							</p>
+						{/each}
+					</div>
+				{/if}
+
+				<div class="confirm-import-form">
+					<form method="post" action="?/confirmImport">
+						<input type="hidden" name="previewId" value={form.importPreview.previewId} />
+						<input type="hidden" name="sourceChecksum" value={form.importPreview.sourceChecksum} />
+						{#each selectedPreviewRowIds as sourceRowId (sourceRowId)}
+							<input type="hidden" name="selectedSourceRowId" value={sourceRowId} />
+						{/each}
+						<button class="button primary" type="submit" disabled={selectedPreviewCount === 0}>
+							{t('Confirm selected expenses')}
+						</button>
+					</form>
+					<form method="get" action={resolve('/app/planning')}>
+						<input type="hidden" name="periodMonth" value={data.periodMonth.slice(0, 7)} />
+						<button class="button secondary" type="submit">{t('Cancel preview')}</button>
+					</form>
+				</div>
+			</section>
+		{/if}
+
 		{#if form?.importResult?.failedRows?.length}
-			<div class="import-errors">
-				{#each form.importResult.failedRows.slice(0, 6) as row, index (`${row.rowNumber}-${index}`)}
+			<div class="import-errors" role="region" aria-label={t('Import failures')}>
+				{#each form.importResult.failedRows as row, index (`confirmed-failure-${row.rowNumber}-${index}`)}
 					<p>
 						{t('Line {rowNumber}: {message}', {
 							rowNumber: row.rowNumber || '-',
@@ -385,6 +517,7 @@
 						<th>{t('Imported')}</th>
 						<th>{t('Failures')}</th>
 						<th>{t('Date')}</th>
+						<th>{t('Actions')}</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -415,6 +548,27 @@
 							<td data-label={t('Date')}
 								><LocalizedDateTime value={batch.createdAt} width="compact" /></td
 							>
+							<td data-label={t('Actions')}>
+								{#if batch.undoneAt}
+									<span class="status-pill neutral">
+										{t('{count} undone', { count: batch.undoneCount })}
+									</span>
+								{:else if batch.importedCount > 0}
+									<form
+										method="post"
+										action="?/undoImport"
+										onsubmit={(event) => {
+											if (!window.confirm(t('Undo this import batch?'))) event.preventDefault();
+										}}
+									>
+										<input type="hidden" name="batchId" value={batch.id} />
+										<button class="button secondary" type="submit">
+											<RotateCcw size={16} />
+											<span>{t('Undo import')}</span>
+										</button>
+									</form>
+								{/if}
+							</td>
 						</tr>
 					{/each}
 				</tbody>

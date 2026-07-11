@@ -25,6 +25,26 @@ export type ImportBatchFailedRow = {
 	message: string;
 };
 
+export type ImportPreviewRow = {
+	sourceRowId: string;
+	rowNumber: number;
+	expenseDate: string;
+	description: string;
+	amountCents: number;
+	categoryId: number;
+	categoryName: string;
+	paymentMethod?: string;
+	vendor?: string;
+	costCenter?: string;
+	notes?: string;
+	isDuplicate: boolean;
+};
+
+export type ImportPreviewAnalysis = {
+	rows: ImportPreviewRow[];
+	failedRows: ImportBatchFailedRow[];
+};
+
 const validMoneyAmount = (column: AnyPgColumn) =>
 	sql`${column} > 0 and ${column} <= ${sql.raw(String(maxMoneyCents))}`;
 
@@ -517,17 +537,58 @@ export const importBatch = pgTable(
 		fileName: text('file_name').notNull(),
 		rowCount: integer('row_count').notNull().default(0),
 		importedCount: integer('imported_count').notNull().default(0),
+		duplicateCount: integer('duplicate_count').notNull().default(0),
 		failedCount: integer('failed_count').notNull().default(0),
 		failedRows: jsonb('failed_rows')
 			.$type<ImportBatchFailedRow[]>()
 			.notNull()
 			.default(sql`'[]'::jsonb`),
+		undoneCount: integer('undone_count').notNull().default(0),
+		undoSkippedCount: integer('undo_skipped_count').notNull().default(0),
+		undoneByUserId: text('undone_by_user_id').references(() => user.id, {
+			onDelete: 'set null'
+		}),
+		undoneAt: timestamp('undone_at', { withTimezone: true }),
 		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 	},
 	(table) => [
 		check('import_batch_source_type_check', sql`${table.sourceType} in ('csv', 'ofx')`),
 		index('import_batch_workspace_created_idx').on(table.workspaceId, table.createdAt),
-		index('import_batch_uploaded_by_idx').on(table.uploadedByUserId)
+		index('import_batch_uploaded_by_idx').on(table.uploadedByUserId),
+		index('import_batch_undone_by_idx').on(table.undoneByUserId)
+	]
+);
+
+export const importPreview = pgTable(
+	'import_preview',
+	{
+		id: bigserial('id', { mode: 'number' }).primaryKey(),
+		workspaceId: bigint('workspace_id', { mode: 'number' })
+			.notNull()
+			.references(() => workspace.id, { onDelete: 'cascade' }),
+		uploadedByUserId: text('uploaded_by_user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		sourceType: text('source_type').notNull(),
+		fileName: text('file_name').notNull(),
+		sourceChecksum: char('source_checksum', { length: 64 }).notNull(),
+		rowCount: integer('row_count').notNull(),
+		analysis: jsonb('analysis').$type<ImportPreviewAnalysis>().notNull(),
+		status: text('status').notNull().default('pending'),
+		confirmedBatchId: bigint('confirmed_batch_id', { mode: 'number' }).references(
+			() => importBatch.id,
+			{ onDelete: 'set null' }
+		),
+		expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		confirmedAt: timestamp('confirmed_at', { withTimezone: true })
+	},
+	(table) => [
+		check('import_preview_source_type_check', sql`${table.sourceType} in ('csv', 'ofx')`),
+		check('import_preview_status_check', sql`${table.status} in ('pending', 'confirmed')`),
+		index('import_preview_workspace_user_idx').on(table.workspaceId, table.uploadedByUserId),
+		index('import_preview_expires_idx').on(table.expiresAt),
+		index('import_preview_confirmed_batch_idx').on(table.confirmedBatchId)
 	]
 );
 
@@ -570,6 +631,7 @@ export const expense = pgTable(
 		importBatchId: bigint('import_batch_id', { mode: 'number' }).references(() => importBatch.id, {
 			onDelete: 'set null'
 		}),
+		importBaselineHash: char('import_baseline_hash', { length: 64 }),
 		installmentGroupId: text('installment_group_id'),
 		installmentNumber: integer('installment_number'),
 		installmentsTotal: integer('installments_total'),
@@ -987,6 +1049,21 @@ export const importBatchRelations = relations(importBatch, ({ one, many }) => ({
 		references: [user.id]
 	}),
 	expenses: many(expense)
+}));
+
+export const importPreviewRelations = relations(importPreview, ({ one }) => ({
+	workspace: one(workspace, {
+		fields: [importPreview.workspaceId],
+		references: [workspace.id]
+	}),
+	uploadedBy: one(user, {
+		fields: [importPreview.uploadedByUserId],
+		references: [user.id]
+	}),
+	confirmedBatch: one(importBatch, {
+		fields: [importPreview.confirmedBatchId],
+		references: [importBatch.id]
+	})
 }));
 
 export * from './auth.schema';
