@@ -19,6 +19,7 @@
 		"format": "prettier --write .",
 		"test:unit": "vitest --run",
 		"test:coverage": "vitest --run --coverage",
+		"test:migrations": "scripts/test-migration-upgrade.sh",
 		"test": "pnpm test:unit && pnpm test:e2e",
 		"test:e2e": "playwright test && playwright test --config playwright.registration-lockdown.config.ts && playwright test --config playwright.email-verification.config.ts",
 		"test:visual": "playwright test --config playwright.visual.config.ts",
