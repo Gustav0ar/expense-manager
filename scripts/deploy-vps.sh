@@ -219,8 +219,10 @@ write_compose_secret_file() {
 
 write_compose_secret_files() {
 	write_compose_secret_file better_auth_secret BETTER_AUTH_SECRET required
+	write_compose_secret_file better_auth_secret_previous BETTER_AUTH_SECRET_PREVIOUS optional
 	write_compose_secret_file postgres_password POSTGRES_PASSWORD required
 	write_compose_secret_file restic_password RESTIC_PASSWORD optional
+	upsert_env_var BETTER_AUTH_SECRET_PREVIOUS_SOURCE_FILE ./secrets/better_auth_secret_previous
 }
 
 ensure_legacy_auth_secret() {

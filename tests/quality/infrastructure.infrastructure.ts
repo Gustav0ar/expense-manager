@@ -44,6 +44,59 @@ async function waitForHealthFailure(baseURL: string, child: ChildProcess, logs: 
 	throw new Error(`Timed out waiting for failed health check: ${lastError}\n${logs.join('')}`);
 }
 
+type BackgroundJobHealth = {
+	status: string;
+	running: boolean;
+};
+
+type HealthResponse = {
+	ok: boolean;
+	backgroundJobs: {
+		status: string;
+		jobs: Record<string, BackgroundJobHealth>;
+	};
+};
+
+async function waitForBackgroundJobs(
+	baseURL: string,
+	child: ChildProcess,
+	logs: string[]
+): Promise<HealthResponse> {
+	const deadline = Date.now() + 20_000;
+	let lastHealth = 'No health response received.';
+
+	while (Date.now() < deadline) {
+		if (child.exitCode !== null) {
+			throw new Error(
+				`Production process exited early with code ${child.exitCode}.\n${logs.join('')}`
+			);
+		}
+
+		try {
+			const response = await fetch(`${baseURL}/api/health`);
+			const body = (await response.json()) as HealthResponse;
+			lastHealth = JSON.stringify(body);
+			const jobs = Object.values(body.backgroundJobs.jobs);
+			if (
+				response.ok &&
+				body.ok &&
+				body.backgroundJobs.status === 'ok' &&
+				jobs.every((job) => job.status === 'ok' && !job.running)
+			) {
+				return body;
+			}
+		} catch (error) {
+			lastHealth = error instanceof Error ? error.message : String(error);
+		}
+
+		await delay(100);
+	}
+
+	throw new Error(
+		`Timed out waiting for background jobs to finish: ${lastHealth}\n${logs.join('')}`
+	);
+}
+
 async function stopChild(child: ChildProcess) {
 	if (child.exitCode !== null) return child.exitCode;
 	child.kill('SIGTERM');
@@ -183,9 +236,8 @@ test('runs recurring work at production startup with no traffic and a one-connec
 		}
 		expect(materialized, logs.join('')).toBe(true);
 
-		const health = await fetch(`${baseURL}/api/health`);
-		expect(health.ok).toBe(true);
-		expect(await health.json()).toEqual(
+		const health = await waitForBackgroundJobs(baseURL, child, logs);
+		expect(health).toEqual(
 			expect.objectContaining({
 				ok: true,
 				backgroundJobs: expect.objectContaining({

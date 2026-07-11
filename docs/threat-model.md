@@ -59,23 +59,26 @@ Out of scope:
 
 ## Key Threats And Controls
 
-| Threat                                   | Primary controls                                                                               |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Credential stuffing or brute-force login | Persistent rate limiting, secure password handling, optional MFA, audit logs                   |
-| Unverified or abusive registration       | Email verification, registration lock-down, resend limits, stale unverified-user cleanup       |
-| Cross-workspace data access              | Workspace-scoped service queries, RBAC, route/action tests                                     |
-| Privilege escalation through invites     | Role-specific invite handling, authorization checks, role E2E coverage                         |
-| Token leakage                            | Hashed invite/reset/verification tokens, short token lifetime, secret redaction in docs        |
-| Attachment abuse                         | Size limit, MIME allowlist, authenticated download, deleted-expense download block             |
-| Sensitive log exposure                   | No request body logging, no password/token/email/financial value logging, short Loki retention |
-| Public exposure of management tools      | Tailscale-only binding, no public Traefik routes, ACL tests                                    |
-| Broken deploy                            | Pre-deploy dump, automatic image rollback, post-deploy smoke checks                            |
-| Database loss or corruption              | Encrypted off-VPS restic backups, restore tests, checksums, disaster recovery runbook          |
-| Backup repository corruption             | Periodic restic structural checks and restore-test timers                                      |
-| Silent monitoring failure                | Alertmanager fire drill, post-reboot healthcheck, stale metric alerts                          |
-| DNS/TLS/Traefik failure                  | Blackbox DNS/TLS probes, Traefik container alerts                                              |
-| NAS outage                               | App remains self-contained on VPS, backup stale alerts, retryable backup service               |
-| Compromised Docker management UI         | Tailscale-only access, strong generated credentials, limited exposure, operational audit       |
+| Threat                                   | Primary controls                                                                                 |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Credential stuffing or brute-force login | Persistent rate limiting, secure password handling, optional MFA, audit logs                     |
+| Unverified or abusive registration       | Email verification, registration lock-down, resend limits, stale unverified-user cleanup         |
+| Cross-workspace data access              | Workspace-scoped service queries, RBAC, route/action tests                                       |
+| Privilege escalation through invites     | Role-specific invite handling, authorization checks, role E2E coverage                           |
+| Token leakage                            | Hashed invite/reset/verification tokens, authenticated encrypted invite outbox, short lifetime   |
+| Invite provider timeout                  | Stable token across retry, explicit-only rotation, bounded claim leases and attempts             |
+| Duplicate multi-instance invite send     | Advisory-locked cycles, `SKIP LOCKED` row claims, claim-token ownership checks                   |
+| Outbox/database disclosure               | HKDF-separated AES-GCM key, ciphertext versioning, no plaintext token or detailed provider error |
+| Attachment abuse                         | Size limit, MIME allowlist, authenticated download, deleted-expense download block               |
+| Sensitive log exposure                   | No request body logging, no password/token/email/financial value logging, short Loki retention   |
+| Public exposure of management tools      | Tailscale-only binding, no public Traefik routes, ACL tests                                      |
+| Broken deploy                            | Pre-deploy dump, automatic image rollback, post-deploy smoke checks                              |
+| Database loss or corruption              | Encrypted off-VPS restic backups, restore tests, checksums, disaster recovery runbook            |
+| Backup repository corruption             | Periodic restic structural checks and restore-test timers                                        |
+| Silent monitoring failure                | Alertmanager fire drill, post-reboot healthcheck, stale metric alerts                            |
+| DNS/TLS/Traefik failure                  | Blackbox DNS/TLS probes, Traefik container alerts                                                |
+| NAS outage                               | App remains self-contained on VPS, backup stale alerts, retryable backup service                 |
+| Compromised Docker management UI         | Tailscale-only access, strong generated credentials, limited exposure, operational audit         |
 
 ## Residual Risks
 
@@ -86,6 +89,13 @@ Out of scope:
   limited to any separate private copies of secrets and snapshots.
 - Email delivery depends on the provider accepting the sender domain and API
   credentials.
+- A provider may accept an invitation email and time out before acknowledging it.
+  A retry can send a duplicate, but both messages contain the same valid link.
+- Database and current application-secret compromise together expose pending
+  invitation tokens. Database compromise alone does not.
+- Removing an old application secret before the documented overlap ends makes
+  its pending ciphertext undecryptable; explicit resend recovers delivery with a
+  newly encrypted token.
 
 ## Required Review Triggers
 

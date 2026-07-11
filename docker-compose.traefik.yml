@@ -24,6 +24,7 @@ services:
       ORIGIN: ${ORIGIN:?set ORIGIN}
       TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
       BETTER_AUTH_SECRET_FILE: /run/secrets/better_auth_secret
+      BETTER_AUTH_SECRET_PREVIOUS_FILE: /run/secrets/better_auth_secret_previous
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET_COMPAT:-}
       REQUIRE_EMAIL_VERIFICATION: ${REQUIRE_EMAIL_VERIFICATION:-true}
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
@@ -63,6 +64,7 @@ services:
         condition: service_healthy
     secrets:
       - better_auth_secret
+      - better_auth_secret_previous
       - postgres_password
     volumes:
       - uploads:/app/uploads
@@ -224,6 +226,8 @@ networks:
 secrets:
   better_auth_secret:
     file: ${BETTER_AUTH_SECRET_SOURCE_FILE:-./secrets/better_auth_secret}
+  better_auth_secret_previous:
+    file: ${BETTER_AUTH_SECRET_PREVIOUS_SOURCE_FILE:-/dev/null}
   postgres_password:
     file: ${POSTGRES_PASSWORD_SOURCE_FILE:-./secrets/postgres_password}
   restic_password:

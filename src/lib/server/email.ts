@@ -9,6 +9,7 @@ type MailInput = {
 	text: string;
 	html?: string;
 	customId?: string;
+	redactBodyInLogs?: boolean;
 };
 
 type MailProvider = 'auto' | 'mailjet' | 'sender' | 'smtp' | 'log';
@@ -133,7 +134,7 @@ function logEmail(input: MailInput) {
 	console.info('[email:dev]', {
 		to: input.to,
 		subject: input.subject,
-		text: input.text
+		text: input.redactBodyInLogs ? '[redacted sensitive email body]' : input.text
 	});
 }
 
@@ -272,8 +273,9 @@ export async function sendInvitationEmail(
 	const safeWorkspaceName = escapeHtml(safeTextWorkspaceName);
 	const textUrl = sanitizeEmailText(url);
 	const safeUrl = escapeHtml(textUrl);
-	await sendMail({
+	return sendMail({
 		to,
+		redactBodyInLogs: true,
 		subject: translate(locale, 'Invite to {workspace}', { workspace: safeTextWorkspaceName }),
 		text: translate(locale, 'You received an invite to access {workspace}. Open: {url}', {
 			workspace: safeTextWorkspaceName,

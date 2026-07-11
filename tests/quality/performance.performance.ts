@@ -25,7 +25,10 @@ const assetBudget: AssetBudget = {
 	largestJsBytes: 90 * kib,
 	totalCssBytes: 80 * kib,
 	totalGzipJsBytes: 140 * kib,
-	totalJsBytes: 380 * kib
+	// Durable invitation delivery adds localized status and resend UX. The previous
+	// 380 KiB ceiling was 389,120 bytes; the reviewed production build measured
+	// 391,433 bytes. Keep the gzip, largest-asset and runtime budgets unchanged.
+	totalJsBytes: 384 * kib
 };
 
 const runtimeBudget: RuntimeBudget = {

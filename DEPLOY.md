@@ -44,24 +44,25 @@ restricted tag such as `tag:ci`.
 If `VPS_ENV_FILE` is not set, the deploy workflow builds the VPS `.env` from
 individual protected environment secrets:
 
-| Secret                  | Notes                                                                           |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| `DOMAIN_NAME`           | Bare production hostname.                                                       |
-| `ORIGIN`                | Full production origin.                                                         |
-| `BETTER_AUTH_SECRET`    | High-entropy app secret.                                                        |
-| `POSTGRES_PASSWORD`     | Database password.                                                              |
-| `RESTIC_REPOSITORY`     | Remote off-VPS restic repository. Required when `BACKUP_ENABLED=true`.          |
-| `RESTIC_PASSWORD`       | High-entropy restic repository password. Required when `BACKUP_ENABLED=true`.   |
-| `MAILJET_API_KEY`       | Mailjet transactional email API key. Required when `EMAIL_PROVIDER=mailjet`.    |
-| `MAILJET_SECRET_KEY`    | Mailjet transactional email secret key. Required when `EMAIL_PROVIDER=mailjet`. |
-| `MAILJET_FROM`          | Verified Mailjet sender address, optionally with name.                          |
-| `SENDER_API_TOKEN`      | Legacy Sender transactional email API token.                                    |
-| `SENDER_FROM`           | Legacy Sender verified sender address, optionally with name.                    |
-| `TRUSTED_ORIGINS`       | Optional comma-separated extra origins.                                         |
-| `AWS_ACCESS_KEY_ID`     | Required only for S3-compatible restic.                                         |
-| `AWS_SECRET_ACCESS_KEY` | Required only for S3-compatible restic.                                         |
-| `AWS_DEFAULT_REGION`    | Optional S3-compatible region.                                                  |
-| `SMTP_*`                | Optional SMTP fallback values.                                                  |
+| Secret                        | Notes                                                                               |
+| ----------------------------- | ----------------------------------------------------------------------------------- |
+| `DOMAIN_NAME`                 | Bare production hostname.                                                           |
+| `ORIGIN`                      | Full production origin.                                                             |
+| `BETTER_AUTH_SECRET`          | High-entropy app secret.                                                            |
+| `BETTER_AUTH_SECRET_PREVIOUS` | Optional old application secret used only during a bounded invitation-key rotation. |
+| `POSTGRES_PASSWORD`           | Database password.                                                                  |
+| `RESTIC_REPOSITORY`           | Remote off-VPS restic repository. Required when `BACKUP_ENABLED=true`.              |
+| `RESTIC_PASSWORD`             | High-entropy restic repository password. Required when `BACKUP_ENABLED=true`.       |
+| `MAILJET_API_KEY`             | Mailjet transactional email API key. Required when `EMAIL_PROVIDER=mailjet`.        |
+| `MAILJET_SECRET_KEY`          | Mailjet transactional email secret key. Required when `EMAIL_PROVIDER=mailjet`.     |
+| `MAILJET_FROM`                | Verified Mailjet sender address, optionally with name.                              |
+| `SENDER_API_TOKEN`            | Legacy Sender transactional email API token.                                        |
+| `SENDER_FROM`                 | Legacy Sender verified sender address, optionally with name.                        |
+| `TRUSTED_ORIGINS`             | Optional comma-separated extra origins.                                             |
+| `AWS_ACCESS_KEY_ID`           | Required only for S3-compatible restic.                                             |
+| `AWS_SECRET_ACCESS_KEY`       | Required only for S3-compatible restic.                                             |
+| `AWS_DEFAULT_REGION`          | Optional S3-compatible region.                                                      |
+| `SMTP_*`                      | Optional SMTP fallback values.                                                      |
 
 ### Environment Variables
 
@@ -136,6 +137,7 @@ ORIGIN=https://finance.example.com
 TRUSTED_ORIGINS=
 
 BETTER_AUTH_SECRET=<openssl rand -base64 32>
+BETTER_AUTH_SECRET_PREVIOUS=
 REQUIRE_EMAIL_VERIFICATION=true
 ALLOW_REGISTRATION=false
 
@@ -203,6 +205,30 @@ or a port. `ORIGIN` is the full browser origin.
 
 Use Mailjet in production if users need password reset, invitations or email
 verification. See [`docs/email.md`](docs/email.md) for the Mailjet setup.
+
+### Rotate the application secret without stranding invitations
+
+Queued invitation tokens are encrypted with a key derived from the application
+secret. Rotate with an overlap:
+
+1. In the protected `production` environment, set
+   `BETTER_AUTH_SECRET_PREVIOUS` to the exact current value of
+   `BETTER_AUTH_SECRET`.
+2. Replace `BETTER_AUTH_SECRET` with a newly generated high-entropy value, then
+   run the normal reviewed deployment. The workflow never writes either value to
+   command output. On the VPS, `deploy-vps.sh` writes separate private Compose
+   secret files and mounts the previous one at
+   `/run/secrets/better_auth_secret_previous`.
+3. Verify `/api/health` and accept a queued pre-rotation invitation.
+4. Keep the old value for at least seven days, or explicitly resend all remaining
+   pending invitations.
+5. Delete the protected `BETTER_AUTH_SECRET_PREVIOUS` secret and deploy again.
+   The optional secret file becomes empty and the application drops the old key.
+
+If `VPS_ENV_FILE` mode is used, perform the same steps by keeping both keys in
+the private file during overlap and removing only
+`BETTER_AUTH_SECRET_PREVIOUS` afterward. Never remove the old value before the
+new container has successfully started with both keys.
 
 The workflow preserves deploy-generated state keys from the existing VPS `.env`
 when it refreshes the file from GitHub secrets:

@@ -34,6 +34,16 @@
 		return map[status] ?? status;
 	}
 
+	function translateDeliveryStatus(status: string | null) {
+		const map: Record<string, string> = {
+			pending: t('Queued'),
+			sending: t('Sending'),
+			sent: t('Sent'),
+			failed: t('Retry scheduled')
+		};
+		return status ? (map[status] ?? status) : t('Legacy invitation');
+	}
+
 	async function copyInviteUrl() {
 		if (!form?.inviteUrl) return;
 		try {
@@ -88,6 +98,9 @@
 
 	{#if form?.message}
 		<p class="notice danger" role="alert">{form.message}</p>
+	{/if}
+	{#if form?.notice}
+		<p class="notice success" role="status">{form.notice}</p>
 	{/if}
 
 	{#if form?.inviteUrl}
@@ -189,6 +202,9 @@
 							<th>{t('Email')}</th>
 							<th>{t('Role')}</th>
 							<th>{t('Status')}</th>
+							<th>{t('Email delivery')}</th>
+							<th>{t('Attempts')}</th>
+							<th>{t('Actions')}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -197,6 +213,18 @@
 								<td data-label={t('Email')}>{invitation.email}</td>
 								<td data-label={t('Role')}>{translateRole(invitation.role)}</td>
 								<td data-label={t('Status')}>{translateInvitationStatus(invitation.status)}</td>
+								<td data-label={t('Email delivery')}>
+									{translateDeliveryStatus(invitation.deliveryStatus)}
+								</td>
+								<td data-label={t('Attempts')}>{invitation.deliveryAttemptCount ?? 0}</td>
+								<td data-label={t('Actions')}>
+									{#if data.canManageInvitations && invitation.status === 'pending'}
+										<form method="post" action="?/resend" class="inline-form">
+											<input type="hidden" name="id" value={invitation.id} />
+											<button class="button secondary" type="submit">{t('Resend')}</button>
+										</form>
+									{/if}
+								</td>
 							</tr>
 						{/each}
 					</tbody>

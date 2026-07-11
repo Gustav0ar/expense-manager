@@ -406,8 +406,12 @@ describe('email helpers', () => {
 				expect.objectContaining({
 					to: 'new@example.com',
 					subject: 'Convite para Empresa Financeira',
-					text: expect.stringContaining('Você recebeu um convite')
+					text: '[redacted sensitive email body]'
 				})
+			);
+			expect(log).not.toHaveBeenCalledWith(
+				'[email:dev]',
+				expect.objectContaining({ text: expect.stringContaining('/invite/abc') })
 			);
 		} finally {
 			if (previousDeliveryMode === undefined) {

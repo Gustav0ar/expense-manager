@@ -6,17 +6,23 @@ import {
 	expense,
 	workspace,
 	workspaceInvitation,
+	workspaceInvitationDelivery,
 	workspaceMember,
 	user as authUser
 } from '$lib/server/db/schema';
 import type { Role } from '$lib/server/security/roles';
 import { canManageMembers, canManageWorkspace } from '$lib/server/security/roles';
 import { randomToken, sha256 } from '$lib/server/utils/crypto';
-import { sendInvitationEmail } from '$lib/server/email';
 import { insertAuditEvent } from './audit';
 import { env } from '$env/dynamic/private';
 import type { SupportedLocale } from '$lib/i18n';
 import { translate } from '$lib/i18n';
+import { deliverInvitation } from './invitation-delivery';
+import {
+	decryptInvitationToken,
+	encryptInvitationToken,
+	InvitationTokenDecryptionError
+} from './invitation-token';
 
 export type WorkspaceContext = {
 	userId: string;
@@ -216,10 +222,17 @@ export async function listInvitations(context: WorkspaceContext) {
 			email: workspaceInvitation.email,
 			role: workspaceInvitation.role,
 			status: workspaceInvitation.status,
+			deliveryStatus: workspaceInvitationDelivery.status,
+			deliveryAttemptCount: workspaceInvitationDelivery.attemptCount,
+			deliveryErrorCategory: workspaceInvitationDelivery.lastErrorCategory,
 			expiresAt: workspaceInvitation.expiresAt,
 			createdAt: workspaceInvitation.createdAt
 		})
 		.from(workspaceInvitation)
+		.leftJoin(
+			workspaceInvitationDelivery,
+			eq(workspaceInvitationDelivery.invitationId, workspaceInvitation.id)
+		)
 		.where(eq(workspaceInvitation.workspaceId, context.workspaceId))
 		.orderBy(desc(workspaceInvitation.createdAt));
 }
@@ -234,63 +247,191 @@ export async function inviteMember(
 	const email = input.email.trim().toLowerCase();
 	const token = randomToken();
 	const tokenHash = sha256(token);
+	const encryptedToken = encryptInvitationToken(token, tokenHash);
 	const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7);
-	const expiresAtIso = expiresAt.toISOString();
 	const origin = env.ORIGIN || 'http://localhost:5173';
-	const url = `${origin}/invite/${token}`;
 
 	const result = await db.transaction(async (tx) => {
-		const [invitation] = await tx.execute<{ id: number }>(sql`
-			insert into "workspace_invitation" (
-				"workspace_id",
-				"email",
-				"role",
-				"token_hash",
-				"status",
-				"invited_by_user_id",
-				"expires_at",
-				"created_at"
+		await tx.execute(sql`
+			with expired as (
+				update "workspace_invitation"
+				set "status" = 'expired'
+				where "workspace_id" = ${context.workspaceId}
+					and lower("email") = ${email}
+					and "status" = 'pending'
+					and "expires_at" <= now()
+				returning "id"
 			)
-			values (
-				${context.workspaceId},
-				${email},
-				${input.role},
-				${tokenHash},
-				'pending',
-				${context.userId},
-				${expiresAtIso}::timestamptz,
-				now()
-			)
-			on conflict ("workspace_id", lower("email")) where "status" = 'pending'
-			do update set
-				"role" = excluded."role",
-				"token_hash" = excluded."token_hash",
-				"invited_by_user_id" = excluded."invited_by_user_id",
-				"expires_at" = excluded."expires_at",
-				"created_at" = now()
-			returning "id"
+			update "workspace_invitation_delivery" d
+			set "status" = 'failed',
+				"claim_token" = null,
+				"claim_expires_at" = null,
+				"last_error_category" = 'expired',
+				"updated_at" = now()
+			where d."invitation_id" in (select "id" from expired)
 		`);
 
-		const invitationId = Number(invitation.id);
+		const [created] = await tx
+			.insert(workspaceInvitation)
+			.values({
+				workspaceId: context.workspaceId,
+				email,
+				role: input.role,
+				tokenHash,
+				status: 'pending',
+				invitedByUserId: context.userId,
+				expiresAt
+			})
+			.onConflictDoNothing()
+			.returning({ id: workspaceInvitation.id });
 
-		await tx.insert(auditEvent).values({
-			workspaceId: context.workspaceId,
-			actorUserId: context.userId,
-			action: 'workspace_member.invited',
-			entityType: 'workspace_invitation',
-			entityId: String(invitationId),
-			metadata: { role: input.role, email }
-		});
+		if (created) {
+			await tx.insert(workspaceInvitationDelivery).values({
+				invitationId: created.id,
+				encryptedToken,
+				locale: context.locale
+			});
 
-		return { invitationId, url };
+			await insertAuditEvent(tx, {
+				workspaceId: context.workspaceId,
+				actorUserId: context.userId,
+				action: 'workspace_member.invited',
+				entityType: 'workspace_invitation',
+				entityId: created.id,
+				metadata: { role: input.role, email }
+			});
+
+			return { invitationId: created.id, token, created: true };
+		}
+
+		const [existing] = await tx
+			.select({
+				id: workspaceInvitation.id,
+				tokenHash: workspaceInvitation.tokenHash,
+				encryptedToken: workspaceInvitationDelivery.encryptedToken
+			})
+			.from(workspaceInvitation)
+			.leftJoin(
+				workspaceInvitationDelivery,
+				eq(workspaceInvitationDelivery.invitationId, workspaceInvitation.id)
+			)
+			.where(
+				and(
+					eq(workspaceInvitation.workspaceId, context.workspaceId),
+					sql`lower(${workspaceInvitation.email}) = ${email}`,
+					eq(workspaceInvitation.status, 'pending')
+				)
+			)
+			.limit(1);
+
+		if (!existing) throw new Error('Invitation conflict could not be resolved.');
+		let existingToken: string | null = null;
+		if (existing.encryptedToken) {
+			try {
+				existingToken = decryptInvitationToken(existing.encryptedToken, existing.tokenHash);
+			} catch (tokenError) {
+				if (!(tokenError instanceof InvitationTokenDecryptionError)) throw tokenError;
+			}
+		}
+		return {
+			invitationId: existing.id,
+			token: existingToken,
+			created: false
+		};
 	});
 
-	// Send the email after the transaction commits so a failed email
-	// cannot roll back the invitation row, and a rolled-back transaction
-	// does not send an email for a non-existent record.
-	await sendInvitationEmail(email, context.workspaceName, url, context.locale);
+	const delivery = result.created ? await deliverInvitation(result.invitationId, { origin }) : null;
 
-	return result;
+	return {
+		invitationId: result.invitationId,
+		url: result.token ? `${origin.replace(/\/$/, '')}/invite/${result.token}` : null,
+		created: result.created,
+		deliveryStatus:
+			delivery == null
+				? 'unchanged'
+				: delivery.sent > 0
+					? 'sent'
+					: delivery.failed > 0
+						? 'failed'
+						: 'in_progress'
+	};
+}
+
+export async function resendInvitation(context: WorkspaceContext, invitationId: number) {
+	if (!canManageMembers(context.role))
+		throw error(403, translate(context.locale, 'Permission denied.'));
+
+	const token = randomToken();
+	const tokenHash = sha256(token);
+	const encryptedToken = encryptInvitationToken(token, tokenHash);
+	const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7);
+	const origin = env.ORIGIN || 'http://localhost:5173';
+
+	await db.transaction(async (tx) => {
+		const [invitation] = await tx.execute<{ id: number; email: string; role: string }>(sql`
+			select "id", "email", "role"
+			from "workspace_invitation"
+			where "id" = ${invitationId}
+				and "workspace_id" = ${context.workspaceId}
+				and "status" = 'pending'
+				and "expires_at" > now()
+			for update
+		`);
+		if (!invitation)
+			throw error(404, translate(context.locale, 'Invitation not found or expired.'));
+		const lockedInvitationId = Number(invitation.id);
+
+		await tx
+			.update(workspaceInvitation)
+			.set({
+				tokenHash,
+				invitedByUserId: context.userId,
+				expiresAt,
+				createdAt: new Date()
+			})
+			.where(eq(workspaceInvitation.id, lockedInvitationId));
+
+		await tx
+			.insert(workspaceInvitationDelivery)
+			.values({
+				invitationId,
+				encryptedToken,
+				locale: context.locale
+			})
+			.onConflictDoUpdate({
+				target: workspaceInvitationDelivery.invitationId,
+				set: {
+					encryptedToken,
+					locale: context.locale,
+					status: 'pending',
+					claimToken: null,
+					claimExpiresAt: null,
+					attemptCount: 0,
+					lastErrorCategory: null,
+					provider: null,
+					providerMessageId: null,
+					providerMessageUuid: null,
+					sentAt: null,
+					updatedAt: new Date()
+				}
+			});
+
+		await insertAuditEvent(tx, {
+			workspaceId: context.workspaceId,
+			actorUserId: context.userId,
+			action: 'workspace_invitation.resent',
+			entityType: 'workspace_invitation',
+			entityId: invitationId,
+			metadata: { role: invitation.role, email: invitation.email }
+		});
+	});
+
+	const delivery = await deliverInvitation(invitationId, { origin });
+	return {
+		invitationId,
+		url: `${origin.replace(/\/$/, '')}/invite/${token}`,
+		deliveryStatus: delivery.sent > 0 ? 'sent' : delivery.failed > 0 ? 'failed' : 'in_progress'
+	};
 }
 
 export async function changeMemberRole(

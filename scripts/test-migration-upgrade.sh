@@ -78,6 +78,59 @@ assert_money_constraints() {
 	fi
 }
 
+assert_invitation_delivery_outbox() {
+	local target_url="$1"
+	local target_label="$2"
+	local schema_count
+	schema_count="$(
+		psql "${target_url}" -v ON_ERROR_STOP=1 -Atqc \
+			"SELECT
+			   (SELECT count(*)
+			    FROM information_schema.columns
+			    WHERE table_schema = 'public'
+			      AND table_name = 'workspace_invitation_delivery'
+			      AND column_name IN (
+			        'invitation_id', 'encrypted_token', 'status', 'claim_token',
+			        'claim_expires_at', 'attempt_count', 'last_error_category'
+			      ))
+			 + (SELECT count(*)
+			    FROM pg_constraint
+			    WHERE conname IN (
+			      'workspace_invitation_delivery_status_check',
+			      'workspace_invitation_delivery_attempt_count_check',
+			      'workspace_invitation_delivery_error_category_check'
+			    )
+			      AND contype = 'c'
+			      AND convalidated)
+			 + (SELECT count(*)
+			    FROM pg_indexes
+			    WHERE schemaname = 'public'
+			      AND tablename = 'workspace_invitation_delivery'
+			      AND indexname IN (
+			        'workspace_invitation_delivery_invitation_unique_idx',
+			        'workspace_invitation_delivery_claim_expires_at_idx'
+			      ))"
+	)"
+	if [ "${schema_count}" != "12" ]; then
+		echo "${target_label} does not have the durable invitation outbox schema." >&2
+		exit 1
+	fi
+
+	local plaintext_column_count
+	plaintext_column_count="$(
+		psql "${target_url}" -v ON_ERROR_STOP=1 -Atqc \
+			"SELECT count(*)
+			 FROM information_schema.columns
+			 WHERE table_schema = 'public'
+			   AND table_name = 'workspace_invitation_delivery'
+			   AND column_name IN ('token', 'raw_token', 'plaintext_token')"
+	)"
+	if [ "${plaintext_column_count}" != "0" ]; then
+		echo "${target_label} exposes a plaintext invitation token column." >&2
+		exit 1
+	fi
+}
+
 mkdir -p "${legacy_migrations}/meta"
 cp "${repo_root}"/drizzle/000[0-8]_*.sql "${legacy_migrations}/"
 
@@ -138,6 +191,7 @@ fi
 echo "Reapplying the complete migration set to verify idempotency."
 DATABASE_URL="${upgrade_database_url}" pnpm exec drizzle-kit migrate --config "${repo_root}/drizzle.config.ts"
 assert_money_constraints "${upgrade_database_url}" "Upgraded database"
+assert_invitation_delivery_outbox "${upgrade_database_url}" "Upgraded database"
 
 fresh_database_created=true
 createdb --maintenance-db="${maintenance_url}" "${fresh_database}"
@@ -157,6 +211,7 @@ fi
 echo "Reapplying the complete migration set to the fresh database."
 DATABASE_URL="${fresh_database_url}" pnpm exec drizzle-kit migrate --config "${repo_root}/drizzle.config.ts"
 assert_money_constraints "${fresh_database_url}" "Fresh database"
+assert_invitation_delivery_outbox "${fresh_database_url}" "Fresh database"
 
 cleanup
 trap - EXIT INT TERM

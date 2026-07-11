@@ -18,14 +18,19 @@ describe('BackgroundJobCoordinator', () => {
 			.fn()
 			.mockResolvedValue({ processed: 0, sent: 0, failed: 0, errors: 0 });
 		const emailDeliveryCleanup = vi.fn().mockResolvedValue({ deletedEvents: 0 });
+		const invitationDeliveryScheduler = vi
+			.fn()
+			.mockResolvedValue({ processed: 0, sent: 0, failed: 0 });
 		const coordinator = new BackgroundJobCoordinator({
 			verificationCleanup,
 			recurringScheduler,
 			budgetAlertScheduler,
+			invitationDeliveryScheduler,
 			emailDeliveryCleanup,
 			verificationIntervalMs: 100,
 			recurringIntervalMs: 300,
 			budgetAlertIntervalMs: 500,
+			invitationDeliveryIntervalMs: 100,
 			emailDeliveryCleanupIntervalMs: 700
 		});
 
@@ -35,6 +40,7 @@ describe('BackgroundJobCoordinator', () => {
 		expect(recurringScheduler).toHaveBeenCalledTimes(1);
 		expect(budgetAlertScheduler).toHaveBeenCalledTimes(1);
 		expect(emailDeliveryCleanup).toHaveBeenCalledTimes(1);
+		expect(invitationDeliveryScheduler).toHaveBeenCalledTimes(1);
 
 		await vi.advanceTimersByTimeAsync(300);
 		await coordinator.waitForIdle();
@@ -42,6 +48,7 @@ describe('BackgroundJobCoordinator', () => {
 		expect(recurringScheduler).toHaveBeenCalledTimes(2);
 		expect(budgetAlertScheduler).toHaveBeenCalledTimes(1);
 		expect(emailDeliveryCleanup).toHaveBeenCalledTimes(1);
+		expect(invitationDeliveryScheduler).toHaveBeenCalledTimes(4);
 		expect(coordinator.health().status).toBe('ok');
 		expect(coordinator.health(new Date('2026-07-09T12:00:03.000Z').getTime()).status).toBe(
 			'degraded'
@@ -56,6 +63,7 @@ describe('BackgroundJobCoordinator', () => {
 			verificationCleanup,
 			recurringScheduler,
 			budgetAlertScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			invitationDeliveryScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			emailDeliveryCleanup: vi.fn().mockResolvedValue({ skipped: true }),
 			verificationIntervalMs: 100,
 			recurringIntervalMs: 100
@@ -84,6 +92,7 @@ describe('BackgroundJobCoordinator', () => {
 			verificationCleanup,
 			recurringScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			budgetAlertScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			invitationDeliveryScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			emailDeliveryCleanup: vi.fn().mockResolvedValue({ skipped: true }),
 			verificationIntervalMs: 100,
 			recurringIntervalMs: 100,
@@ -112,10 +121,12 @@ describe('BackgroundJobCoordinator', () => {
 		const recurringScheduler = vi.fn().mockResolvedValue({ skipped: true });
 		const budgetAlertScheduler = vi.fn().mockResolvedValue({ skipped: true });
 		const emailDeliveryCleanup = vi.fn().mockResolvedValue({ skipped: true });
+		const invitationDeliveryScheduler = vi.fn().mockResolvedValue({ skipped: true });
 		const coordinator = new BackgroundJobCoordinator({
 			verificationCleanup,
 			recurringScheduler,
 			budgetAlertScheduler,
+			invitationDeliveryScheduler,
 			emailDeliveryCleanup,
 			verificationIntervalMs: 100,
 			recurringIntervalMs: 100
@@ -127,5 +138,40 @@ describe('BackgroundJobCoordinator', () => {
 		expect(recurringScheduler).toHaveBeenCalledOnce();
 		expect(budgetAlertScheduler).toHaveBeenCalledOnce();
 		expect(emailDeliveryCleanup).toHaveBeenCalledOnce();
+		expect(invitationDeliveryScheduler).toHaveBeenCalledOnce();
+	});
+
+	it('surfaces durable delivery failures and clears the degraded result on retry', async () => {
+		const invitationDeliveryScheduler = vi
+			.fn()
+			.mockResolvedValueOnce({ processed: 1, sent: 0, failed: 1 })
+			.mockResolvedValueOnce({ processed: 1, sent: 1, failed: 0 });
+		const coordinator = new BackgroundJobCoordinator({
+			verificationCleanup: vi.fn().mockResolvedValue({ deletedUsers: 0 }),
+			recurringScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			budgetAlertScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			invitationDeliveryScheduler,
+			emailDeliveryCleanup: vi.fn().mockResolvedValue({ skipped: true }),
+			invitationDeliveryIntervalMs: 100
+		});
+
+		coordinator.start(true);
+		await coordinator.waitForIdle();
+		expect(coordinator.health().jobs.invitationDeliveryScheduler).toMatchObject({
+			status: 'degraded',
+			attempts: 1,
+			failures: 1,
+			lastFailedCount: 1
+		});
+
+		await vi.advanceTimersByTimeAsync(100);
+		await coordinator.waitForIdle();
+		expect(coordinator.health().jobs.invitationDeliveryScheduler).toMatchObject({
+			status: 'ok',
+			attempts: 2,
+			failures: 1,
+			lastFailedCount: 0
+		});
+		await coordinator.stop();
 	});
 });
