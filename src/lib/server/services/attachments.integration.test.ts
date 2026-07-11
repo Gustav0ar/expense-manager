@@ -293,7 +293,7 @@ describe('attachment service integration', () => {
 		const due = new Date(Date.now() + attachmentDeletionGraceMs + 1);
 		let removals = 0;
 		const results = await Promise.all([
-			runAttachmentDeletionWorker({
+			runAttachmentWorkerUntilAcquired({
 				now: due,
 				workspaceId: fixture.context.workspaceId,
 				removeFile: async (filePath) => {
@@ -302,7 +302,7 @@ describe('attachment service integration', () => {
 				},
 				reconcile: false
 			}),
-			runAttachmentDeletionWorker({
+			runAttachmentWorkerUntilAcquired({
 				now: due,
 				workspaceId: fixture.context.workspaceId,
 				reconcile: false
@@ -324,7 +324,7 @@ describe('attachment service integration', () => {
 			.set({ storageKey: '../keep.txt' })
 			.where(eq(attachmentDeletion.attachmentId, traversal!.id));
 		const logger = vi.spyOn(console, 'error').mockImplementation(() => {});
-		await runAttachmentDeletionWorker({
+		await runAttachmentWorkerUntilAcquired({
 			now: new Date(due.getTime() + 60_000),
 			workspaceId: fixture.context.workspaceId,
 			reconcile: false
@@ -456,13 +456,12 @@ describe('attachment service integration', () => {
 				workspaceId: fixture.context.workspaceId
 			})
 		).resolves.toMatchObject({ disk: 0, missingActive: 1 });
-		await expect(
-			runAttachmentDeletionWorker({
-				uploadDir: getUploadDir(),
-				limit: 0,
-				workspaceId: fixture.context.workspaceId
-			})
-		).resolves.toHaveProperty('reconciliation');
+		const finalWorkerResult = await runAttachmentWorkerUntilAcquired({
+			uploadDir: getUploadDir(),
+			limit: 0,
+			workspaceId: fixture.context.workspaceId
+		});
+		expect(finalWorkerResult).toHaveProperty('reconciliation');
 	});
 });
 
@@ -515,4 +514,15 @@ async function createFixture() {
 		role: 'owner'
 	};
 	return { context, expenseId: expenseRow.id };
+}
+async function runAttachmentWorkerUntilAcquired(
+	options: Parameters<typeof runAttachmentDeletionWorker>[0]
+) {
+	const deadline = Date.now() + 5_000;
+	do {
+		const result = await runAttachmentDeletionWorker(options);
+		if (!('skipped' in result) || !result.skipped) return result;
+		await new Promise<void>((resolve) => setTimeout(resolve, 10));
+	} while (Date.now() < deadline);
+	throw new Error('attachment worker storage lock stayed busy');
 }
