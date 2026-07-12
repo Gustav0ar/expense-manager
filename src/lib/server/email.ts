@@ -20,6 +20,22 @@ export type MailDeliveryReceipt = {
 	messageUuid?: string;
 };
 
+export const defaultEmailDeliveryTimeoutMs = 15_000;
+export const defaultEmailDeliveryConcurrency = 5;
+
+export function emailDeliveryTimeoutMs() {
+	return boundedIntegerEnv(
+		'EMAIL_DELIVERY_TIMEOUT_MS',
+		defaultEmailDeliveryTimeoutMs,
+		1000,
+		120_000
+	);
+}
+
+export function emailDeliveryConcurrency() {
+	return boundedIntegerEnv('EMAIL_DELIVERY_CONCURRENCY', defaultEmailDeliveryConcurrency, 1, 20);
+}
+
 function configuredProvider(): MailProvider {
 	const provider = (getPrivateEnv('EMAIL_PROVIDER') || 'auto').trim().toLowerCase();
 	if (
@@ -108,6 +124,9 @@ async function sendSmtpMail(input: MailInput, provider: MailProvider) {
 		host: smtpHost,
 		port: Number.parseInt(smtpPort, 10),
 		secure: getPrivateEnv('SMTP_SECURE') === 'true',
+		connectionTimeout: emailDeliveryTimeoutMs(),
+		greetingTimeout: emailDeliveryTimeoutMs(),
+		socketTimeout: emailDeliveryTimeoutMs(),
 		auth:
 			getPrivateEnv('SMTP_USER') && getPrivateSecret('SMTP_PASSWORD')
 				? {
@@ -144,6 +163,7 @@ async function sendMailjetApiMail(input: MailInput) {
 		`${getPrivateSecret('MAILJET_API_KEY')}:${getPrivateSecret('MAILJET_SECRET_KEY')}`
 	).toString('base64');
 	const response = await fetch('https://api.mailjet.com/v3.1/send', {
+		signal: AbortSignal.timeout(emailDeliveryTimeoutMs()),
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -189,6 +209,7 @@ async function sendMailjetApiMail(input: MailInput) {
 async function sendSenderApiMail(input: MailInput) {
 	const from = parseMailbox(getPrivateEnv('SENDER_FROM') || '');
 	const response = await fetch('https://api.sender.net/v2/message/send', {
+		signal: AbortSignal.timeout(emailDeliveryTimeoutMs()),
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -211,6 +232,11 @@ async function sendSenderApiMail(input: MailInput) {
 		throw new Error(`Sender API failed with HTTP ${response.status}: ${body}`);
 	}
 	return { provider: 'sender' } satisfies MailDeliveryReceipt;
+}
+
+function boundedIntegerEnv(key: string, fallback: number, minimum: number, maximum: number) {
+	const parsed = Number.parseInt(getPrivateEnv(key) || '', 10);
+	return Number.isFinite(parsed) ? Math.min(Math.max(parsed, minimum), maximum) : fallback;
 }
 
 export function parseMailbox(value: string) {

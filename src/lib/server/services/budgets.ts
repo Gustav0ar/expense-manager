@@ -11,9 +11,14 @@ import {
 	workspace,
 	workspaceMember
 } from '$lib/server/db/schema';
-import { sendBudgetAlertEmail, type MailDeliveryReceipt } from '$lib/server/email';
+import {
+	emailDeliveryConcurrency,
+	sendBudgetAlertEmail,
+	type MailDeliveryReceipt
+} from '$lib/server/email';
 import { canManageBudgets } from '$lib/server/security/roles';
 import { randomToken } from '$lib/server/utils/crypto';
+import { mapWithConcurrency } from '$lib/server/utils/concurrency';
 import { firstDayOfMonth, startOfMonth } from '$lib/server/utils/date';
 import { parseCurrencyToCents } from '$lib/server/utils/money';
 import { formatCents } from '$lib/utils/format';
@@ -1093,68 +1098,66 @@ async function deliverClaimedLegacyBudgetAlerts(
 ) {
 	let sentCount = 0;
 	let failedCount = 0;
-	await Promise.all(
-		claimed.map(async (delivery) => {
-			try {
-				const receipt = await send(
-					delivery.recipientEmail,
-					context.workspaceName,
-					periodMonth,
-					emailItems,
-					context.locale,
-					`budget-alert:${delivery.providerReference}`
-				);
-				const updated = await db
-					.update(budgetAlertDelivery)
-					.set({
-						status: 'sent',
-						sentAt: now,
-						claimToken: null,
-						claimExpiresAt: null,
-						lastErrorCategory: null,
-						provider: receipt?.provider ?? null,
-						providerMessageId: receipt?.messageId ?? null,
-						providerMessageUuid: receipt?.messageUuid ?? null,
-						updatedAt: now
-					})
-					.where(
-						and(
-							eq(budgetAlertDelivery.id, delivery.id),
-							eq(budgetAlertDelivery.claimToken, claimToken)
-						)
+	await mapWithConcurrency(claimed, emailDeliveryConcurrency(), async (delivery) => {
+		try {
+			const receipt = await send(
+				delivery.recipientEmail,
+				context.workspaceName,
+				periodMonth,
+				emailItems,
+				context.locale,
+				`budget-alert:${delivery.providerReference}`
+			);
+			const updated = await db
+				.update(budgetAlertDelivery)
+				.set({
+					status: 'sent',
+					sentAt: now,
+					claimToken: null,
+					claimExpiresAt: null,
+					lastErrorCategory: null,
+					provider: receipt?.provider ?? null,
+					providerMessageId: receipt?.messageId ?? null,
+					providerMessageUuid: receipt?.messageUuid ?? null,
+					updatedAt: now
+				})
+				.where(
+					and(
+						eq(budgetAlertDelivery.id, delivery.id),
+						eq(budgetAlertDelivery.claimToken, claimToken)
 					)
-					.returning({ id: budgetAlertDelivery.id });
-				sentCount += updated.length;
-			} catch (sendError) {
-				const errorCategory = classifyBudgetAlertDeliveryError(sendError);
-				console.error(
-					JSON.stringify({
-						level: 'error',
-						message: 'budget_alert_delivery: legacy provider send failed',
-						deliveryId: delivery.id,
-						errorCategory
-					})
-				);
-				const updated = await db
-					.update(budgetAlertDelivery)
-					.set({
-						status: 'failed',
-						claimToken: null,
-						claimExpiresAt: null,
-						lastErrorCategory: errorCategory,
-						updatedAt: now
-					})
-					.where(
-						and(
-							eq(budgetAlertDelivery.id, delivery.id),
-							eq(budgetAlertDelivery.claimToken, claimToken)
-						)
+				)
+				.returning({ id: budgetAlertDelivery.id });
+			sentCount += updated.length;
+		} catch (sendError) {
+			const errorCategory = classifyBudgetAlertDeliveryError(sendError);
+			console.error(
+				JSON.stringify({
+					level: 'error',
+					message: 'budget_alert_delivery: legacy provider send failed',
+					deliveryId: delivery.id,
+					errorCategory
+				})
+			);
+			const updated = await db
+				.update(budgetAlertDelivery)
+				.set({
+					status: 'failed',
+					claimToken: null,
+					claimExpiresAt: null,
+					lastErrorCategory: errorCategory,
+					updatedAt: now
+				})
+				.where(
+					and(
+						eq(budgetAlertDelivery.id, delivery.id),
+						eq(budgetAlertDelivery.claimToken, claimToken)
 					)
-					.returning({ id: budgetAlertDelivery.id });
-				failedCount += updated.length;
-			}
-		})
-	);
+				)
+				.returning({ id: budgetAlertDelivery.id });
+			failedCount += updated.length;
+		}
+	});
 	return { sentCount, failedCount };
 }
 
@@ -1395,75 +1398,73 @@ async function deliverClaimedBudgetAlerts(
 ) {
 	let sentCount = 0;
 	let failedCount = 0;
-	await Promise.all(
-		claimed.map(async (delivery) => {
-			try {
-				const receipt = await send(
-					delivery.recipientEmail,
-					context.workspaceName,
-					periodMonth,
-					[
-						{
-							categoryName: delivery.categoryName,
-							usagePct: delivery.usagePct,
-							spentLabel: formatCents(delivery.spentCents, context.currency, context.locale),
-							budgetLabel: formatCents(delivery.amountCents, context.currency, context.locale),
-							status: delivery.status
-						}
-					],
-					context.locale,
-					`budget-alert:${delivery.providerReference}`
-				);
-				const updated = await db
-					.update(budgetAlertDelivery)
-					.set({
-						status: 'sent',
-						sentAt: now,
-						claimToken: null,
-						claimExpiresAt: null,
-						lastErrorCategory: null,
-						provider: receipt?.provider ?? null,
-						providerMessageId: receipt?.messageId ?? null,
-						providerMessageUuid: receipt?.messageUuid ?? null,
-						updatedAt: now
-					})
-					.where(
-						and(
-							eq(budgetAlertDelivery.id, delivery.id),
-							eq(budgetAlertDelivery.claimToken, claimToken)
-						)
+	await mapWithConcurrency(claimed, emailDeliveryConcurrency(), async (delivery) => {
+		try {
+			const receipt = await send(
+				delivery.recipientEmail,
+				context.workspaceName,
+				periodMonth,
+				[
+					{
+						categoryName: delivery.categoryName,
+						usagePct: delivery.usagePct,
+						spentLabel: formatCents(delivery.spentCents, context.currency, context.locale),
+						budgetLabel: formatCents(delivery.amountCents, context.currency, context.locale),
+						status: delivery.status
+					}
+				],
+				context.locale,
+				`budget-alert:${delivery.providerReference}`
+			);
+			const updated = await db
+				.update(budgetAlertDelivery)
+				.set({
+					status: 'sent',
+					sentAt: now,
+					claimToken: null,
+					claimExpiresAt: null,
+					lastErrorCategory: null,
+					provider: receipt?.provider ?? null,
+					providerMessageId: receipt?.messageId ?? null,
+					providerMessageUuid: receipt?.messageUuid ?? null,
+					updatedAt: now
+				})
+				.where(
+					and(
+						eq(budgetAlertDelivery.id, delivery.id),
+						eq(budgetAlertDelivery.claimToken, claimToken)
 					)
-					.returning({ id: budgetAlertDelivery.id });
-				sentCount += updated.length;
-			} catch (sendError) {
-				failedCount++;
-				const errorCategory = classifyBudgetAlertDeliveryError(sendError);
-				console.error(
-					JSON.stringify({
-						level: 'error',
-						message: 'budget_alert_delivery: provider send failed',
-						deliveryId: delivery.id,
-						errorCategory
-					})
+				)
+				.returning({ id: budgetAlertDelivery.id });
+			sentCount += updated.length;
+		} catch (sendError) {
+			failedCount++;
+			const errorCategory = classifyBudgetAlertDeliveryError(sendError);
+			console.error(
+				JSON.stringify({
+					level: 'error',
+					message: 'budget_alert_delivery: provider send failed',
+					deliveryId: delivery.id,
+					errorCategory
+				})
+			);
+			await db
+				.update(budgetAlertDelivery)
+				.set({
+					status: 'failed',
+					claimToken: null,
+					claimExpiresAt: null,
+					lastErrorCategory: errorCategory,
+					updatedAt: now
+				})
+				.where(
+					and(
+						eq(budgetAlertDelivery.id, delivery.id),
+						eq(budgetAlertDelivery.claimToken, claimToken)
+					)
 				);
-				await db
-					.update(budgetAlertDelivery)
-					.set({
-						status: 'failed',
-						claimToken: null,
-						claimExpiresAt: null,
-						lastErrorCategory: errorCategory,
-						updatedAt: now
-					})
-					.where(
-						and(
-							eq(budgetAlertDelivery.id, delivery.id),
-							eq(budgetAlertDelivery.claimToken, claimToken)
-						)
-					);
-			}
-		})
-	);
+		}
+	});
 	return { sentCount, failedCount };
 }
 

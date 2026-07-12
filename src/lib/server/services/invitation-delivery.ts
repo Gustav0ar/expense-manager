@@ -1,8 +1,13 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { advisoryLockClient, db } from '$lib/server/db';
 import { workspaceInvitationDelivery } from '$lib/server/db/schema';
-import { sendInvitationEmail, type MailDeliveryReceipt } from '$lib/server/email';
+import {
+	emailDeliveryConcurrency,
+	sendInvitationEmail,
+	type MailDeliveryReceipt
+} from '$lib/server/email';
 import { randomToken } from '$lib/server/utils/crypto';
+import { mapWithConcurrency } from '$lib/server/utils/concurrency';
 import { decryptInvitationToken } from './invitation-token';
 import type { SupportedLocale } from '$lib/i18n';
 
@@ -100,54 +105,52 @@ async function processInvitationDeliveries(
 
 	let sent = 0;
 	let failed = 0;
-	await Promise.all(
-		claimed.map(async (delivery) => {
-			let token: string;
-			try {
-				token = decryptInvitationToken(delivery.encryptedToken, delivery.tokenHash);
-			} catch {
-				failed++;
-				await markInvitationDeliveryFailed(delivery.id, claimToken, 'encryption', now);
-				logDeliveryFailure(delivery.id, 'encryption');
-				return;
-			}
+	await mapWithConcurrency(claimed, emailDeliveryConcurrency(), async (delivery) => {
+		let token: string;
+		try {
+			token = decryptInvitationToken(delivery.encryptedToken, delivery.tokenHash);
+		} catch {
+			failed++;
+			await markInvitationDeliveryFailed(delivery.id, claimToken, 'encryption', now);
+			logDeliveryFailure(delivery.id, 'encryption');
+			return;
+		}
 
-			try {
-				const receipt = await send(
-					delivery.recipientEmail,
-					delivery.workspaceName,
-					`${origin}/invite/${token}`,
-					delivery.locale
-				);
-				const updated = await db
-					.update(workspaceInvitationDelivery)
-					.set({
-						status: 'sent',
-						claimToken: null,
-						claimExpiresAt: null,
-						lastErrorCategory: null,
-						provider: receipt?.provider ?? null,
-						providerMessageId: receipt?.messageId ?? null,
-						providerMessageUuid: receipt?.messageUuid ?? null,
-						sentAt: now,
-						updatedAt: now
-					})
-					.where(
-						and(
-							eq(workspaceInvitationDelivery.id, delivery.id),
-							eq(workspaceInvitationDelivery.claimToken, claimToken)
-						)
+		try {
+			const receipt = await send(
+				delivery.recipientEmail,
+				delivery.workspaceName,
+				`${origin}/invite/${token}`,
+				delivery.locale
+			);
+			const updated = await db
+				.update(workspaceInvitationDelivery)
+				.set({
+					status: 'sent',
+					claimToken: null,
+					claimExpiresAt: null,
+					lastErrorCategory: null,
+					provider: receipt?.provider ?? null,
+					providerMessageId: receipt?.messageId ?? null,
+					providerMessageUuid: receipt?.messageUuid ?? null,
+					sentAt: now,
+					updatedAt: now
+				})
+				.where(
+					and(
+						eq(workspaceInvitationDelivery.id, delivery.id),
+						eq(workspaceInvitationDelivery.claimToken, claimToken)
 					)
-					.returning({ id: workspaceInvitationDelivery.id });
-				sent += updated.length;
-			} catch (error) {
-				failed++;
-				const category = classifyInvitationDeliveryError(error);
-				await markInvitationDeliveryFailed(delivery.id, claimToken, category, now);
-				logDeliveryFailure(delivery.id, category);
-			}
-		})
-	);
+				)
+				.returning({ id: workspaceInvitationDelivery.id });
+			sent += updated.length;
+		} catch (error) {
+			failed++;
+			const category = classifyInvitationDeliveryError(error);
+			await markInvitationDeliveryFailed(delivery.id, claimToken, category, now);
+			logDeliveryFailure(delivery.id, category);
+		}
+	});
 
 	return { processed: claimed.length, sent, failed };
 }
