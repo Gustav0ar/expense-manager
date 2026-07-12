@@ -8,6 +8,7 @@
 	let { data, form } = $props<{ data: PageData; form: ActionData }>();
 
 	let copied = $state(false);
+	let copyFailed = $state(false);
 	let removeDialog: HTMLDialogElement | undefined = $state();
 	let pendingRemove = $state<{ id: string; name: string } | null>(null);
 
@@ -46,12 +47,14 @@
 
 	async function copyInviteUrl() {
 		if (!form?.inviteUrl) return;
+		copyFailed = false;
 		try {
 			await navigator.clipboard.writeText(form.inviteUrl ?? '');
 			copied = true;
 			setTimeout(() => (copied = false), 2000);
 		} catch {
-			// clipboard not available (HTTP, permission denied) — silently fail, don't show "Copied!"
+			copied = false;
+			copyFailed = true;
 		}
 	}
 
@@ -110,6 +113,11 @@
 			<button type="button" class="button secondary" onclick={copyInviteUrl}>
 				{copied ? t('Copied!') : t('Copy link')}
 			</button>
+			{#if copyFailed}
+				<span class="field-error" role="alert"
+					>{t('Copy failed. Select and copy the link manually.')}</span
+				>
+			{/if}
 		</div>
 	{/if}
 
@@ -146,7 +154,7 @@
 							<th>{t('Name')}</th>
 							<th>{t('Email')}</th>
 							<th>{t('Role')}</th>
-							<th></th>
+							<th><span class="sr-only">{t('Actions')}</span></th>
 						</tr>
 					</thead>
 					<tbody>

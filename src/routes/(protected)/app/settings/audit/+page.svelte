@@ -18,10 +18,15 @@
 	}
 
 	function auditPageHref(cursor: string) {
-		const params = new URLSearchParams({ cursor });
-		if (data.filters.action) params.set('action', data.filters.action);
-		if (data.filters.entityType) params.set('entityType', data.filters.entityType);
-		return `${auditPath}?${params.toString()}`;
+		const params = [
+			['cursor', cursor],
+			['action', data.filters.action],
+			['entityType', data.filters.entityType]
+		]
+			.filter((entry): entry is [string, string] => Boolean(entry[1]))
+			.map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+			.join('&');
+		return `${auditPath}?${params}`;
 	}
 </script>
 
@@ -97,9 +102,7 @@
 
 		{#if data.audit.nextCursor}
 			<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-			<a class="button secondary" href={auditPageHref(data.audit.nextCursor)}
-				>{t('Next page')}</a
-			>
+			<a class="button secondary" href={auditPageHref(data.audit.nextCursor)}>{t('Next page')}</a>
 		{/if}
 	</section>
 </section>
