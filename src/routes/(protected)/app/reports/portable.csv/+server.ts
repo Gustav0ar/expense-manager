@@ -3,31 +3,17 @@ import type { RequestHandler } from './$types';
 import { translate } from '$lib/i18n';
 import { streamAnalyticalExpenseReport } from '$lib/server/services/expenses';
 import { requireWorkspaceContext } from '$lib/server/services/workspaces';
-import { firstDayOfMonth, lastDayOfMonth } from '$lib/server/utils/date';
 import {
 	maxExpenseImportBytes,
 	maxExpenseImportRows,
 	serializePortableExpenseCsv,
 	type PortableExpenseCsvRow
 } from '$lib/server/utils/import';
-import { reportFilterSchema } from '$lib/server/validation';
+import { parseReportFilters } from '$lib/server/report-filters';
 
 export const GET: RequestHandler = async (event) => {
 	const context = await requireWorkspaceContext(event);
-	const today = new Date();
-	const filters = reportFilterSchema.safeParse({
-		from: event.url.searchParams.get('from') || firstDayOfMonth(today),
-		to: event.url.searchParams.get('to') || lastDayOfMonth(today),
-		groupBy: event.url.searchParams.get('groupBy') || 'expense',
-		dateField: event.url.searchParams.get('dateField') || 'expenseDate',
-		categoryId: event.url.searchParams.get('categoryId') || undefined,
-		vendorId: event.url.searchParams.get('vendorId') || undefined,
-		costCenterId: event.url.searchParams.get('costCenterId') || undefined,
-		competencyMonth: event.url.searchParams.get('competencyMonth') || undefined,
-		reviewStatus: event.url.searchParams.get('reviewStatus') || undefined,
-		paymentStatus: event.url.searchParams.get('paymentStatus') || undefined,
-		q: event.url.searchParams.get('q') || undefined
-	});
+	const filters = parseReportFilters(event.url.searchParams, { defaultGroupBy: 'expense' });
 	if (!filters.success) throw error(400, translate(context.locale, 'Filters are invalid.'));
 
 	const portableRows: PortableExpenseCsvRow[] = [];

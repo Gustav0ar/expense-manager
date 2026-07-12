@@ -93,7 +93,7 @@ export type AnalyticalExpenseReportFilters = Omit<ExpenseFilters, 'cursor' | 'li
 	to: string;
 };
 
-type GroupedReportFilters = Pick<
+export type GroupedReportFilters = Pick<
 	AnalyticalExpenseReportFilters,
 	| 'from'
 	| 'to'
