@@ -30,16 +30,55 @@ jobs:
   preflight:
     name: Verify required workflows
     runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.target.outputs.should_deploy }}
     if: |
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
     steps:
+      - name: Select the current deployment target
+        id: target
+        uses: actions/github-script@v9
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const headSha = process.env.HEAD_SHA;
+
+            if (!headSha) {
+              core.setFailed('Unable to determine deploy commit SHA.');
+              return;
+            }
+
+            if (context.eventName !== 'workflow_run') {
+              core.setOutput('should_deploy', 'true');
+              return;
+            }
+
+            const { data: branch } = await github.rest.repos.getBranch({
+              owner,
+              repo,
+              branch: context.payload.repository.default_branch
+            });
+
+            if (branch.commit.sha !== headSha) {
+              core.notice(
+                `Skipping stale deployment for ${headSha}; ${branch.name} now points to ${branch.commit.sha}.`
+              );
+              core.setOutput('should_deploy', 'false');
+              return;
+            }
+
+            core.setOutput('should_deploy', 'true');
+
       - name: Skip checks for forced manual deploy
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.force == 'true' }}
         run: echo "Forced manual deploy requested; skipping workflow preflight."
 
       - name: Require CI, Security and Containers for this SHA
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.force != 'true' }}
+        if: ${{ steps.target.outputs.should_deploy == 'true' && (github.event_name != 'workflow_dispatch' || inputs.force != 'true') }}
         uses: actions/github-script@v9
         env:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
@@ -108,7 +147,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: preflight
     environment: production
-    if: needs.preflight.result == 'success'
+    if: needs.preflight.result == 'success' && needs.preflight.outputs.should_deploy == 'true'
     env:
       TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
     steps:
