@@ -1118,6 +1118,7 @@ test('covers planning, imports, attachments and audit flows', async ({ page }) =
 	await page.getByRole('button', { name: 'Enviar alertas agora' }).click();
 	await expect(page.getByText('Nenhum alerta de orçamento para enviar.')).toBeVisible();
 
+	await page.goto('/app/planning?section=recurring&periodMonth=2026-06-01');
 	const planningPaymentForm = page.locator('form.compact-support');
 	await planningPaymentForm.getByLabel('Novo pagamento').fill('Boleto');
 	await planningPaymentForm.getByRole('button', { name: 'Criar' }).click();
@@ -1134,7 +1135,7 @@ test('covers planning, imports, attachments and audit flows', async ({ page }) =
 	await recurringForm.getByRole('button', { name: 'Criar recorrência' }).click();
 	await expect(page.getByText('Confira os dados da recorrência.')).toBeVisible();
 
-	await page.goto('/app/planning?periodMonth=2026-06-01');
+	await page.goto('/app/planning?section=recurring&periodMonth=2026-06-01');
 	await recurringForm.getByLabel('Descrição').fill('Limpeza mensal');
 	await recurringForm.getByLabel('Valor').fill('90,00');
 	await recurringForm.getByLabel('Categoria').selectOption({ label: '🧼 Limpeza' });
@@ -1143,24 +1144,24 @@ test('covers planning, imports, attachments and audit flows', async ({ page }) =
 	await recurringForm.getByRole('button', { name: 'Criar recorrência' }).click();
 	await expect(page.locator('.recurring-item').filter({ hasText: 'Limpeza mensal' })).toBeVisible();
 
-	await page.goto('/app/planning?periodMonth=2026-05-01');
+	await page.goto('/app/planning?section=recurring&periodMonth=2026-05-01');
 	let recurringItem = page.locator('.recurring-item').filter({ hasText: 'Limpeza mensal' });
 	await recurringItem.getByRole('button', { name: 'Pausar' }).click();
-	await expect(page).toHaveURL(/\/app\/planning\?periodMonth=2026-05-01$/);
+	await expect(page).toHaveURL(/\/app\/planning\?section=recurring&periodMonth=2026-05-01$/);
 	recurringItem = page.locator('.recurring-item').filter({ hasText: 'Limpeza mensal' });
 	await recurringItem.getByRole('button', { name: 'Retomar' }).click();
-	await expect(page).toHaveURL(/\/app\/planning\?periodMonth=2026-05-01$/);
+	await expect(page).toHaveURL(/\/app\/planning\?section=recurring&periodMonth=2026-05-01$/);
 
 	await page.goto('/app/expenses?from=2026-06-01&to=2026-06-30');
 	await expect(
 		page.locator('.expense-table-item').filter({ hasText: 'Limpeza mensal' })
 	).toContainText('R$ 90,00');
 
-	await page.goto('/app/planning');
+	await page.goto('/app/planning?section=recurring');
 	await page.getByRole('button', { name: 'Gerar vencidas' }).click();
 	await expect(page.getByText('Nenhuma recorrência vencida para gerar.')).toBeVisible();
 
-	await page.goto('/app/planning');
+	await page.goto('/app/planning?section=imports');
 	const reconciliationUpload = page.locator('form[action="?/importExpenses"]');
 	await reconciliationUpload.getByLabel('Formato').selectOption('ofx');
 	await reconciliationUpload.locator('input[type="file"]').setInputFiles({
@@ -1210,7 +1211,7 @@ test('covers planning, imports, attachments and audit flows', async ({ page }) =
 	await credit.getByRole('button', { name: 'Ignorar' }).click();
 	await expect(page.getByText('Lançamento bancário ignorado.')).toBeVisible();
 
-	await page.goto('/app/planning');
+	await page.goto('/app/planning?section=imports');
 	const importForm = page.locator('form[action="?/importExpenses"]');
 	await importForm.evaluate((form) => form.setAttribute('novalidate', ''));
 	await importForm.getByRole('button', { name: 'Importar' }).click();
@@ -1234,7 +1235,7 @@ test('covers planning, imports, attachments and audit flows', async ({ page }) =
 	await cancelPreview.focus();
 	await expect(cancelPreview).toBeFocused();
 	await cancelPreview.press('Enter');
-	await expect(page).toHaveURL(/\/app\/planning\?periodMonth=2026-07$/);
+	await expect(page).toHaveURL(/\/app\/planning\?section=imports&periodMonth=2026-07$/);
 	await expect(page.getByRole('heading', { name: 'Prévia da importação' })).toBeHidden();
 
 	await page.goto('/app/categories');
@@ -1246,7 +1247,7 @@ test('covers planning, imports, attachments and audit flows', async ({ page }) =
 	await ruleForm.getByRole('button', { name: 'Criar regra' }).click();
 	await expect(page.locator('.rule-summary').filter({ hasText: 'Fornecedor ACME' })).toBeVisible();
 
-	await page.goto('/app/planning');
+	await page.goto('/app/planning?section=imports');
 	const importFormWithRule = page.locator('form[action="?/importExpenses"]');
 	await importFormWithRule.locator('input[type="file"]').setInputFiles({
 		name: 'despesas.csv',
@@ -1304,7 +1305,7 @@ test('fully and partially undoes guarded import batches', async ({ page }) => {
 	await registerAndCreateWorkspace(page, 'Undo de importações');
 	await createCategory(page, { name: 'Limpeza', emoji: '🧼', color: '#0f766e' });
 
-	await page.goto('/app/planning?periodMonth=2026-06');
+	await page.goto('/app/planning?section=imports&periodMonth=2026-06');
 	let undoImportForm = page.locator('form[action="?/importExpenses"]');
 	await undoImportForm.getByLabel('Categoria padrão').selectOption({ label: '🧼 Limpeza' });
 	await undoImportForm.locator('input[type="file"]').setInputFiles({
@@ -1323,7 +1324,7 @@ test('fully and partially undoes guarded import batches', async ({ page }) => {
 	await page.goto('/app/expenses?q=Undo%20E2E%20completo');
 	await expect(page.getByText('Nenhuma despesa encontrada.')).toBeVisible();
 
-	await page.goto('/app/planning?periodMonth=2026-06');
+	await page.goto('/app/planning?section=imports&periodMonth=2026-06');
 	undoImportForm = page.locator('form[action="?/importExpenses"]');
 	await undoImportForm.getByLabel('Categoria padrão').selectOption({ label: '🧼 Limpeza' });
 	await undoImportForm.locator('input[type="file"]').setInputFiles({
@@ -1347,7 +1348,7 @@ test('fully and partially undoes guarded import batches', async ({ page }) => {
 	await protectedImportRow.getByLabel('Descrição').fill('Undo E2E protegida');
 	await protectedImportRow.getByRole('button', { name: 'Atualizar' }).click();
 
-	await page.goto('/app/planning?periodMonth=2026-06');
+	await page.goto('/app/planning?section=imports&periodMonth=2026-06');
 	undoBatchRow = page.locator('tbody tr').filter({ hasText: 'undo-parcial.csv' });
 	page.once('dialog', (dialog) => dialog.accept());
 	await undoBatchRow.getByRole('button', { name: 'Desfazer importação' }).click();
@@ -1489,7 +1490,7 @@ test('enforces review-sensitive business rules for members, recurrences and impo
 	await ruleForm.getByRole('button', { name: 'Criar regra' }).click();
 	await expect(page.locator('.rule-summary').filter({ hasText: 'Fornecedor ACME' })).toBeVisible();
 
-	await page.goto('/app/planning');
+	await page.goto('/app/planning?section=imports');
 	let importForm = page.locator('form[action="?/importExpenses"]');
 	await importForm
 		.locator('select[name="defaultCategoryId"]')
@@ -1510,7 +1511,7 @@ test('enforces review-sensitive business rules for members, recurrences and impo
 		page.locator('.expense-table-item').filter({ hasText: 'Compra regra padrão' })
 	).toContainText('Insumos');
 
-	await page.goto('/app/planning');
+	await page.goto('/app/planning?section=imports');
 	importForm = page.locator('form[action="?/importExpenses"]');
 	await importForm.locator('select[name="sourceType"]').selectOption('ofx');
 	await importForm

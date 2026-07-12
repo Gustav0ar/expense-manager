@@ -198,6 +198,7 @@ test('covers planning bad paths and budget deletion', async ({ page }) => {
 	await createCategoryByRequest(page);
 
 	expect((await page.request.get('/app/planning?periodMonth=2026-13')).status()).toBe(400);
+	expect((await page.request.get('/app/planning?section=unknown')).status()).toBe(400);
 
 	await page.goto('/app/planning?periodMonth=2026-06');
 	const categoryId = await page
@@ -205,6 +206,17 @@ test('covers planning bad paths and budget deletion', async ({ page }) => {
 		.first()
 		.getAttribute('value');
 	expect(categoryId).toBeTruthy();
+	await expect(page.locator('form[action="?/createRecurring"]')).toHaveCount(0);
+	await expect(page.locator('form[action="?/importExpenses"]')).toHaveCount(0);
+	await page.getByRole('link', { name: 'Recorrências' }).click();
+	await expect(page).toHaveURL(/section=recurring/);
+	await expect(page.locator('form[action="?/createRecurring"]')).toBeVisible();
+	await expect(page.locator('form[action="?/upsertBudget"]')).toHaveCount(0);
+	await page.getByRole('link', { name: 'Importar despesas' }).click();
+	await expect(page).toHaveURL(/section=imports/);
+	await expect(page.locator('form[action="?/importExpenses"]')).toBeVisible();
+	await expect(page.locator('form[action="?/createRecurring"]')).toHaveCount(0);
+	await page.goto('/app/planning?section=budgets&periodMonth=2026-06');
 	const notificationCenter = page.locator('.notification-center');
 	await expect(
 		notificationCenter.getByRole('heading', { name: 'Configurações de notificações' })
@@ -281,7 +293,7 @@ test('covers planning bad paths and budget deletion', async ({ page }) => {
 	await expect(budgetItem).toContainText('de R$ 320,00');
 
 	await budgetItem.getByRole('button', { name: 'Remover orçamento' }).click();
-	await expect(page).toHaveURL(/\/app\/planning\?periodMonth=2026-06-01/);
+	await expect(page).toHaveURL(/\/app\/planning\?section=budgets&periodMonth=2026-06-01/);
 	budgetItem = page.locator('.budget-item').filter({ hasText: 'Planejamento Teste' });
 	await expect(budgetItem).toContainText('Sem meta');
 });

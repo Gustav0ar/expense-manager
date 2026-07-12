@@ -394,7 +394,7 @@ async function expenseId(page: Page, description: string) {
 }
 
 async function recurringId(page: Page, description: string) {
-	await page.goto('/app/planning?periodMonth=2026-06');
+	await page.goto('/app/planning?section=recurring&periodMonth=2026-06');
 	const item = page.locator('.recurring-item').filter({ hasText: description }).first();
 	await expect(item).toBeVisible();
 	const idInput = item.locator('input[name="id"]').first();
@@ -898,7 +898,7 @@ test('enforces expense, review, payment, catalog, recurrence and import permissi
 			await stageOfxRequest(invited.viewer.page, 'viewer-reconciliation'),
 			'viewer cannot stage OFX reconciliation'
 		);
-		await invited.member.page.goto('/app/planning');
+		await invited.member.page.goto('/app/planning?section=imports');
 		const importForm = invited.member.page.locator('form[action="?/importExpenses"]');
 		await importForm.locator('select[name="defaultCategoryId"]').selectOption(baseCategoryId);
 		await importForm.locator('input[type="file"]').setInputFiles({

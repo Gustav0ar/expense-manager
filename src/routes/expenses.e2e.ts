@@ -1424,7 +1424,7 @@ test('reaches every trashed expense beyond 100 rows and preserves cursor navigat
 	await registerAndCreateWorkspace(page, 'Paginação da lixeira');
 	await createCategory(page);
 
-	await page.goto('/app/planning?periodMonth=2026-07');
+	await page.goto('/app/planning?section=imports&periodMonth=2026-07');
 	const importForm = page.locator('form[action="?/importExpenses"]');
 	await importForm.getByLabel('Categoria padrão').selectOption({ label: '🧰 Operacional' });
 	const descriptions = Array.from(

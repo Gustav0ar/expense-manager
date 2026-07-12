@@ -182,7 +182,7 @@ test('keeps core pages and mobile navigation within runtime budgets', async ({ p
 
 test('imports the maximum 500-row batch within a generous runtime budget', async ({ page }) => {
 	await registerAndSeed(page);
-	await page.goto('/app/planning');
+	await page.goto('/app/planning?section=imports');
 
 	const importForm = page.locator('form[action="?/importExpenses"]');
 	await importForm.getByLabel('Default category').selectOption({ label: '🧰 Operations' });

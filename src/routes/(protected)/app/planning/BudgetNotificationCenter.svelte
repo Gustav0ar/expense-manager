@@ -156,7 +156,7 @@
 	}
 
 	function nextPagePath(cursor: string): `/app/planning?${string}` {
-		const params = new URLSearchParams({ periodMonth, alertCursor: cursor });
+		const params = new URLSearchParams({ section: 'budgets', periodMonth, alertCursor: cursor });
 		return `/app/planning?${params.toString()}`;
 	}
 </script>
