@@ -39,6 +39,9 @@ local production-like testing or for a standalone Caddy deployment.
   window. It defaults to `/dev/null`; see [`docs/email.md`](email.md) before
   rotating `BETTER_AUTH_SECRET`.
 - `UPLOAD_DIR`: attachment path inside the container. The compose file uses `/app/uploads` by default.
+- `BODY_SIZE_LIMIT`: adapter-node request-body limit. It defaults to `3M`, which
+  is intentionally above the application's 2 MiB attachment limit so multipart
+  metadata does not cause valid uploads to be rejected before validation.
 - `DB_POOL_MAX`: maximum application query-pool size. Each app process may open one additional dedicated connection while holding a scheduler advisory lock.
 - `TRUST_PROXY_HEADERS`: use `true` only when the app is not directly exposed and only receives traffic through a trusted reverse proxy.
 - `TRUSTED_PROXY_CIDR`: immediate reverse proxy subnet allowed to supply forwarded client addresses. It is required when `TRUST_PROXY_HEADERS=true` and accepts comma-separated IPv4/IPv6 CIDRs. There is intentionally no broad private-network default: configure the narrowest deployment-specific CIDR and place the app and proxy on a dedicated network whenever possible.
