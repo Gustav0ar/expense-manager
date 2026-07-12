@@ -140,3 +140,26 @@ export async function registerAndCreateWorkspace(page: Page, options: AccountWor
 	});
 	return { email, workspaceName: options.workspaceName };
 }
+
+export async function chooseSearchableOption(scope: Page | Locator, label: string, option: string) {
+	const combobox = scope.getByRole('combobox', { name: label });
+	await combobox.fill(option);
+	await scope.getByRole('option', { name: option, exact: true }).click();
+	await expect(combobox).toHaveValue(option);
+}
+
+export async function clearSearchableOption(scope: Page | Locator, label: string) {
+	await scope.getByRole('button', { name: `Limpar ${label}` }).click();
+	await expect(scope.getByRole('combobox', { name: label })).toHaveValue('');
+}
+
+export async function expectSearchableOptionAbsent(
+	scope: Page | Locator,
+	label: string,
+	option: string
+) {
+	const combobox = scope.getByRole('combobox', { name: label });
+	await combobox.fill(option);
+	await expect(scope.getByRole('option', { name: option, exact: true })).toHaveCount(0);
+	await combobox.press('Escape');
+}

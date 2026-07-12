@@ -1,5 +1,6 @@
-import { expect, type Browser, type Locator, type Page, test } from '@playwright/test';
+import { expect, type Browser, type Page, test } from '@playwright/test';
 import {
+	chooseSearchableOption,
 	registerAccount,
 	registerAndCreateWorkspace as setupWorkspace,
 	uniqueEmail
@@ -111,13 +112,6 @@ async function createExpenseFromForm(
 	if (input.notes) await form.getByLabel('Notas').fill(input.notes);
 	await form.getByRole('button', { name: 'Adicionar' }).click();
 	await expect(expenseRow(page, input.description).first()).toBeVisible();
-}
-
-async function chooseSearchableOption(scope: Page | Locator, label: string, option: string) {
-	const combobox = scope.getByRole('combobox', { name: label });
-	await combobox.fill(option);
-	await scope.getByRole('option', { name: option, exact: true }).click();
-	await expect(combobox).toHaveValue(option);
 }
 
 function expenseRow(page: Page, text: string) {
