@@ -169,6 +169,13 @@
       "when": 1784678400000,
       "tag": "0023_reconciliation_integrity",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1783884596086,
+      "tag": "0024_audit_cursor_index",
+      "breakpoints": true
     }
   ]
 }
