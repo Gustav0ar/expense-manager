@@ -224,6 +224,9 @@ jobs:
           BETTER_AUTH_SECRET_PREVIOUS: ${{ secrets.BETTER_AUTH_SECRET_PREVIOUS }}
           REQUIRE_EMAIL_VERIFICATION: ${{ vars.REQUIRE_EMAIL_VERIFICATION || 'true' }}
           ALLOW_REGISTRATION: ${{ vars.ALLOW_REGISTRATION || 'false' }}
+          AUTH_RATE_LIMIT_IDENTIFIER_MAX: ${{ vars.AUTH_RATE_LIMIT_IDENTIFIER_MAX || '' }}
+          AUTH_RATE_LIMIT_IP_MAX: ${{ vars.AUTH_RATE_LIMIT_IP_MAX || '' }}
+          AUTH_RATE_LIMIT_WINDOW_SECONDS: ${{ vars.AUTH_RATE_LIMIT_WINDOW_SECONDS || '' }}
           POSTGRES_DB: ${{ vars.POSTGRES_DB || 'expense_manager' }}
           POSTGRES_USER: ${{ vars.POSTGRES_USER || 'expense_manager' }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
@@ -374,6 +377,9 @@ jobs:
             write_env_var BETTER_AUTH_SECRET_PREVIOUS "${BETTER_AUTH_SECRET_PREVIOUS}"
             write_env_var REQUIRE_EMAIL_VERIFICATION "${REQUIRE_EMAIL_VERIFICATION}"
             write_env_var ALLOW_REGISTRATION "${ALLOW_REGISTRATION}"
+            write_env_var AUTH_RATE_LIMIT_IDENTIFIER_MAX "${AUTH_RATE_LIMIT_IDENTIFIER_MAX}"
+            write_env_var AUTH_RATE_LIMIT_IP_MAX "${AUTH_RATE_LIMIT_IP_MAX}"
+            write_env_var AUTH_RATE_LIMIT_WINDOW_SECONDS "${AUTH_RATE_LIMIT_WINDOW_SECONDS}"
             write_env_var POSTGRES_DB "${POSTGRES_DB}"
             write_env_var POSTGRES_USER "${POSTGRES_USER}"
             write_env_var POSTGRES_PASSWORD "${POSTGRES_PASSWORD}"

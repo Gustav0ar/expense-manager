@@ -61,7 +61,7 @@ Out of scope:
 
 | Threat                                   | Primary controls                                                                                 |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Credential stuffing or brute-force login | Persistent rate limiting, secure password handling, optional MFA, audit logs                     |
+| Credential stuffing or brute-force login | Atomic independent IP/account rate limits, secure password handling, optional MFA, audit logs    |
 | Unverified or abusive registration       | Email verification, registration lock-down, resend limits, stale unverified-user cleanup         |
 | Cross-workspace data access              | Workspace-scoped service queries, RBAC, route/action tests                                       |
 | Privilege escalation through invites     | Role-specific invite handling, authorization checks, role E2E coverage                           |

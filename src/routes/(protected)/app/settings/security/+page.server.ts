@@ -36,7 +36,7 @@ export const actions: Actions = {
 			scope: 'mfa-enable',
 			identifier: event.locals.user.id,
 			windowSeconds: 300,
-			max: 5
+			identifierMax: 5
 		});
 
 		const formData = await event.request.formData();
@@ -75,7 +75,7 @@ export const actions: Actions = {
 			scope: 'mfa-disable',
 			identifier: event.locals.user.id,
 			windowSeconds: 300,
-			max: 5
+			identifierMax: 5
 		});
 
 		const parsed = parseForm(await event.request.formData(), mfaCodeSchema);

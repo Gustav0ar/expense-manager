@@ -5,7 +5,7 @@
 - Authentication with Better Auth
 - Email verification required by default in production
 - Secure cookies configured by the auth library
-- Persistent rate limiting for login, registration and password reset
+- Persistent rate limiting for login, registration, password reset and MFA uses one atomic database statement to consume independent hashed client-IP and normalized-identifier buckets. The identifier bucket follows one account across rotating addresses; the higher IP bucket bounds cross-account spraying without using a combined key that penalizes ordinary shared networks too early.
 - Rate limiting uses forwarded client addresses only when `TRUST_PROXY_HEADERS=true` and the immediate peer matches `TRUSTED_PROXY_CIDR`
 - Isolation by `workspace_id` in all domain services
 - Workspace-scoped RBAC
@@ -79,7 +79,8 @@ file, report or deployment changes:
 - Input validation: IDs, dates, amounts, pagination, uploaded files and enum-like
   fields reject malformed or cross-workspace values.
 - Rate limiting: login, registration, password reset and verification email
-  resend limits are persistent and tested for abuse cases.
+  resend limits are persistent; authentication tests cover concurrent attempts,
+  address rotation against one account and cross-account attempts from one IP.
 - Email delivery: provider credentials live only in protected secrets or VPS
   secret files, sender domains are verified and failed delivery does not create
   silent account states.
