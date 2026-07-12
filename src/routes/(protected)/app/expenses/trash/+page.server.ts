@@ -1,6 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { translate } from '$lib/i18n';
+import { safeInternalPath } from '$lib/server/security/internal-redirect';
 import { handleServiceError } from '$lib/server/action-utils';
 import {
 	listTrashedExpenses,
@@ -51,7 +52,7 @@ export const actions: Actions = {
 };
 
 function safeTrashReturnTo(value: FormDataEntryValue | null) {
-	const path = value?.toString() || '/app/expenses/trash';
+	const path = safeInternalPath(value?.toString(), '/app/expenses/trash');
 	return (path === '/app/expenses/trash' || path.startsWith('/app/expenses/trash?')) &&
 		!path.startsWith('//')
 		? path
