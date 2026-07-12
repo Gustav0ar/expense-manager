@@ -3427,6 +3427,90 @@ describe('server service integration', () => {
 		expect(auditRows).toHaveLength(1);
 	});
 
+	it('rejects active-member invitations and never overwrites a legacy owner membership', async () => {
+		const fixture = await createWorkspaceFixture();
+		await expect(
+			inviteMember(fixture.context, { email: fixture.owner.email, role: 'viewer' })
+		).rejects.toMatchObject({ status: 409 });
+		await db
+			.update(workspaceMember)
+			.set({ status: 'disabled' })
+			.where(
+				and(
+					eq(workspaceMember.workspaceId, fixture.context.workspaceId),
+					eq(workspaceMember.userId, fixture.owner.id)
+				)
+			);
+		await expect(
+			inviteMember(fixture.context, { email: fixture.owner.email, role: 'viewer' })
+		).rejects.toMatchObject({ status: 409 });
+
+		const token = `owner-invite-${randomUUID()}`;
+		await db.insert(workspaceInvitation).values({
+			workspaceId: fixture.context.workspaceId,
+			email: fixture.owner.email,
+			role: 'viewer',
+			tokenHash: sha256(token),
+			invitedByUserId: fixture.context.userId,
+			expiresAt: new Date(Date.now() + 60_000)
+		});
+		await expect(
+			acceptInvitation(token, fixture.owner.id, fixture.owner.email)
+		).rejects.toMatchObject({ status: 409 });
+
+		await expect(
+			db
+				.select({ role: workspaceMember.role, status: workspaceMember.status })
+				.from(workspaceMember)
+				.where(
+					and(
+						eq(workspaceMember.workspaceId, fixture.context.workspaceId),
+						eq(workspaceMember.userId, fixture.owner.id)
+					)
+				)
+		).resolves.toEqual([{ role: 'owner', status: 'disabled' }]);
+		await expect(getPendingInvitation(token)).resolves.toMatchObject({ role: 'viewer' });
+	});
+
+	it('reactivates only a disabled non-owner membership once under concurrent acceptance', async () => {
+		const fixture = await createWorkspaceFixture();
+		const returningMember = await createUser('returning-member');
+		await db.insert(workspaceMember).values({
+			workspaceId: fixture.context.workspaceId,
+			userId: returningMember.id,
+			role: 'member',
+			status: 'disabled'
+		});
+		const token = `returning-invite-${randomUUID()}`;
+		await db.insert(workspaceInvitation).values({
+			workspaceId: fixture.context.workspaceId,
+			email: returningMember.email,
+			role: 'viewer',
+			tokenHash: sha256(token),
+			invitedByUserId: fixture.context.userId,
+			expiresAt: new Date(Date.now() + 60_000)
+		});
+
+		const results = await Promise.allSettled([
+			acceptInvitation(token, returningMember.id, returningMember.email),
+			acceptInvitation(token, returningMember.id, returningMember.email)
+		]);
+		expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+		expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+		await expect(
+			db
+				.select({ role: workspaceMember.role, status: workspaceMember.status })
+				.from(workspaceMember)
+				.where(
+					and(
+						eq(workspaceMember.workspaceId, fixture.context.workspaceId),
+						eq(workspaceMember.userId, returningMember.id)
+					)
+				)
+		).resolves.toEqual([{ role: 'viewer', status: 'active' }]);
+		await expect(getPendingInvitation(token)).resolves.toBeNull();
+	});
+
 	it('rejects invitation acceptance when the authenticated email differs', async () => {
 		const fixture = await createWorkspaceFixture();
 		const invited = await createUser('invited');
@@ -4170,7 +4254,7 @@ async function createWorkspaceFixture() {
 		role: 'owner'
 	};
 
-	return { context, categoryId: categoryRow.id };
+	return { context, categoryId: categoryRow.id, owner };
 }
 
 async function createMemberContext(

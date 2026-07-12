@@ -737,6 +737,10 @@ export const ptBrMessages = {
 		'Sugestões nunca alteram despesas até que você confirme uma decisão.',
 	'This statement currency does not match the workspace. You can only ignore this transaction.':
 		'A moeda deste extrato não corresponde à do workspace. Você só pode ignorar este lançamento.',
+	'This membership cannot be changed through an invitation.':
+		'Esta associação não pode ser alterada por meio de um convite.',
+	'This user is already an active workspace member.':
+		'Este usuário já é um membro ativo do workspace.',
 	'{count} days apart': '{count} dias de diferença',
 	'{count} transactions shown': '{count} lançamentos exibidos',
 	'{score}% description overlap': '{score}% de semelhança na descrição',

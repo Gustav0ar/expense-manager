@@ -61,6 +61,23 @@ export async function acceptInvitation(
 		if (!safeEqual(invitation.email.toLowerCase(), userEmail.toLowerCase())) {
 			throw error(403, translate(locale, 'This invite belongs to another email.'));
 		}
+		const [membership] = await tx
+			.select({ role: workspaceMember.role, status: workspaceMember.status })
+			.from(workspaceMember)
+			.where(
+				and(
+					eq(workspaceMember.workspaceId, invitation.workspaceId),
+					eq(workspaceMember.userId, userId)
+				)
+			)
+			.limit(1)
+			.for('update');
+		if (membership?.status === 'active' || membership?.role === 'owner') {
+			throw error(
+				409,
+				translate(locale, 'This membership cannot be changed through an invitation.')
+			);
+		}
 
 		const [accepted] = await tx
 			.update(workspaceInvitation)
@@ -76,21 +93,43 @@ export async function acceptInvitation(
 
 		if (!accepted) throw error(404, translate(locale, 'Invalid invite or expired.'));
 
-		await tx
-			.insert(workspaceMember)
-			.values({
-				workspaceId: invitation.workspaceId,
-				userId,
-				role: invitation.role,
-				status: 'active'
-			})
-			.onConflictDoUpdate({
-				target: [workspaceMember.workspaceId, workspaceMember.userId],
-				set: {
+		if (membership) {
+			const [reactivated] = await tx
+				.update(workspaceMember)
+				.set({ role: invitation.role, status: 'active' })
+				.where(
+					and(
+						eq(workspaceMember.workspaceId, invitation.workspaceId),
+						eq(workspaceMember.userId, userId),
+						eq(workspaceMember.status, 'disabled'),
+						eq(workspaceMember.role, membership.role)
+					)
+				)
+				.returning({ id: workspaceMember.id });
+			if (!reactivated) {
+				throw error(
+					409,
+					translate(locale, 'This membership cannot be changed through an invitation.')
+				);
+			}
+		} else {
+			const [created] = await tx
+				.insert(workspaceMember)
+				.values({
+					workspaceId: invitation.workspaceId,
+					userId,
 					role: invitation.role,
 					status: 'active'
-				}
-			});
+				})
+				.onConflictDoNothing()
+				.returning({ id: workspaceMember.id });
+			if (!created) {
+				throw error(
+					409,
+					translate(locale, 'This membership cannot be changed through an invitation.')
+				);
+			}
+		}
 
 		await tx.insert(auditEvent).values({
 			workspaceId: invitation.workspaceId,
