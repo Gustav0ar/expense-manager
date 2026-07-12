@@ -120,11 +120,18 @@ test('pins the VPS SSH host identity in deploy and rollback workflows', async ()
 	for (const workflow of workflows) {
 		expect(workflow).not.toContain('StrictHostKeyChecking=accept-new');
 		expect(workflow).toContain('VPS_SSH_HOST_FINGERPRINT');
-		expect(workflow).toContain('StrictHostKeyChecking=yes');
+		expect(workflow).toContain('scripts/ops/prepare-pinned-ssh.sh');
 		expect(workflow).toContain('fingerprint: ${{ secrets.VPS_SSH_HOST_FINGERPRINT }}');
 	}
 	expect(workflows[0]).toContain('"host_identifier_hash"');
 	expect(workflows[0]).not.toContain('"host_fingerprint"');
+	const helper = await readFile(
+		new URL('../../scripts/ops/prepare-pinned-ssh.sh', import.meta.url),
+		'utf8'
+	);
+	expect(helper).toContain('StrictHostKeyChecking=yes');
+	expect(helper).toContain('HostKeyAlgorithms=ecdsa-sha2-nistp256');
+	expect(helper).toContain('No scanned VPS host key matched VPS_SSH_HOST_FINGERPRINT.');
 });
 
 test('reports a real database outage through the health endpoint', async () => {
