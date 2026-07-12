@@ -6,6 +6,10 @@ if (!databaseUrl) throw new Error('DATABASE_URL is required');
 
 const client = postgres(databaseUrl, { max: 1, prepare: false });
 const rollbackSentinel = new Error('rollback usage-count fixture');
+const auditWorkspaceStride = 401;
+// Keep enough sparse workspace rows to distinguish the cursor index from an
+// index that filters by workspace and sorts every matching audit row.
+const auditEventCount = 205_000;
 let report;
 
 async function main() {
@@ -61,6 +65,12 @@ async function main() {
 					`expense-trash pagination did not use its cursor index: ${expenseTrashIndexes.join(', ')}`
 				);
 			}
+			const auditIndexes = await explainIndexes(tx, auditCursorPageSql, workspaceId);
+			if (!auditIndexes.includes('audit_event_workspace_id_desc_idx')) {
+				throw new Error(
+					`audit cursor pagination did not use its workspace/id index: ${auditIndexes.join(', ')}`
+				);
+			}
 
 			report = {
 				fixture: {
@@ -74,7 +84,8 @@ async function main() {
 				category: { baseline: categoryBaseline.metrics, optimized: categoryOptimized.metrics },
 				paymentMethod: { baseline: paymentBaseline.metrics, optimized: paymentOptimized.metrics },
 				budgetAlertHistory: { indexes: budgetAlertHistoryIndexes },
-				expenseTrash: { indexes: expenseTrashIndexes }
+				expenseTrash: { indexes: expenseTrashIndexes },
+				auditCursor: { indexes: auditIndexes }
 			};
 
 			throw rollbackSentinel;
@@ -184,6 +195,23 @@ async function seedFixture(tx, workspaceId, userId) {
 		where noise.created_by_user_id = ${userId}
 			and noise.name like 'Budget history noise %'
 	`;
+	await tx`
+		insert into audit_event (workspace_id, actor_user_id, action, entity_type)
+		select case
+			when series % ${auditWorkspaceStride} = 0 then ${workspaceId}
+			else (
+				select noise.id
+				from workspace noise
+				where noise.created_by_user_id = ${userId}
+					and noise.name like 'Budget history noise %'
+				order by noise.id
+				offset (series % 40)
+				limit 1
+			)
+		end,
+		${userId}, 'expense.updated', 'expense'
+		from generate_series(1, ${auditEventCount}) series
+	`;
 	await tx`analyze category`;
 	await tx`analyze expense`;
 	await tx`analyze recurring_expense`;
@@ -191,6 +219,7 @@ async function seedFixture(tx, workspaceId, userId) {
 	await tx`analyze category_rule`;
 	await tx`analyze payment_method`;
 	await tx`analyze budget_alert_delivery`;
+	await tx`analyze audit_event`;
 }
 
 async function explainAndRun(tx, query, workspaceId) {
@@ -387,6 +416,14 @@ const expenseTrashPageSql = `
 			)
 		)
 	order by e.deleted_at desc, e.id desc
+	limit 101
+`;
+
+const auditCursorPageSql = `
+	select id, action, entity_type, created_at
+	from audit_event
+	where workspace_id = $1 and id < 9223372036854775807
+	order by id desc
 	limit 101
 `;
 

@@ -1,4 +1,4 @@
-import { relations, sql } from 'drizzle-orm';
+import { desc, relations, sql } from 'drizzle-orm';
 import {
 	bigint,
 	bigserial,
@@ -979,6 +979,7 @@ export const auditEvent = pgTable(
 	},
 	(table) => [
 		index('audit_event_workspace_created_idx').on(table.workspaceId, table.createdAt),
+		index('audit_event_workspace_id_desc_idx').on(table.workspaceId, desc(table.id)),
 		index('audit_event_actor_idx').on(table.actorUserId)
 	]
 );
