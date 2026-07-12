@@ -805,9 +805,10 @@ satisfy this fixture; record production-like `EXPLAIN` evidence before proposing
 ## Background Job Freshness
 
 `/api/health` reports the recurring-expense scheduler, automatic budget-alert
-scheduler, durable invitation-delivery scheduler, expense-trash purge, email-delivery event retention and expired-registration cleanup
-and expired import-preview cleanup
-under `backgroundJobs`. Each job
+scheduler, durable invitation-delivery scheduler, attachment deletion and
+storage reconciliation, expense-trash purge, email-delivery event retention,
+expired-registration cleanup and expired import-preview cleanup under
+`backgroundJobs`. Each job
 exposes its attempt count, advisory-lock skip count, last
 attempt/completion/success/error timestamps, last duration, cumulative failed
 work items and latest failed count. Per-workspace errors from schedulers that
@@ -822,13 +823,15 @@ restarting a healthy web process can amplify an external provider or database
 incident. Monitor the JSON state or the structured `background_job:` error logs
 and alert when a job remains degraded beyond three expected intervals.
 
-The `attachmentDeletionScheduler` entry reports queue counts, terminal failures,
-the last successful cycle and report-only reconciliation counts. It never
-includes storage keys or filesystem paths. A missing active attachment, a
-terminal deletion failure or a storage scan failure degrades health. Pending
-deletions are expected during the 48-hour backup grace. Unknown disk files are
-reported but are never automatically deleted; investigate the matching audit
-and backup history before taking any manual action.
+The five-minute `attachmentDeletionScheduler` entry reports queue counts,
+terminal failures and the last successful deletion cycle without walking the
+entire upload tree. The six-hour `attachmentReconciliation` entry owns the
+report-only database/filesystem integrity scan. Neither entry includes storage
+keys or filesystem paths. A missing active attachment, a missing retained
+attachment, a terminal deletion failure or a storage scan failure degrades the
+corresponding job. Pending deletions are expected during the 48-hour backup
+grace. Unknown disk files are reported but are never automatically deleted;
+investigate the matching audit and backup history before taking manual action.
 
 `expenseTrashPurgeScheduler` runs every five minutes. It takes a distinct
 session advisory lock and removes only rows whose 30-day recovery period has

@@ -87,6 +87,42 @@ export async function runAttachmentDeletionWorker(options: AttachmentDeletionWor
 	}
 }
 
+export async function runAttachmentStorageReconciliation(
+	options: Pick<AttachmentDeletionWorkerOptions, 'uploadDir' | 'workspaceId'> = {}
+) {
+	const workspaceId = resolveAttachmentWorkerWorkspaceId(options.workspaceId);
+	const reserved = await advisoryLockClient.reserve();
+	try {
+		const [lock] = await reserved<{ acquired: boolean }[]>`
+			select pg_try_advisory_lock(${attachmentStorageLockKey}) as acquired
+		`;
+		if (!lock?.acquired) return { failed: 0, reconciliation: null, skipped: true };
+
+		try {
+			const reconciliation = await reconcileAttachmentStorage({
+				uploadDir: options.uploadDir,
+				workspaceId
+			}).catch(() => ({
+				active: 0,
+				retained: 0,
+				disk: 0,
+				missingActive: 0,
+				missingRetained: 0,
+				unknownDisk: 0,
+				scanFailed: true
+			}));
+			return {
+				failed: reconciliation.missingActive + reconciliation.missingRetained,
+				reconciliation
+			};
+		} finally {
+			await reserved`select pg_advisory_unlock(${attachmentStorageLockKey})`;
+		}
+	} finally {
+		reserved.release();
+	}
+}
+
 export function resolveAttachmentWorkerWorkspaceId(explicitWorkspaceId?: number) {
 	if (explicitWorkspaceId != null) return explicitWorkspaceId;
 	const configuredWorkspaceId = Number.parseInt(
@@ -160,9 +196,8 @@ async function processAttachmentDeletions(options: AttachmentDeletionWorkerOptio
 		${options.workspaceId == null ? sql`` : sql`and "workspace_id" = ${options.workspaceId}`}
 	`);
 	const reconciliation =
-		options.reconcile === false
-			? null
-			: await reconcileAttachmentStorage({
+		options.reconcile === true
+			? await reconcileAttachmentStorage({
 					uploadDir,
 					workspaceId: options.workspaceId
 				}).catch(() => ({
@@ -173,7 +208,8 @@ async function processAttachmentDeletions(options: AttachmentDeletionWorkerOptio
 					missingRetained: 0,
 					unknownDisk: 0,
 					scanFailed: true
-				}));
+				}))
+			: null;
 
 	return {
 		processed: claimed.length,
