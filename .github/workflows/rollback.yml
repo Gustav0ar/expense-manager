@@ -95,9 +95,11 @@ jobs:
           fi
           chmod 600 "${KNOWN_HOSTS_FILE}"
 
+          # Match appleboy/ssh-action's Go SSH client so both steps pin the same key.
           ssh -i "${SSH_KEY_FILE}" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
+            -o HostKeyAlgorithms=ecdsa-sha2-nistp256 \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="${KNOWN_HOSTS_FILE}" \
             -o ConnectTimeout=15 \
