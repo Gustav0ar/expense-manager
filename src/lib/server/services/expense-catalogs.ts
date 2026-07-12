@@ -40,11 +40,15 @@ type CatalogSelectionOptions = {
 	};
 };
 
-export async function listExpenseCatalogs(context: WorkspaceContext, includeArchived = false) {
+export async function listExpenseCatalogs(
+	context: WorkspaceContext,
+	includeArchived = false,
+	includeUsage = true
+) {
 	const [paymentMethods, vendors, costCenters] = await Promise.all([
-		listPaymentMethods(context.workspaceId, includeArchived),
-		listVendors(context.workspaceId, includeArchived),
-		listCostCenters(context.workspaceId, includeArchived)
+		listPaymentMethods(context.workspaceId, includeArchived, includeUsage),
+		listVendors(context.workspaceId, includeArchived, includeUsage),
+		listCostCenters(context.workspaceId, includeArchived, includeUsage)
 	]);
 
 	return { paymentMethods, vendors, costCenters };
@@ -354,7 +358,13 @@ function canUseArchivedCatalog(id?: number | null, allowedId?: number | null) {
 	return Boolean(id && allowedId && id === allowedId);
 }
 
-async function listPaymentMethods(workspaceId: number, includeArchived: boolean) {
+async function listPaymentMethods(
+	workspaceId: number,
+	includeArchived: boolean,
+	includeUsage: boolean
+) {
+	if (!includeUsage)
+		return listCatalogItemsWithoutUsage('paymentMethod', workspaceId, includeArchived);
 	const rows = await db.execute<CatalogRow>(
 		paymentMethodUsageSql(workspaceId, { includeArchived })
 	);
@@ -362,7 +372,8 @@ async function listPaymentMethods(workspaceId: number, includeArchived: boolean)
 	return rows.map((row) => toCatalogItem(row)!);
 }
 
-async function listVendors(workspaceId: number, includeArchived: boolean) {
+async function listVendors(workspaceId: number, includeArchived: boolean, includeUsage: boolean) {
+	if (!includeUsage) return listCatalogItemsWithoutUsage('vendor', workspaceId, includeArchived);
 	const rows = await db.execute<CatalogRow>(sql`
 		select v.id,
 			v.name,
@@ -381,7 +392,13 @@ async function listVendors(workspaceId: number, includeArchived: boolean) {
 	return rows.map((row) => toCatalogItem(row)!);
 }
 
-async function listCostCenters(workspaceId: number, includeArchived: boolean) {
+async function listCostCenters(
+	workspaceId: number,
+	includeArchived: boolean,
+	includeUsage: boolean
+) {
+	if (!includeUsage)
+		return listCatalogItemsWithoutUsage('costCenter', workspaceId, includeArchived);
 	const rows = await db.execute<CatalogRow>(sql`
 		select cc.id,
 			cc.name,
@@ -411,6 +428,23 @@ function toCatalogItem(row?: CatalogRow): ExpenseCatalogItem | null {
 		recurringCount: Number(row.recurring_count ?? 0),
 		createdAt: row.created_at
 	};
+}
+
+async function listCatalogItemsWithoutUsage(
+	kind: ExpenseCatalogKind,
+	workspaceId: number,
+	includeArchived: boolean
+) {
+	const table =
+		kind === 'paymentMethod' ? 'payment_method' : kind === 'vendor' ? 'vendor' : 'cost_center';
+	const rows = await db.execute<CatalogRow>(sql`
+		select id, name, is_archived, created_at, 0::int as expense_count, 0::int as recurring_count
+		from ${sql.raw(table)}
+		where workspace_id = ${workspaceId}
+			${includeArchived ? sql`` : sql`and is_archived = false`}
+		order by name asc, id asc
+	`);
+	return rows.map((row) => toCatalogItem(row)!);
 }
 
 async function executeCatalogRows(executor: CatalogExecutor, query: SQL) {

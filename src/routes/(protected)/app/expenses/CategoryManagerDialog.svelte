@@ -27,10 +27,11 @@
 		categories: CategoryItem[];
 		returnTo: string;
 		locale: string;
+		onRefresh?: () => void | Promise<void>;
 		t: (key: string, params?: Record<string, string | number | null | undefined>) => string;
 	};
 
-	let { active, categories, returnTo, locale, t }: Props = $props();
+	let { active, categories, returnTo, locale, onRefresh, t }: Props = $props();
 	const pageSize = 8;
 	let search = $state('');
 	let page = $state(1);
@@ -105,6 +106,7 @@
 				if (result.type === 'success') {
 					const data = categoryActionData(result.data);
 					await update({ reset: resetOnSuccess, invalidateAll: true });
+					await onRefresh?.();
 					if (resetOnSuccess) {
 						search = '';
 						page = 1;

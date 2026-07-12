@@ -24,6 +24,8 @@
 	const activeCategories = $derived(
 		data.categories.filter((c: PageData['categories'][number]) => !c.isArchived)
 	);
+	type ManagementData = Pick<PageData, 'categories' | 'catalogs'>;
+	let managementData = $state<ManagementData | null>(null);
 
 	let deleteDialog: DeleteExpenseDialog | undefined = $state();
 	let supportCatalogDialog: SupportCatalogDialog | undefined = $state();
@@ -119,7 +121,17 @@
 	}
 
 	function openSupportCatalogDialog() {
-		supportCatalogDialog?.open();
+		void supportCatalogDialog?.open();
+	}
+
+	async function loadManagementData() {
+		try {
+			const response = await fetch(resolve('/app/expenses/management-data'));
+			if (!response.ok) return;
+			managementData = (await response.json()) as ManagementData;
+		} catch {
+			// The current active options remain usable if the management refresh fails.
+		}
 	}
 
 	function hasCatalogOption(items: { id: number }[], id?: number | null) {
@@ -196,10 +208,11 @@
 
 	<SupportCatalogDialog
 		bind:this={supportCatalogDialog}
-		catalogs={data.catalogs}
-		categories={data.categories}
+		catalogs={managementData?.catalogs ?? data.catalogs}
+		categories={managementData?.categories ?? data.categories}
 		returnTo={data.returnTo}
 		locale={data.locale}
+		onRefresh={loadManagementData}
 		{t}
 	/>
 
