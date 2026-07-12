@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { formatCents } from '$lib/utils/format';
-	import { translate } from '$lib/i18n';
 	import { onMount } from 'svelte';
 	import { formatPeriodLabel, getBrowserLocales, type DatePeriod } from '$lib/utils/date-format';
 
@@ -18,7 +17,7 @@
 		locale
 	}: {
 		items: Item[];
-		empty?: string;
+		empty: string;
 		period?: DatePeriod;
 		currency?: string;
 		locale?: string;
@@ -26,7 +25,6 @@
 
 	let locales = $state<Intl.LocalesArgument>(undefined);
 	const max = $derived(Math.max(...items.map((item) => item.totalCents), 0));
-	const emptyMessage = $derived(empty ?? translate(locale, 'No data'));
 
 	function formatLabel(label: string) {
 		const resolvedLocales = locale ?? locales;
@@ -46,7 +44,7 @@
 <svelte:window onlanguagechange={updateLocales} />
 
 {#if items.length === 0}
-	<p class="empty">{emptyMessage}</p>
+	<p class="empty">{empty}</p>
 {:else}
 	<div class="bar-list">
 		{#each items as item (item.label)}

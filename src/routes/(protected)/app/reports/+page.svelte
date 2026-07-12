@@ -341,7 +341,13 @@
 			<div class="panel-heading">
 				<h3>{t('Result')}</h3>
 			</div>
-			<BarList items={data.report} period={reportPeriod} {currency} locale={data.locale} />
+			<BarList
+				items={data.report}
+				period={reportPeriod}
+				empty={t('No data')}
+				{currency}
+				locale={data.locale}
+			/>
 
 			<div class="table-wrap">
 				<table>
