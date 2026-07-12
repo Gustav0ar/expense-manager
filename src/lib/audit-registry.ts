@@ -3,6 +3,7 @@ export const auditActions = [
 	['bank_transaction.created', 'Bank transaction created'],
 	['bank_transaction.ignored', 'Bank transaction ignored'],
 	['bank_transaction.matched', 'Bank transaction matched'],
+	['bank_transaction.reversed', 'Bank transaction reconciliation reversed'],
 	['budget.alert_delivery_retried', 'Budget alert delivery retried'],
 	['budget.alerts_disabled', 'Budget alerts disabled'],
 	['budget.alerts_enabled', 'Budget alerts enabled'],
