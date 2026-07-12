@@ -1250,10 +1250,11 @@ test('edits, reviews, pays, attaches and deletes an expense', async ({ page }) =
 	await expect(row).toContainText('Conciliada');
 
 	await row.locator('summary').click();
+	const receiptBody = Buffer.alloc(700 * 1024, 'a');
 	await row.locator('input[type="file"]').setInputFiles({
 		name: 'recibo.txt',
 		mimeType: 'text/plain',
-		buffer: Buffer.from('recibo fluxo completo')
+		buffer: receiptBody
 	});
 	await row.getByRole('button', { name: 'Anexar' }).click();
 	row = expenseRow(page, 'Fluxo atualizado');
@@ -1264,7 +1265,7 @@ test('edits, reviews, pays, attaches and deletes an expense', async ({ page }) =
 	expect(attachmentHref).toBeTruthy();
 	const attachmentResponse = await page.request.get(attachmentHref!);
 	await expect(attachmentResponse).toBeOK();
-	expect(await attachmentResponse.text()).toBe('recibo fluxo completo');
+	expect((await attachmentResponse.body()).length).toBe(receiptBody.length);
 
 	await row.getByRole('button', { name: 'Excluir Fluxo atualizado' }).click();
 	await expect(page.getByRole('dialog', { name: 'Excluir despesa?' })).toBeVisible();

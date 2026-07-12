@@ -35,6 +35,7 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       DATABASE_URL: ${DATABASE_URL:-}
       DB_POOL_MAX: ${DB_POOL_MAX:-5}
+      BODY_SIZE_LIMIT: ${BODY_SIZE_LIMIT:-3M}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
       TRUSTED_PROXY_CIDR: ${TRUSTED_PROXY_CIDR:-}
       UPLOAD_DIR: /app/uploads
