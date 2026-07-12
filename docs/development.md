@@ -97,6 +97,12 @@ The expense list is exposed as an ARIA table with explicit column indexes, expan
 
 File upload creates a short-lived, user- and workspace-owned preview and must not create expenses or auxiliary catalog entries. Confirmation accepts only stable source row IDs, reloads normalized rows from the server-owned preview, validates its expiry and source checksum, and reruns duplicate detection while holding the workspace import lock. Keep confirmation idempotent: repeated or concurrent submissions must return the one linked import batch.
 
+Pending previews expire after 15 minutes. The hourly cleanup removes expired
+pending previews and retains confirmed previews for one additional day so an
+immediate repeated confirmation can still return the original batch result.
+Preview JSON is transient workflow state and must not become permanent backup
+content.
+
 Imported expenses store a baseline hash of their material fields. Batch undo locks the batch and its expenses and soft-deletes only rows that are still unpaid, unreconciled, active and baseline-identical. Edited or financially protected rows are counted as skipped. Attachment tombstones, durable deletion intents, expense changes, batch counters and audit events belong to the same transaction; never hard-delete imported expenses during undo.
 
 Delete and import undo both move expenses into a 30-day recoverable trash.

@@ -5,6 +5,7 @@ import { pruneEmailDeliveryEvents } from '$lib/server/services/email-delivery-ev
 import { runInvitationDeliveryScheduler } from '$lib/server/services/invitation-delivery';
 import { runAttachmentDeletionWorker } from '$lib/server/services/attachment-deletion';
 import { runExpenseTrashPurgeWorker } from '$lib/server/services/expense-trash';
+import { pruneExpiredImportPreviews } from '$lib/server/services/imports';
 
 export const verificationCleanupIntervalMs = 60_000;
 export const recurringSchedulerIntervalMs = 5 * 60 * 1000;
@@ -13,6 +14,7 @@ export const emailDeliveryCleanupIntervalMs = 24 * 60 * 60 * 1000;
 export const invitationDeliverySchedulerIntervalMs = 60_000;
 export const attachmentDeletionSchedulerIntervalMs = 5 * 60 * 1000;
 export const expenseTrashPurgeSchedulerIntervalMs = 5 * 60 * 1000;
+export const importPreviewCleanupIntervalMs = 60 * 60 * 1000;
 
 type BackgroundJobName =
 	| 'verificationCleanup'
@@ -21,6 +23,7 @@ type BackgroundJobName =
 	| 'invitationDeliveryScheduler'
 	| 'attachmentDeletionScheduler'
 	| 'expenseTrashPurgeScheduler'
+	| 'importPreviewCleanup'
 	| 'emailDeliveryCleanup';
 type BackgroundJobResult = {
 	skipped?: boolean;
@@ -63,6 +66,7 @@ type BackgroundJobCoordinatorOptions = {
 	invitationDeliveryScheduler?: BackgroundJobRunner;
 	attachmentDeletionScheduler?: BackgroundJobRunner;
 	expenseTrashPurgeScheduler?: BackgroundJobRunner;
+	importPreviewCleanup?: BackgroundJobRunner;
 	emailDeliveryCleanup?: BackgroundJobRunner;
 	verificationIntervalMs?: number;
 	recurringIntervalMs?: number;
@@ -70,6 +74,7 @@ type BackgroundJobCoordinatorOptions = {
 	invitationDeliveryIntervalMs?: number;
 	attachmentDeletionIntervalMs?: number;
 	expenseTrashPurgeIntervalMs?: number;
+	importPreviewCleanupIntervalMs?: number;
 	emailDeliveryCleanupIntervalMs?: number;
 	now?: () => number;
 	setIntervalFn?: (callback: () => void, intervalMs: number) => TimerHandle;
@@ -111,6 +116,7 @@ export class BackgroundJobCoordinator {
 		invitationDeliveryScheduler: initialJobState(),
 		attachmentDeletionScheduler: initialJobState(),
 		expenseTrashPurgeScheduler: initialJobState(),
+		importPreviewCleanup: initialJobState(),
 		emailDeliveryCleanup: initialJobState()
 	};
 	private readonly nextRunAt: Record<BackgroundJobName, number> = {
@@ -120,6 +126,7 @@ export class BackgroundJobCoordinator {
 		invitationDeliveryScheduler: 0,
 		attachmentDeletionScheduler: 0,
 		expenseTrashPurgeScheduler: 0,
+		importPreviewCleanup: 0,
 		emailDeliveryCleanup: 0
 	};
 	private readonly promises: Partial<Record<BackgroundJobName, Promise<void>>> = {};
@@ -135,6 +142,7 @@ export class BackgroundJobCoordinator {
 			attachmentDeletionScheduler:
 				options.attachmentDeletionScheduler ?? runAttachmentDeletionWorker,
 			expenseTrashPurgeScheduler: options.expenseTrashPurgeScheduler ?? runExpenseTrashPurgeWorker,
+			importPreviewCleanup: options.importPreviewCleanup ?? pruneExpiredImportPreviews,
 			emailDeliveryCleanup: options.emailDeliveryCleanup ?? pruneEmailDeliveryEvents
 		};
 		this.intervals = {
@@ -147,6 +155,8 @@ export class BackgroundJobCoordinator {
 				options.attachmentDeletionIntervalMs ?? attachmentDeletionSchedulerIntervalMs,
 			expenseTrashPurgeScheduler:
 				options.expenseTrashPurgeIntervalMs ?? expenseTrashPurgeSchedulerIntervalMs,
+			importPreviewCleanup:
+				options.importPreviewCleanupIntervalMs ?? importPreviewCleanupIntervalMs,
 			emailDeliveryCleanup: options.emailDeliveryCleanupIntervalMs ?? emailDeliveryCleanupIntervalMs
 		};
 		this.now = options.now ?? Date.now;
@@ -172,6 +182,7 @@ export class BackgroundJobCoordinator {
 		this.triggerJob('invitationDeliveryScheduler');
 		this.triggerJob('attachmentDeletionScheduler');
 		this.triggerJob('expenseTrashPurgeScheduler');
+		this.triggerJob('importPreviewCleanup');
 		this.triggerJob('emailDeliveryCleanup');
 	}
 
@@ -195,6 +206,7 @@ export class BackgroundJobCoordinator {
 			invitationDeliveryScheduler: this.publicJobState('invitationDeliveryScheduler', now),
 			attachmentDeletionScheduler: this.publicJobState('attachmentDeletionScheduler', now),
 			expenseTrashPurgeScheduler: this.publicJobState('expenseTrashPurgeScheduler', now),
+			importPreviewCleanup: this.publicJobState('importPreviewCleanup', now),
 			emailDeliveryCleanup: this.publicJobState('emailDeliveryCleanup', now)
 		};
 		const values = Object.values(jobs);

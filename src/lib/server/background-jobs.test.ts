@@ -31,6 +31,7 @@ describe('BackgroundJobCoordinator', () => {
 			invitationDeliveryScheduler,
 			attachmentDeletionScheduler,
 			expenseTrashPurgeScheduler: vi.fn().mockResolvedValue({}),
+			importPreviewCleanup: vi.fn().mockResolvedValue({ deletedPreviews: 0 }),
 			emailDeliveryCleanup,
 			verificationIntervalMs: 100,
 			recurringIntervalMs: 300,
@@ -73,6 +74,7 @@ describe('BackgroundJobCoordinator', () => {
 			invitationDeliveryScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			attachmentDeletionScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			expenseTrashPurgeScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			importPreviewCleanup: vi.fn().mockResolvedValue({ skipped: true }),
 			emailDeliveryCleanup: vi.fn().mockResolvedValue({ skipped: true }),
 			verificationIntervalMs: 100,
 			recurringIntervalMs: 100
@@ -104,6 +106,7 @@ describe('BackgroundJobCoordinator', () => {
 			invitationDeliveryScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			attachmentDeletionScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			expenseTrashPurgeScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			importPreviewCleanup: vi.fn().mockResolvedValue({ skipped: true }),
 			emailDeliveryCleanup: vi.fn().mockResolvedValue({ skipped: true }),
 			verificationIntervalMs: 100,
 			recurringIntervalMs: 100,
@@ -141,6 +144,7 @@ describe('BackgroundJobCoordinator', () => {
 			invitationDeliveryScheduler,
 			attachmentDeletionScheduler,
 			expenseTrashPurgeScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			importPreviewCleanup: vi.fn().mockResolvedValue({ skipped: true }),
 			emailDeliveryCleanup,
 			verificationIntervalMs: 100,
 			recurringIntervalMs: 100
@@ -170,6 +174,7 @@ describe('BackgroundJobCoordinator', () => {
 				.fn()
 				.mockResolvedValue({ processed: 0, completed: 0, pending: 2, failed: 0 }),
 			expenseTrashPurgeScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			importPreviewCleanup: vi.fn().mockResolvedValue({ skipped: true }),
 			emailDeliveryCleanup: vi.fn().mockResolvedValue({ skipped: true }),
 			invitationDeliveryIntervalMs: 100
 		});
@@ -206,6 +211,7 @@ describe('BackgroundJobCoordinator', () => {
 			invitationDeliveryScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			attachmentDeletionScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			expenseTrashPurgeScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			importPreviewCleanup: vi.fn().mockResolvedValue({ skipped: true }),
 			emailDeliveryCleanup: vi.fn().mockResolvedValue({ skipped: true }),
 			recurringIntervalMs: 100
 		});
@@ -247,7 +253,8 @@ describe('BackgroundJobCoordinator', () => {
 					scanFailed: false
 				}
 			}),
-			expenseTrashPurgeScheduler: vi.fn().mockResolvedValue({ skipped: true })
+			expenseTrashPurgeScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			importPreviewCleanup: vi.fn().mockResolvedValue({ skipped: true })
 		});
 
 		coordinator.trigger();

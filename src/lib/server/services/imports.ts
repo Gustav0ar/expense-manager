@@ -48,7 +48,10 @@ import type { WorkspaceContext } from './workspaces';
 const maxImportBytes = 1 * 1024 * 1024;
 const maxImportRows = 500;
 export const importPreviewTtlMs = 15 * 60 * 1000;
+export const confirmedImportPreviewRetentionMs = 24 * 60 * 60 * 1000;
+export const importPreviewCleanupBatchSize = 1000;
 const importLockNamespace = 'expense-manager:workspace-import:v1';
+const importPreviewCleanupLockName = 'expense-manager:import-preview-cleanup:v1';
 
 export type ImportExpensesInput = {
 	sourceType: ExpenseImportSource;
@@ -83,6 +86,41 @@ export async function listImportBatches(context: WorkspaceContext) {
 		.where(eq(importBatch.workspaceId, context.workspaceId))
 		.orderBy(desc(importBatch.createdAt))
 		.limit(20);
+}
+
+export async function pruneExpiredImportPreviews(now = new Date()) {
+	const confirmedCutoff = new Date(now.getTime() - confirmedImportPreviewRetentionMs);
+	const nowIso = now.toISOString();
+	const confirmedCutoffIso = confirmedCutoff.toISOString();
+	return db.transaction(async (tx) => {
+		const [lock] = await tx.execute<{ acquired: boolean }>(sql`
+			select pg_try_advisory_xact_lock(
+				hashtextextended(${importPreviewCleanupLockName}, 0)
+			) as acquired
+		`);
+		if (!lock?.acquired) return { deletedPreviews: 0, skipped: true };
+
+		const deleted = await tx.execute<{ id: number }>(sql`
+			with expired as (
+				select ${importPreview.id}
+				from ${importPreview}
+				where (
+					${importPreview.status} = 'pending'
+					and ${importPreview.expiresAt} <= ${nowIso}::timestamptz
+				) or (
+					${importPreview.status} = 'confirmed'
+					and ${importPreview.expiresAt} <= ${confirmedCutoffIso}::timestamptz
+				)
+				order by ${importPreview.expiresAt}, ${importPreview.id}
+				limit ${importPreviewCleanupBatchSize}
+				for update skip locked
+			)
+			delete from ${importPreview}
+			where ${importPreview.id} in (select id from expired)
+			returning ${importPreview.id} as id
+		`);
+		return { deletedPreviews: deleted.length };
+	});
 }
 
 /** Pure import analysis. All database-derived inputs are explicit and the returned rows are stable. */
