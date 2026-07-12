@@ -53,25 +53,25 @@ ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256
 If `VPS_ENV_FILE` is not set, the deploy workflow builds the VPS `.env` from
 individual protected environment secrets:
 
-| Secret                        | Notes                                                                               |
-| ----------------------------- | ----------------------------------------------------------------------------------- |
-| `DOMAIN_NAME`                 | Bare production hostname.                                                           |
-| `ORIGIN`                      | Full production origin.                                                             |
-| `BETTER_AUTH_SECRET`          | High-entropy app secret.                                                            |
-| `BETTER_AUTH_SECRET_PREVIOUS` | Optional old application secret used only during a bounded invitation-key rotation. |
-| `POSTGRES_PASSWORD`           | Database password.                                                                  |
-| `RESTIC_REPOSITORY`           | Remote off-VPS restic repository. Required when `BACKUP_ENABLED=true`.              |
-| `RESTIC_PASSWORD`             | High-entropy restic repository password. Required when `BACKUP_ENABLED=true`.       |
-| `MAILJET_API_KEY`             | Mailjet transactional email API key. Required when `EMAIL_PROVIDER=mailjet`.        |
-| `MAILJET_SECRET_KEY`          | Mailjet transactional email secret key. Required when `EMAIL_PROVIDER=mailjet`.     |
-| `MAILJET_FROM`                | Verified Mailjet sender address, optionally with name.                              |
-| `SENDER_API_TOKEN`            | Legacy Sender transactional email API token.                                        |
-| `SENDER_FROM`                 | Legacy Sender verified sender address, optionally with name.                        |
-| `TRUSTED_ORIGINS`             | Optional comma-separated extra origins.                                             |
-| `AWS_ACCESS_KEY_ID`           | Required only for S3-compatible restic.                                             |
-| `AWS_SECRET_ACCESS_KEY`       | Required only for S3-compatible restic.                                             |
-| `AWS_DEFAULT_REGION`          | Optional S3-compatible region.                                                      |
-| `SMTP_*`                      | Optional SMTP fallback values.                                                      |
+| Secret                        | Notes                                                                                                 |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `DOMAIN_NAME`                 | Bare production hostname.                                                                             |
+| `ORIGIN`                      | Full production origin.                                                                               |
+| `BETTER_AUTH_SECRET`          | High-entropy app secret.                                                                              |
+| `BETTER_AUTH_SECRET_PREVIOUS` | Optional comma-separated old application secrets used during bounded invitation and MFA-key rotation. |
+| `POSTGRES_PASSWORD`           | Database password.                                                                                    |
+| `RESTIC_REPOSITORY`           | Remote off-VPS restic repository. Required when `BACKUP_ENABLED=true`.                                |
+| `RESTIC_PASSWORD`             | High-entropy restic repository password. Required when `BACKUP_ENABLED=true`.                         |
+| `MAILJET_API_KEY`             | Mailjet transactional email API key. Required when `EMAIL_PROVIDER=mailjet`.                          |
+| `MAILJET_SECRET_KEY`          | Mailjet transactional email secret key. Required when `EMAIL_PROVIDER=mailjet`.                       |
+| `MAILJET_FROM`                | Verified Mailjet sender address, optionally with name.                                                |
+| `SENDER_API_TOKEN`            | Legacy Sender transactional email API token.                                                          |
+| `SENDER_FROM`                 | Legacy Sender verified sender address, optionally with name.                                          |
+| `TRUSTED_ORIGINS`             | Optional comma-separated extra origins.                                                               |
+| `AWS_ACCESS_KEY_ID`           | Required only for S3-compatible restic.                                                               |
+| `AWS_SECRET_ACCESS_KEY`       | Required only for S3-compatible restic.                                                               |
+| `AWS_DEFAULT_REGION`          | Optional S3-compatible region.                                                                        |
+| `SMTP_*`                      | Optional SMTP fallback values.                                                                        |
 
 ### Environment Variables
 
@@ -215,10 +215,11 @@ or a port. `ORIGIN` is the full browser origin.
 Use Mailjet in production if users need password reset, invitations or email
 verification. See [`docs/email.md`](docs/email.md) for the Mailjet setup.
 
-### Rotate the application secret without stranding invitations
+### Rotate the application secret without stranding invitations or MFA
 
-Queued invitation tokens are encrypted with a key derived from the application
-secret. Rotate with an overlap:
+Queued invitation tokens and MFA seeds are encrypted with separate,
+domain-separated keys derived from the application secret. Rotate with an
+overlap:
 
 1. In the protected `production` environment, set
    `BETTER_AUTH_SECRET_PREVIOUS` to the exact current value of
@@ -228,16 +229,24 @@ secret. Rotate with an overlap:
    command output. On the VPS, `deploy-vps.sh` writes separate private Compose
    secret files and mounts the previous one at
    `/run/secrets/better_auth_secret_previous`.
-3. Verify `/api/health` and accept a queued pre-rotation invitation.
-4. Keep the old value for at least seven days, or explicitly resend all remaining
-   pending invitations.
+3. Verify `/api/health`, accept a queued pre-rotation invitation and complete an
+   MFA challenge for a pre-rotation MFA account. A successful TOTP or recovery
+   challenge compare-and-swaps that account's seed to the current key; failed
+   challenges never rewrite it.
+4. Keep the old value until all pending invitations have expired or been
+   explicitly resent and every MFA-enabled account has completed a successful
+   post-rotation challenge. Re-enroll any inactive MFA account before removing a
+   key it still needs.
 5. Delete the protected `BETTER_AUTH_SECRET_PREVIOUS` secret and deploy again.
    The optional secret file becomes empty and the application drops the old key.
 
 If `VPS_ENV_FILE` mode is used, perform the same steps by keeping both keys in
 the private file during overlap and removing only
 `BETTER_AUTH_SECRET_PREVIOUS` afterward. Never remove the old value before the
-new container has successfully started with both keys.
+new container has successfully started with both keys and the invitation/MFA
+overlap conditions above are complete. Existing legacy MFA ciphertext is read
+in place and upgraded after successful use; rotation requires no destructive
+database migration.
 
 The workflow preserves deploy-generated state keys from the existing VPS `.env`
 when it refreshes the file from GitHub secrets:

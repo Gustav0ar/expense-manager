@@ -1,12 +1,13 @@
 import { error } from '@sveltejs/kit';
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { and, eq, gt, isNull, lte, or, sql } from 'drizzle-orm';
-import { getPrivateEnv, getPrivateSecret } from '$lib/server/config';
+import { getPrivateEnv } from '$lib/server/config';
 import { db } from '$lib/server/db';
 import { auditEvent, mfaSession, userMfaConfig } from '$lib/server/db/schema';
 import { safeEqual, sha256 } from '$lib/server/utils/crypto';
 import { buildOtpAuthUri, generateTotpCode, generateTotpSecret } from '$lib/server/utils/totp';
 import { translate, type SupportedLocale } from '$lib/i18n';
+import { decryptMfaSecret, encryptMfaSecret, MfaSecretDecryptionError } from './mfa-secret';
 
 const mfaSessionTtlMs = 12 * 60 * 60 * 1000;
 const cleanupIntervalMs = 60 * 60 * 1000;
@@ -63,14 +64,14 @@ export async function enableMfa(input: {
 			.insert(userMfaConfig)
 			.values({
 				userId: input.userId,
-				encryptedSecret: encryptSecret(input.secret, input.locale),
+				encryptedSecret: encryptMfaSecret(input.secret),
 				recoveryCodeHashes,
 				lastUsedTotpCounter: enrollCounter
 			})
 			.onConflictDoUpdate({
 				target: userMfaConfig.userId,
 				set: {
-					encryptedSecret: encryptSecret(input.secret, input.locale),
+					encryptedSecret: encryptMfaSecret(input.secret),
 					recoveryCodeHashes,
 					lastUsedTotpCounter: enrollCounter,
 					enabledAt: new Date(),
@@ -178,7 +179,18 @@ async function verifyMfaCodeForUser(userId: string, code: string, locale: Suppor
 
 	if (!config) return false;
 
-	const secret = decryptSecret(config.encryptedSecret, locale);
+	let decrypted: ReturnType<typeof decryptMfaSecret>;
+	try {
+		decrypted = decryptMfaSecret(config.encryptedSecret);
+	} catch (decryptionError) {
+		if (decryptionError instanceof MfaSecretDecryptionError)
+			throw error(500, translate(locale, 'MFA configuration is invalid.'));
+		throw decryptionError;
+	}
+	const replacementCiphertext = decrypted.needsReEncryption
+		? encryptMfaSecret(decrypted.secret)
+		: null;
+	const secret = decrypted.secret;
 	const totpResult = findAcceptedTotpCounter(secret, code);
 	if (totpResult !== null) {
 		// Atomically claim this counter: only succeeds when the row still has
@@ -186,10 +198,17 @@ async function verifyMfaCodeForUser(userId: string, code: string, locale: Suppor
 		// replays within the acceptance window.
 		const updated = await db
 			.update(userMfaConfig)
-			.set({ lastUsedTotpCounter: totpResult })
+			.set({
+				lastUsedTotpCounter: totpResult,
+				updatedAt: new Date(),
+				...(replacementCiphertext ? { encryptedSecret: replacementCiphertext } : {})
+			})
 			.where(
 				and(
 					eq(userMfaConfig.userId, userId),
+					replacementCiphertext
+						? eq(userMfaConfig.encryptedSecret, config.encryptedSecret)
+						: undefined,
 					or(
 						isNull(userMfaConfig.lastUsedTotpCounter),
 						sql`${userMfaConfig.lastUsedTotpCounter} < ${totpResult}`
@@ -212,7 +231,15 @@ async function verifyMfaCodeForUser(userId: string, code: string, locale: Suppor
 				from jsonb_array_elements_text(recovery_code_hashes) as code(value)
 				where code.value <> ${matchedHash}
 			),
-			updated_at = now()
+				updated_at = now()
+				${
+					replacementCiphertext
+						? sql`, encrypted_secret = case
+							when encrypted_secret = ${config.encryptedSecret} then ${replacementCiphertext}
+							else encrypted_secret
+						end`
+						: sql``
+				}
 		where user_id = ${userId}
 			and recovery_code_hashes @> ${JSON.stringify([matchedHash])}::jsonb
 		returning user_id
@@ -253,39 +280,6 @@ async function cleanupExpiredMfaSessions() {
 		.delete(mfaSession)
 		.where(lte(mfaSession.expiresAt, new Date()))
 		.catch(() => {});
-}
-
-function encryptSecret(secret: string, locale: SupportedLocale = 'en') {
-	const key = encryptionKey(locale);
-	const iv = randomBytes(12);
-	const cipher = createCipheriv('aes-256-gcm', key, iv);
-	const encrypted = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
-	const tag = cipher.getAuthTag();
-	return `v1:${iv.toString('base64url')}:${tag.toString('base64url')}:${encrypted.toString('base64url')}`;
-}
-
-function decryptSecret(payload: string, locale: SupportedLocale = 'en') {
-	const [version, ivValue, tagValue, encryptedValue] = payload.split(':');
-	if (version !== 'v1' || !ivValue || !tagValue || !encryptedValue) {
-		throw error(500, translate(locale, 'MFA configuration is invalid.'));
-	}
-
-	const decipher = createDecipheriv(
-		'aes-256-gcm',
-		encryptionKey(locale),
-		Buffer.from(ivValue, 'base64url')
-	);
-	decipher.setAuthTag(Buffer.from(tagValue, 'base64url'));
-	return Buffer.concat([
-		decipher.update(Buffer.from(encryptedValue, 'base64url')),
-		decipher.final()
-	]).toString('utf8');
-}
-
-function encryptionKey(locale: SupportedLocale = 'en') {
-	const secret = getPrivateSecret('BETTER_AUTH_SECRET');
-	if (!secret) throw error(500, translate(locale, 'BETTER_AUTH_SECRET is not configured.'));
-	return createHash('sha256').update(secret).digest();
 }
 
 function generateRecoveryCodes() {

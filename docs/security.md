@@ -12,7 +12,7 @@
 - Financial values stored in cents, with each persisted amount capped at 100,000,000,000 cents
   so PostgreSQL `bigint` values remain exact when mapped to JavaScript numbers
 - Invitations with hashed tokens
-- Optional per-user MFA/TOTP with encrypted secret, hashed recovery codes and a global gate for authenticated sessions
+- Optional per-user MFA/TOTP with a domain-separated encrypted secret, retained-key rotation, opportunistic authenticated re-encryption, hashed recovery codes and a global gate for authenticated sessions
 - Attachments with size limit, MIME allowlist, authenticated download and blocking when the expense was removed
 - Attachment upload and download through streaming to avoid large buffers in the Node process
 - Soft delete for expenses

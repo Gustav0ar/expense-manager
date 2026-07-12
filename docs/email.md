@@ -97,9 +97,10 @@ audit event. Invitations created before the delivery ledger have no recoverable
 plaintext token; they remain valid, show as legacy in the UI and must be
 explicitly resent to enter durable delivery.
 
-Invitation encryption derives a dedicated key from `BETTER_AUTH_SECRET`; it does
-not reuse that secret as an AES key. Ciphertexts include a derivation-format
-version. The application reads retained rotation keys from
+Invitation and MFA encryption derive separate domain-specific keys from
+`BETTER_AUTH_SECRET`; neither reuses that secret as an AES key, and one domain's
+ciphertext cannot be decrypted by the other domain's key. Ciphertexts include a
+derivation-format version. The application reads retained rotation keys from
 `BETTER_AUTH_SECRET_PREVIOUS_FILE` first, with the direct
 `BETTER_AUTH_SECRET_PREVIOUS` value available for non-Compose runtimes. Multiple
 retained keys are comma-separated.
@@ -119,9 +120,12 @@ For the GitHub deployment workflow:
    writes both values to separate mode-`0444` Compose secret files before it
    recreates the application container.
 3. Confirm a queued invitation created before rotation can still be delivered and
-   accepted. Monitor `invitationDeliveryScheduler` in `/api/health`.
+   accepted, and successfully challenge a pre-rotation MFA account. Successful
+   MFA use safely re-encrypts that account's seed with the current domain key.
+   Monitor `invitationDeliveryScheduler` in `/api/health`.
 4. Wait at least the seven-day invitation lifetime, or explicitly resend every
-   remaining pending invitation so it is encrypted with the new key.
+   remaining pending invitation, and retain the old key until every MFA-enabled
+   account has successfully challenged or been re-enrolled.
 5. Delete the `BETTER_AUTH_SECRET_PREVIOUS` production secret and deploy again.
    The deploy script replaces the retained-key file with an empty file; the app
    then uses only the current key.

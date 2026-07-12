@@ -5,6 +5,7 @@ import { session, user } from '$lib/server/db/auth.schema';
 import { userMfaConfig } from '$lib/server/db/schema';
 import { db } from '$lib/server/db';
 import { generateTotpCode } from '$lib/server/utils/totp';
+import { decryptMfaSecret, encryptMfaSecret } from './mfa-secret';
 import {
 	beginMfaSetup,
 	disableMfa,
@@ -97,6 +98,55 @@ describe('MFA persistence integration', () => {
 		await expect(
 			verifyMfaChallenge({ userId: account.id, sessionId: 'bad', code: '123456' })
 		).rejects.toMatchObject({ status: 500, body: { message: 'MFA configuration is invalid.' } });
+	});
+
+	it('re-encrypts a retained-key secret only after a successful challenge', async () => {
+		const account = await createUser('mfa-secret-rotation');
+		const sessionId = `rotation-${randomUUID()}`;
+		await createSession(account.id, sessionId);
+		const oldApplicationSecret = 'old-mfa-application-secret-at-least-32-bytes';
+		const currentApplicationSecret = process.env.BETTER_AUTH_SECRET;
+		if (!currentApplicationSecret) throw new Error('BETTER_AUTH_SECRET is required for this test.');
+		const totpSecret = (await beginMfaSetup({ email: account.email })).secret;
+		const oldCiphertext = encryptMfaSecret(totpSecret, oldApplicationSecret);
+		await db.insert(userMfaConfig).values({
+			userId: account.id,
+			encryptedSecret: oldCiphertext,
+			recoveryCodeHashes: []
+		});
+
+		const previous = process.env.BETTER_AUTH_SECRET_PREVIOUS;
+		process.env.BETTER_AUTH_SECRET_PREVIOUS = oldApplicationSecret;
+		try {
+			await expect(
+				verifyMfaChallenge({ userId: account.id, sessionId, code: 'invalid' })
+			).resolves.toBe(false);
+			const [unchanged] = await db
+				.select({ encryptedSecret: userMfaConfig.encryptedSecret })
+				.from(userMfaConfig)
+				.where(eq(userMfaConfig.userId, account.id));
+			expect(unchanged.encryptedSecret).toBe(oldCiphertext);
+
+			await expect(
+				verifyMfaChallenge({
+					userId: account.id,
+					sessionId,
+					code: generateTotpCode(totpSecret)
+				})
+			).resolves.toBe(true);
+			const [rewrapped] = await db
+				.select({ encryptedSecret: userMfaConfig.encryptedSecret })
+				.from(userMfaConfig)
+				.where(eq(userMfaConfig.userId, account.id));
+			expect(rewrapped.encryptedSecret).not.toBe(oldCiphertext);
+			expect(decryptMfaSecret(rewrapped.encryptedSecret, [currentApplicationSecret])).toEqual({
+				secret: totpSecret,
+				needsReEncryption: false
+			});
+		} finally {
+			if (previous === undefined) delete process.env.BETTER_AUTH_SECRET_PREVIOUS;
+			else process.env.BETTER_AUTH_SECRET_PREVIOUS = previous;
+		}
 	});
 });
 
