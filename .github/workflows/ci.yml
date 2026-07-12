@@ -76,7 +76,7 @@ jobs:
           test -x "${postgres_bin}/pg_dump"
           "${postgres_bin}/pg_dump" --version | grep -E '^pg_dump \(PostgreSQL\) 18\.'
           echo "${postgres_bin}" >> "$GITHUB_PATH"
-      - run: bash -n scripts/*.sh
+      - run: bash -n scripts/*.sh scripts/ops/*.sh
       - run: docker compose config
       - run: docker compose --profile tools config
       - run: docker compose -f docker-compose.traefik.yml config
