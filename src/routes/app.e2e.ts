@@ -842,6 +842,9 @@ test('keeps core app screens responsive without horizontal overflow', async ({ p
 });
 
 test('shows validation errors and supports editing and deleting expenses', async ({ page }) => {
+	// This scenario exercises catalog management as well as the expense lifecycle.
+	// Hosted CI can take longer than the default timeout while all requests remain healthy.
+	test.setTimeout(60_000);
 	await registerAndCreateWorkspace(page);
 	await createCategory(page, { name: 'Administrativo', emoji: '💼', color: '#0f766e' });
 
