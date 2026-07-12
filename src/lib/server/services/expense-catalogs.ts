@@ -32,6 +32,7 @@ type CatalogRow = {
 
 type CatalogSelectionOptions = {
 	allowArchived?: boolean;
+	executor?: CatalogExecutor;
 	locale?: string;
 	allowedArchivedIds?: {
 		paymentMethodId?: number | null;
@@ -143,6 +144,20 @@ export async function removeExpenseCatalogItem(
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const removed = await db.transaction(async (tx) => {
+		const locked = await requireCatalogItemForRemoval(
+			tx,
+			context.workspaceId,
+			input.kind,
+			input.id
+		);
+		if (!locked)
+			throw error(
+				404,
+				translate(context.locale, '{kind} not found.', {
+					kind: translate(context.locale, catalogKindLabel(input.kind))
+				})
+			);
+
 		const [usage] = await executeCatalogRows(
 			tx,
 			selectCatalogUsageSql(input.kind, context.workspaceId, input.id)
@@ -209,33 +224,38 @@ export async function resolveExpenseCatalogSelection(
 	},
 	options: CatalogSelectionOptions = {}
 ) {
+	const executor = options.executor ?? db;
+	const lockSelection = options.executor != null;
 	const [resolvedPaymentMethod, resolvedVendor, resolvedCostCenter] = await Promise.all([
 		requireActiveCatalogItem(
-			db,
+			executor,
 			workspaceId,
 			'paymentMethod',
 			input.paymentMethodId,
 			canUseArchivedCatalog(input.paymentMethodId, options.allowedArchivedIds?.paymentMethodId) ||
 				options.allowArchived,
-			options.locale
+			options.locale,
+			lockSelection
 		),
 		requireActiveCatalogItem(
-			db,
+			executor,
 			workspaceId,
 			'vendor',
 			input.vendorId,
 			canUseArchivedCatalog(input.vendorId, options.allowedArchivedIds?.vendorId) ||
 				options.allowArchived,
-			options.locale
+			options.locale,
+			lockSelection
 		),
 		requireActiveCatalogItem(
-			db,
+			executor,
 			workspaceId,
 			'costCenter',
 			input.costCenterId,
 			canUseArchivedCatalog(input.costCenterId, options.allowedArchivedIds?.costCenterId) ||
 				options.allowArchived,
-			options.locale
+			options.locale,
+			lockSelection
 		)
 	]);
 
@@ -255,11 +275,15 @@ export async function requireActiveCatalogItem(
 	kind: ExpenseCatalogKind,
 	id?: number | null,
 	allowArchived = false,
-	locale = 'en'
+	locale = 'en',
+	lock = false
 ) {
 	if (!id) return null;
 
-	const rows = await executeCatalogRows(executor, selectCatalogByIdSql(kind, workspaceId, id));
+	const rows = await executeCatalogRows(
+		executor,
+		selectCatalogByIdSql(kind, workspaceId, id, lock ? 'key share' : undefined)
+	);
 	const item = toCatalogItem(rows[0]);
 	if (!item || (!allowArchived && item.isArchived))
 		throw error(
@@ -458,13 +482,32 @@ function hasControlCharacters(value: string) {
 	});
 }
 
-function selectCatalogByIdSql(kind: ExpenseCatalogKind, workspaceId: number, id: number) {
+async function requireCatalogItemForRemoval(
+	executor: CatalogExecutor,
+	workspaceId: number,
+	kind: ExpenseCatalogKind,
+	id: number
+) {
+	const rows = await executeCatalogRows(
+		executor,
+		selectCatalogByIdSql(kind, workspaceId, id, 'update')
+	);
+	return toCatalogItem(rows[0]);
+}
+
+function selectCatalogByIdSql(
+	kind: ExpenseCatalogKind,
+	workspaceId: number,
+	id: number,
+	lock?: 'key share' | 'update'
+) {
+	const lockClause = lock === 'update' ? sql`for update` : lock ? sql`for key share` : sql``;
 	if (kind === 'paymentMethod') {
 		return sql`
 			select id, name, is_archived, created_at
 			from payment_method
 			where workspace_id = ${workspaceId} and id = ${id}
-			limit 1
+			${lockClause}
 		`;
 	}
 
@@ -473,7 +516,7 @@ function selectCatalogByIdSql(kind: ExpenseCatalogKind, workspaceId: number, id:
 			select id, name, is_archived, created_at
 			from vendor
 			where workspace_id = ${workspaceId} and id = ${id}
-			limit 1
+			${lockClause}
 		`;
 	}
 
@@ -481,7 +524,7 @@ function selectCatalogByIdSql(kind: ExpenseCatalogKind, workspaceId: number, id:
 		select id, name, is_archived, created_at
 		from cost_center
 		where workspace_id = ${workspaceId} and id = ${id}
-		limit 1
+		${lockClause}
 	`;
 }
 

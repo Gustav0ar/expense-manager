@@ -33,6 +33,7 @@ import {
 	resolveExpenseCatalogSelection,
 	updateExpenseCatalogItem
 } from './expense-catalogs';
+import { createExpense } from './expenses';
 import type { WorkspaceContext } from './workspaces';
 
 const workspaceIds: number[] = [];
@@ -348,7 +349,58 @@ describe('category and expense catalog integration', () => {
 			])
 		});
 	});
+
+	it('turns concurrent category and catalog removal into a translated validation failure', async () => {
+		const fixture = await createFixture();
+		const vendor = await createExpenseCatalogItem(fixture.context, {
+			kind: 'vendor',
+			name: 'Concurrent vendor'
+		});
+
+		const vendorRace = await startExpenseCreation(fixture.context, {
+			description: 'Concurrent catalog reference',
+			amount: '10.00',
+			expenseDate: '2026-07-01',
+			categoryId: fixture.categoryId,
+			vendorId: vendor.id
+		});
+		await expect(
+			removeExpenseCatalogItem(fixture.context, { kind: 'vendor', id: vendor.id })
+		).resolves.toMatchObject({ mode: 'deleted' });
+		vendorRace.release();
+		await expect(vendorRace.result).rejects.toMatchObject({ status: 400 });
+
+		const categoryRace = await startExpenseCreation(fixture.context, {
+			description: 'Concurrent category reference',
+			amount: '10.00',
+			expenseDate: '2026-07-01',
+			categoryId: fixture.categoryId
+		});
+		await expect(removeCategory(fixture.context, fixture.categoryId)).resolves.toMatchObject({
+			mode: 'deleted'
+		});
+		categoryRace.release();
+		await expect(categoryRace.result).rejects.toMatchObject({ status: 400 });
+	});
 });
+
+async function startExpenseCreation(
+	context: WorkspaceContext,
+	input: Parameters<typeof createExpense>[1]
+) {
+	let release!: () => void;
+	let markLocked!: () => void;
+	const locked = new Promise<void>((resolve) => (markLocked = resolve));
+	const gate = new Promise<void>((resolve) => (release = resolve));
+	const result = createExpense(context, input, {
+		afterCurrencyLock: async () => {
+			markLocked();
+			await gate;
+		}
+	});
+	await locked;
+	return { result, release };
+}
 
 async function createFixture() {
 	const id = `catalog-${randomUUID()}`;

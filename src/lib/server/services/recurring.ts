@@ -67,15 +67,15 @@ export async function createRecurringExpense(
 ) {
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
-	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
-
-	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
-		locale: context.locale
-	});
 	const amountCents = parseCurrencyToCents(input.amount);
 
 	return db.transaction(async (tx) => {
 		const currentCurrency = await lockWorkspaceCurrency(tx, context.workspaceId);
+		await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale, tx);
+		const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
+			locale: context.locale,
+			executor: tx
+		});
 		const [created] = await tx
 			.insert(recurringExpense)
 			.values({

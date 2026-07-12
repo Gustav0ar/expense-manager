@@ -241,10 +241,6 @@ export async function createExpense(
 ) {
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
-	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
-	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
-		locale: context.locale
-	});
 	const amountCents = parseCurrencyToCents(input.amount);
 	const installments = input.installments ?? 1;
 	const installmentGroupId = installments > 1 ? randomToken(12) : null;
@@ -256,6 +252,11 @@ export async function createExpense(
 	const created = await db.transaction(async (tx) => {
 		const currentCurrency = await lockWorkspaceCurrency(tx, context.workspaceId);
 		await options.afterCurrencyLock?.();
+		await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale, tx);
+		const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
+			locale: context.locale,
+			executor: tx
+		});
 		const rows = await tx
 			.insert(expense)
 			.values(
@@ -303,7 +304,6 @@ export async function createExpense(
 export async function updateExpense(context: WorkspaceContext, id: number, input: ExpenseInput) {
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
-	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
 	const [snapshot] = await db
 		.select({
 			paymentMethodId: expense.paymentMethodId,
@@ -326,10 +326,6 @@ export async function updateExpense(context: WorkspaceContext, id: number, input
 		throw error(403, translate(context.locale, 'Permission denied.'));
 	}
 
-	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
-		allowedArchivedIds: snapshot,
-		locale: context.locale
-	});
 	const shouldResetReview = !canReviewExpenses(context.role);
 	const amountCents = parseCurrencyToCents(input.amount);
 	const competencyMonth = input.competencyMonth ? startOfMonth(input.competencyMonth) : null;
@@ -352,6 +348,12 @@ export async function updateExpense(context: WorkspaceContext, id: number, input
 		if (!current) throw error(404, translate(context.locale, 'Expense not found.'));
 		if (current.paymentStatus !== 'unpaid' && !canReconcileExpenses(context.role))
 			throw error(403, translate(context.locale, 'Permission denied.'));
+		await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale, tx);
+		const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
+			allowedArchivedIds: current,
+			locale: context.locale,
+			executor: tx
+		});
 		// A match may have committed while this transaction waited for the expense row.
 		linked ??= await lockLinkedBankTransaction(tx, context.workspaceId, id);
 		const nextState = {

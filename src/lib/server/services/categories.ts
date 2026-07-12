@@ -127,6 +127,14 @@ export async function removeCategory(context: WorkspaceContext, id: number) {
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
 	const removed = await db.transaction(async (tx) => {
+		const locked = await tx.execute<{ id: number }>(sql`
+			select id
+			from category
+			where workspace_id = ${context.workspaceId} and id = ${id}
+			for update
+		`);
+		if (!locked[0]) throw error(404, translate(context.locale, 'Category not found.'));
+
 		const [usage] = await tx.execute<CategoryUsageRow>(
 			categoryUsageSql(context.workspaceId, { id })
 		);
