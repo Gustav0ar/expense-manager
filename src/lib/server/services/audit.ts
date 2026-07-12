@@ -1,4 +1,5 @@
 import { auditEvent } from '$lib/server/db/schema';
+import { user } from '$lib/server/db/auth.schema';
 import { db } from '$lib/server/db';
 import { and, desc, eq, lt, type SQL } from 'drizzle-orm';
 import type { WorkspaceContext } from './workspaces';
@@ -53,10 +54,12 @@ export async function listAuditEvents(context: WorkspaceContext, filters: AuditF
 			entityType: auditEvent.entityType,
 			entityId: auditEvent.entityId,
 			actorUserId: auditEvent.actorUserId,
+			actorName: user.name,
 			metadata: auditEvent.metadata,
 			createdAt: auditEvent.createdAt
 		})
 		.from(auditEvent)
+		.leftJoin(user, eq(auditEvent.actorUserId, user.id))
 		.where(and(...conditions))
 		.orderBy(desc(auditEvent.id))
 		.limit(limit + 1);

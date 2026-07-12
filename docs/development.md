@@ -112,6 +112,19 @@ steps inline when those steps are the behavior under test. Specs use Playwright'
 default per-file execution mode: one failure does not skip unrelated tests, and
 tests are not made parallel unless a suite opts in deliberately.
 
+### Audit UX contracts
+
+`src/lib/audit-registry.ts` is the user-facing registry for audit actions, entity types and
+structured metadata fields. Add every new emitted action or entity there and add its pt-BR label in
+`src/lib/i18n/messages.ts`; the registry test scans static service emitters and explicitly covers
+dynamic variants. The audit route accepts only registered filter values, always scopes queries to
+the active workspace and preserves filters in cursor links.
+
+Audit rows show the actor's current display name with the stable user ID as a secondary fallback.
+Known metadata is rendered as a compact definition list. The technical JSON disclosure is also
+passed through recursive credential redaction; never bypass that helper or add secrets, tokens,
+cookies, recovery codes or passwords to a summary field.
+
 ### Expense dialog actions
 
 Support-catalog and category forms use SvelteKit progressive enhancement. Enhanced create, update, archive, delete and restore actions return a scoped `catalogAction` or `categoryAction` payload so the dialog can refresh its data and display the result without closing. Native form submissions still redirect to the validated `returnTo` URL. Keep both paths covered when adding a dialog mutation.

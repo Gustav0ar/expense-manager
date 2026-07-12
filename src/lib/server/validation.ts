@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { categoryEmojiValues } from '$lib/category-emojis';
 import { defaultCurrency, isValidCurrencyCode } from '$lib/i18n';
 import { amountExceedsMaximumMessage, parseCurrencyToCents } from '$lib/server/utils/money';
+import { auditActionValues, auditEntityTypeValues } from '$lib/audit-registry';
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const maxRangeDays = 3660;
@@ -340,8 +341,14 @@ export const budgetAlertHistoryFilterSchema = z.object({
 });
 
 export const auditFilterSchema = z.object({
-	action: z.string().trim().max(120).optional(),
-	entityType: z.string().trim().max(80).optional(),
+	action: z.preprocess(
+		(value) => (value === '' ? undefined : value),
+		z.enum(auditActionValues).optional()
+	),
+	entityType: z.preprocess(
+		(value) => (value === '' ? undefined : value),
+		z.enum(auditEntityTypeValues).optional()
+	),
 	cursor: z.string().trim().max(500).optional()
 });
 

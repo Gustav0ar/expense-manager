@@ -4,6 +4,7 @@ import { listAuditEvents } from '$lib/server/services/audit';
 import { requireWorkspaceContext } from '$lib/server/services/workspaces';
 import { auditFilterSchema } from '$lib/server/validation';
 import { translate } from '$lib/i18n';
+import { auditActions, auditEntityTypes } from '$lib/audit-registry';
 
 export const load: PageServerLoad = async (event) => {
 	const context = await requireWorkspaceContext(event);
@@ -12,6 +13,7 @@ export const load: PageServerLoad = async (event) => {
 
 	return {
 		filters: filters.data,
+		filterOptions: { actions: auditActions, entityTypes: auditEntityTypes },
 		audit: await listAuditEvents(context, filters.data)
 	};
 };
