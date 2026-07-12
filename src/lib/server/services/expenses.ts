@@ -13,7 +13,9 @@ import {
 	sql,
 	type SQL
 } from 'drizzle-orm';
-import { db } from '$lib/server/db';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import { client, db } from '$lib/server/db';
+import * as schema from '$lib/server/db/schema';
 import {
 	auditEvent,
 	attachmentDeletion,
@@ -143,7 +145,7 @@ export type AnalyticalExpenseReport = {
 };
 
 export const analyticalReportUiLimit = 500;
-export const analyticalReportExportLimit = 50_000;
+export const analyticalReportExportBatchSize = 1_000;
 
 export async function listExpenses(context: WorkspaceContext, filters: ExpenseFilters = {}) {
 	const limit = Math.min(Math.max(filters.limit ?? 25, 1), 100);
@@ -919,48 +921,7 @@ export async function getAnalyticalExpenseReport(
 	];
 
 	const [rows, summaryRows] = await Promise.all([
-		db
-			.select({
-				id: expense.id,
-				expenseDate: expense.expenseDate,
-				competencyMonth: expense.competencyMonth,
-				description: expense.description,
-				categoryName: category.name,
-				categoryColor: category.color,
-				categoryIcon: category.icon,
-				amountCents: expense.amountCents,
-				currency: expense.currency,
-				paymentMethod: sql<
-					string | null
-				>`coalesce(${paymentMethod.name}, ${expense.paymentMethod})`,
-				vendor: sql<string | null>`coalesce(${vendor.name}, ${expense.vendor})`,
-				costCenter: sql<string | null>`coalesce(${costCenter.name}, ${expense.costCenter})`,
-				reviewStatus: expense.reviewStatus,
-				paymentStatus: expense.paymentStatus,
-				paidAt: expense.paidAt,
-				installmentNumber: expense.installmentNumber,
-				installmentsTotal: expense.installmentsTotal,
-				notes: expense.notes,
-				// Aggregated via a lateral subquery rather than a correlated scalar
-				// subquery to avoid one COUNT(*) per row at large export sizes.
-				attachmentCount: sql<number>`coalesce((
-					select count(*)::int
-					from expense_attachment ea
-					where ea.expense_id = ${expense.id}
-						and ea.workspace_id = ${expense.workspaceId}
-						and ea.deleted_at is null
-					group by ea.expense_id
-				), 0)`,
-				createdAt: expense.createdAt
-			})
-			.from(expense)
-			.innerJoin(category, eq(category.id, expense.categoryId))
-			.leftJoin(paymentMethod, eq(paymentMethod.id, expense.paymentMethodId))
-			.leftJoin(vendor, eq(vendor.id, expense.vendorId))
-			.leftJoin(costCenter, eq(costCenter.id, expense.costCenterId))
-			.where(and(...baseConditions))
-			.orderBy(desc(expense.expenseDate), desc(expense.id))
-			.limit(limit + 1),
+		selectAnalyticalExpenseRows(db, baseConditions, limit + 1),
 		db
 			.select({
 				itemCount: sql<number>`count(*)::int`,
@@ -980,13 +941,7 @@ export async function getAnalyticalExpenseReport(
 	]);
 
 	const summary = summaryRows[0]!;
-	const items = rows.slice(0, limit).map((row) => ({
-		...row,
-		amountCents: Number(row.amountCents),
-		attachmentCount: Number(row.attachmentCount),
-		reviewStatus: toAnalyticalReviewStatus(row.reviewStatus),
-		paymentStatus: toAnalyticalPaymentStatus(row.paymentStatus)
-	}));
+	const items = await attachAnalyticalExpenseCounts(db, context.workspaceId, rows.slice(0, limit));
 
 	return {
 		items,
@@ -1003,6 +958,139 @@ export async function getAnalyticalExpenseReport(
 		limit,
 		truncated: rows.length > limit
 	};
+}
+
+export async function* streamAnalyticalExpenseReport(
+	context: WorkspaceContext,
+	input: AnalyticalExpenseReportFilters,
+	options: { batchSize?: number } = {}
+): AsyncGenerator<AnalyticalExpenseReportRow[]> {
+	const batchSize = Math.min(
+		Math.max(options.batchSize ?? analyticalReportExportBatchSize, 1),
+		5_000
+	);
+	const reserved = await client.reserve();
+	let transactionOpen = false;
+	try {
+		// A read-only repeatable-read snapshot gives the CSV one explicit point-in-time
+		// view. The ID watermark is captured inside that snapshot and keeps the keyset
+		// boundary visible and testable while new expenses are inserted concurrently.
+		await reserved`begin transaction isolation level repeatable read read only`;
+		transactionOpen = true;
+		// postgres.js intentionally omits pool options from a reserved Sql handle,
+		// while Drizzle reads its parser configuration when binding that handle.
+		// Reuse the already configured pool options; queries still execute only on
+		// the reserved connection that owns this transaction.
+		const snapshotDb = drizzle(Object.assign(reserved, { options: client.options }), { schema });
+		const [watermarkRow] = await snapshotDb
+			.select({ id: sql<number | null>`max(${expense.id})` })
+			.from(expense)
+			.where(
+				and(
+					eq(expense.workspaceId, context.workspaceId),
+					isNull(expense.deletedAt),
+					eq(expense.status, 'posted')
+				)
+			);
+		const watermark = watermarkRow?.id == null ? null : Number(watermarkRow.id);
+		let cursor: { expenseDate: string; id: number } | null = null;
+
+		while (watermark != null) {
+			const conditions: SQL[] = [
+				...buildExpenseConditions(context.workspaceId, input, false),
+				eq(expense.status, 'posted'),
+				lte(expense.id, watermark)
+			];
+			if (cursor) {
+				conditions.push(
+					or(
+						lt(expense.expenseDate, cursor.expenseDate),
+						and(eq(expense.expenseDate, cursor.expenseDate), lt(expense.id, cursor.id))
+					)!
+				);
+			}
+			const rows = await selectAnalyticalExpenseRows(snapshotDb, conditions, batchSize);
+			if (rows.length === 0) break;
+			yield await attachAnalyticalExpenseCounts(snapshotDb, context.workspaceId, rows);
+			const last = rows.at(-1)!;
+			cursor = { expenseDate: last.expenseDate, id: last.id };
+			if (rows.length < batchSize) break;
+		}
+
+		await reserved`commit`;
+		transactionOpen = false;
+	} finally {
+		if (transactionOpen) await reserved`rollback`.catch(() => undefined);
+		reserved.release();
+	}
+}
+
+async function selectAnalyticalExpenseRows(executor: typeof db, conditions: SQL[], limit: number) {
+	return executor
+		.select({
+			id: expense.id,
+			expenseDate: expense.expenseDate,
+			competencyMonth: expense.competencyMonth,
+			description: expense.description,
+			categoryName: category.name,
+			categoryColor: category.color,
+			categoryIcon: category.icon,
+			amountCents: expense.amountCents,
+			currency: expense.currency,
+			paymentMethod: sql<string | null>`coalesce(${paymentMethod.name}, ${expense.paymentMethod})`,
+			vendor: sql<string | null>`coalesce(${vendor.name}, ${expense.vendor})`,
+			costCenter: sql<string | null>`coalesce(${costCenter.name}, ${expense.costCenter})`,
+			reviewStatus: expense.reviewStatus,
+			paymentStatus: expense.paymentStatus,
+			paidAt: expense.paidAt,
+			installmentNumber: expense.installmentNumber,
+			installmentsTotal: expense.installmentsTotal,
+			notes: expense.notes,
+			createdAt: expense.createdAt
+		})
+		.from(expense)
+		.innerJoin(category, eq(category.id, expense.categoryId))
+		.leftJoin(paymentMethod, eq(paymentMethod.id, expense.paymentMethodId))
+		.leftJoin(vendor, eq(vendor.id, expense.vendorId))
+		.leftJoin(costCenter, eq(costCenter.id, expense.costCenterId))
+		.where(and(...conditions))
+		.orderBy(desc(expense.expenseDate), desc(expense.id))
+		.limit(limit);
+}
+
+type AnalyticalExpenseQueryRow = Awaited<ReturnType<typeof selectAnalyticalExpenseRows>>[number];
+
+async function attachAnalyticalExpenseCounts(
+	executor: typeof db,
+	workspaceId: number,
+	rows: AnalyticalExpenseQueryRow[]
+): Promise<AnalyticalExpenseReportRow[]> {
+	if (rows.length === 0) return [];
+	const counts = await executor
+		.select({
+			expenseId: expenseAttachment.expenseId,
+			count: sql<number>`count(*)::int`
+		})
+		.from(expenseAttachment)
+		.where(
+			and(
+				eq(expenseAttachment.workspaceId, workspaceId),
+				inArray(
+					expenseAttachment.expenseId,
+					rows.map((row) => row.id)
+				),
+				isNull(expenseAttachment.deletedAt)
+			)
+		)
+		.groupBy(expenseAttachment.expenseId);
+	const countsByExpense = new Map(counts.map((row) => [row.expenseId, Number(row.count)]));
+	return rows.map((row) => ({
+		...row,
+		amountCents: Number(row.amountCents),
+		attachmentCount: countsByExpense.get(row.id) ?? 0,
+		reviewStatus: toAnalyticalReviewStatus(row.reviewStatus),
+		paymentStatus: toAnalyticalPaymentStatus(row.paymentStatus)
+	}));
 }
 
 function toAnalyticalReviewStatus(value: string): AnalyticalExpenseReportRow['reviewStatus'] {

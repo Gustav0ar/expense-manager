@@ -189,6 +189,20 @@ blocks the change, while a writer queued behind a successful change persists
 the new currency. Do not bypass these service transactions when adding a new
 monetary write path.
 
+### Analytical CSV export contract
+
+Expense-level analytical CSV exports are not capped. The server keyset-paginates
+expenses in bounded batches of 1,000, ordered by `expense_date DESC, id DESC`,
+and aggregates attachment counts once per batch. Keep this ordering and the CSV
+formula-injection protection when changing the export.
+
+Each download holds one database connection in a read-only, repeatable-read
+transaction. Its maximum expense ID is captured inside that snapshot, so inserts
+or edits committed after the export starts cannot produce a mixed or duplicated
+file. The transaction and reserved connection are released when the stream
+finishes, fails or is cancelled. Operators should investigate slow or abandoned
+downloads because a long-running snapshot can delay PostgreSQL vacuum cleanup.
+
 ### CSS ownership
 
 `src/routes/layout.css` contains application-wide primitives and styles shared by multiple routes. Expense-page, support-catalog, attachment and bulk-review rules live in `src/routes/(protected)/app/expenses/expenses.css`, which is imported by the expense page and emitted as a route-only CSS asset. Add new expense-specific responsive rules there instead of growing the global stylesheet.
