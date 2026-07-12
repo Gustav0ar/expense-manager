@@ -259,6 +259,8 @@ jobs:
           BACKUP_MEM_LIMIT: ${{ vars.BACKUP_MEM_LIMIT || '256m' }}
           BACKUP_CPUS: ${{ vars.BACKUP_CPUS || '0.5' }}
           EMAIL_PROVIDER: ${{ vars.EMAIL_PROVIDER || 'auto' }}
+          EMAIL_DELIVERY_TIMEOUT_MS: ${{ vars.EMAIL_DELIVERY_TIMEOUT_MS || '15000' }}
+          EMAIL_DELIVERY_CONCURRENCY: ${{ vars.EMAIL_DELIVERY_CONCURRENCY || '5' }}
           MAILJET_API_KEY: ${{ secrets.MAILJET_API_KEY }}
           MAILJET_SECRET_KEY: ${{ secrets.MAILJET_SECRET_KEY }}
           MAILJET_FROM: ${{ secrets.MAILJET_FROM }}
@@ -412,6 +414,8 @@ jobs:
             write_env_var BACKUP_MEM_LIMIT "${BACKUP_MEM_LIMIT}"
             write_env_var BACKUP_CPUS "${BACKUP_CPUS}"
             write_env_var EMAIL_PROVIDER "${EMAIL_PROVIDER}"
+            write_env_var EMAIL_DELIVERY_TIMEOUT_MS "${EMAIL_DELIVERY_TIMEOUT_MS}"
+            write_env_var EMAIL_DELIVERY_CONCURRENCY "${EMAIL_DELIVERY_CONCURRENCY}"
             write_env_var MAILJET_API_KEY "${MAILJET_API_KEY}"
             write_env_var MAILJET_SECRET_KEY "${MAILJET_SECRET_KEY}"
             write_env_var MAILJET_FROM "${MAILJET_FROM}"

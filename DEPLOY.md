@@ -64,6 +64,8 @@ individual protected environment secrets:
 | `RESTIC_PASSWORD`             | High-entropy restic repository password. Required when `BACKUP_ENABLED=true`.                         |
 | `MAILJET_API_KEY`             | Mailjet transactional email API key. Required when `EMAIL_PROVIDER=mailjet`.                          |
 | `MAILJET_SECRET_KEY`          | Mailjet transactional email secret key. Required when `EMAIL_PROVIDER=mailjet`.                       |
+| `EMAIL_DELIVERY_TIMEOUT_MS`   | Optional provider deadline in milliseconds; defaults to `15000`.                                      |
+| `EMAIL_DELIVERY_CONCURRENCY`  | Optional delivery worker width; defaults to `5` and is capped at `20`.                                |
 | `MAILJET_FROM`                | Verified Mailjet sender address, optionally with name.                                                |
 | `SENDER_API_TOKEN`            | Legacy Sender transactional email API token.                                                          |
 | `SENDER_FROM`                 | Legacy Sender verified sender address, optionally with name.                                          |

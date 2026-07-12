@@ -43,6 +43,10 @@ local production-like testing or for a standalone Caddy deployment.
   is intentionally above the application's 2 MiB attachment limit so multipart
   metadata does not cause valid uploads to be rejected before validation.
 - `DB_POOL_MAX`: maximum application query-pool size. Each app process may open one additional dedicated connection while holding a scheduler advisory lock.
+- `EMAIL_DELIVERY_TIMEOUT_MS`: provider request/socket deadline in milliseconds;
+  defaults to 15000 and is bounded between one second and two minutes.
+- `EMAIL_DELIVERY_CONCURRENCY`: maximum simultaneous invitation or budget-alert
+  deliveries; defaults to 5 and is bounded between 1 and 20.
 - `TRUST_PROXY_HEADERS`: use `true` only when the app is not directly exposed and only receives traffic through a trusted reverse proxy.
 - `TRUSTED_PROXY_CIDR`: immediate reverse proxy subnet allowed to supply forwarded client addresses. It is required when `TRUST_PROXY_HEADERS=true` and accepts comma-separated IPv4/IPv6 CIDRs. There is intentionally no broad private-network default: configure the narrowest deployment-specific CIDR and place the app and proxy on a dedicated network whenever possible.
 - `AUTH_RATE_LIMIT_IDENTIFIER_MAX`: optional global override for the stricter normalized-identifier bucket. Leave empty to retain each flow's reviewed default.

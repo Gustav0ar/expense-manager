@@ -16,6 +16,8 @@ services:
       DB_POOL_MAX: '5'
       DB_PREPARE_STATEMENTS: 'true'
       BODY_SIZE_LIMIT: 3M
+      EMAIL_DELIVERY_TIMEOUT_MS: '15000'
+      EMAIL_DELIVERY_CONCURRENCY: '5'
       SMTP_HOST: ''
       SMTP_PORT: '587'
       SMTP_SECURE: 'false'

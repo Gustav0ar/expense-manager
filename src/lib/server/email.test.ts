@@ -24,6 +24,10 @@ vi.mock('$env/dynamic/private', () => ({
 }));
 
 import {
+	defaultEmailDeliveryConcurrency,
+	defaultEmailDeliveryTimeoutMs,
+	emailDeliveryConcurrency,
+	emailDeliveryTimeoutMs,
 	escapeHtml,
 	parseMailbox,
 	sanitizeEmailText,
@@ -55,6 +59,26 @@ describe('email helpers', () => {
 		expect(parseMailbox('no-reply@example.com')).toEqual({
 			email: 'no-reply@example.com'
 		});
+	});
+
+	it('bounds provider timeouts and delivery concurrency from configuration', () => {
+		const previous = captureEmailEnv();
+		try {
+			delete privateEnv.EMAIL_DELIVERY_TIMEOUT_MS;
+			delete privateEnv.EMAIL_DELIVERY_CONCURRENCY;
+			expect(emailDeliveryTimeoutMs()).toBe(defaultEmailDeliveryTimeoutMs);
+			expect(emailDeliveryConcurrency()).toBe(defaultEmailDeliveryConcurrency);
+			privateEnv.EMAIL_DELIVERY_TIMEOUT_MS = '10';
+			privateEnv.EMAIL_DELIVERY_CONCURRENCY = '100';
+			expect(emailDeliveryTimeoutMs()).toBe(1000);
+			expect(emailDeliveryConcurrency()).toBe(20);
+			privateEnv.EMAIL_DELIVERY_TIMEOUT_MS = 'invalid';
+			privateEnv.EMAIL_DELIVERY_CONCURRENCY = 'invalid';
+			expect(emailDeliveryTimeoutMs()).toBe(defaultEmailDeliveryTimeoutMs);
+			expect(emailDeliveryConcurrency()).toBe(defaultEmailDeliveryConcurrency);
+		} finally {
+			restoreEmailEnv(previous);
+		}
 	});
 
 	it('logs sanitized budget alert emails when SMTP is not configured', async () => {
@@ -149,6 +173,9 @@ describe('email helpers', () => {
 				host: 'smtp.example.com',
 				port: 465,
 				secure: true,
+				connectionTimeout: defaultEmailDeliveryTimeoutMs,
+				greetingTimeout: defaultEmailDeliveryTimeoutMs,
+				socketTimeout: defaultEmailDeliveryTimeoutMs,
 				auth: {
 					user: 'smtp-user',
 					pass: 'smtp-pass'
@@ -174,6 +201,9 @@ describe('email helpers', () => {
 				host: 'smtp.example.com',
 				port: 587,
 				secure: false,
+				connectionTimeout: defaultEmailDeliveryTimeoutMs,
+				greetingTimeout: defaultEmailDeliveryTimeoutMs,
+				socketTimeout: defaultEmailDeliveryTimeoutMs,
 				auth: undefined
 			});
 		} finally {
@@ -438,7 +468,9 @@ function captureEmailEnv() {
 		SMTP_PASSWORD: privateEnv.SMTP_PASSWORD,
 		SMTP_FROM: privateEnv.SMTP_FROM,
 		SENDER_API_TOKEN: privateEnv.SENDER_API_TOKEN,
-		SENDER_FROM: privateEnv.SENDER_FROM
+		SENDER_FROM: privateEnv.SENDER_FROM,
+		EMAIL_DELIVERY_TIMEOUT_MS: privateEnv.EMAIL_DELIVERY_TIMEOUT_MS,
+		EMAIL_DELIVERY_CONCURRENCY: privateEnv.EMAIL_DELIVERY_CONCURRENCY
 	};
 }
 
@@ -456,6 +488,8 @@ function clearEmailEnv() {
 	delete privateEnv.SMTP_FROM;
 	delete privateEnv.SENDER_API_TOKEN;
 	delete privateEnv.SENDER_FROM;
+	delete privateEnv.EMAIL_DELIVERY_TIMEOUT_MS;
+	delete privateEnv.EMAIL_DELIVERY_CONCURRENCY;
 }
 
 function restoreEmailEnv(values: ReturnType<typeof captureEmailEnv>) {

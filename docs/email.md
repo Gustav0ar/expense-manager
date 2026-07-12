@@ -23,6 +23,8 @@ Production environment values:
 
 ```env
 EMAIL_PROVIDER="mailjet"
+EMAIL_DELIVERY_TIMEOUT_MS="15000"
+EMAIL_DELIVERY_CONCURRENCY="5"
 MAILJET_API_KEY="<mailjet-api-key>"
 MAILJET_SECRET_KEY="<mailjet-secret-key>"
 MAILJET_FROM="Expense Manager <no-reply@your-verified-domain.example>"
@@ -33,6 +35,12 @@ REQUIRE_EMAIL_VERIFICATION="true"
 
 The `MAILJET_FROM` domain must match a verified Mailjet domain. Do not use a
 personal mailbox as the production sender.
+
+Every API or SMTP attempt has an application-level wall-clock deadline, and
+durable invitation/budget queues use a bounded worker pool rather than starting
+an entire claimed batch at once. Increase the timeout only for a measured slow
+provider; keep concurrency within the documented 1–20 range to avoid provider
+throttling bursts.
 
 Budget-alert delivery is tracked per workspace, month, category, recipient and
 transition. A recipient receives at most one initial warning or direct
