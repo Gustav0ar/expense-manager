@@ -74,6 +74,85 @@ describe.sequential('OFX reconciliation integration', () => {
 		expect(unchanged.paymentStatus).toBe('unpaid');
 	});
 
+	it('ranks the best eight candidates per transaction beyond one thousand eligible expenses', async () => {
+		const fixture = await createFixture();
+		const rows = await db
+			.insert(expense)
+			.values(
+				Array.from({ length: 1005 }, (_, index) => ({
+					workspaceId: fixture.context.workspaceId,
+					categoryId: fixture.categoryId,
+					createdByUserId: fixture.context.userId,
+					description: index === 1004 ? 'Needle target' : `Unrelated candidate ${index}`,
+					amountCents: 7777,
+					currency: fixture.context.currency,
+					expenseDate: '2026-07-10'
+				}))
+			)
+			.returning({ id: expense.id, description: expense.description });
+		const best = rows.at(-1)!;
+		const secondRows = await db
+			.insert(expense)
+			.values(
+				Array.from({ length: 9 }, (_, index) => ({
+					workspaceId: fixture.context.workspaceId,
+					categoryId: fixture.categoryId,
+					createdByUserId: fixture.context.userId,
+					description: index === 8 ? 'Second needle' : `Second decoy ${index}`,
+					amountCents: 8888,
+					currency: fixture.context.currency,
+					expenseDate: '2026-07-10'
+				}))
+			)
+			.returning({ id: expense.id, description: expense.description });
+		await stageOfxTransactions(
+			fixture.context,
+			statement([
+				'<STMTTRN><DTPOSTED>20260710<TRNAMT>-77.77<FITID>large-candidate-set<NAME>Needle target</STMTTRN>',
+				'<STMTTRN><DTPOSTED>20260710<TRNAMT>-88.88<FITID>second-candidate-set<NAME>Second needle</STMTTRN>'
+			])
+		);
+
+		const [transaction, secondTransaction] = await listReconciliationQueue(fixture.context);
+		expect(transaction.candidates).toHaveLength(8);
+		expect(transaction.candidates[0]).toMatchObject({
+			id: best.id,
+			description: 'Needle target',
+			dateDistanceDays: 0,
+			textScore: 100
+		});
+		expect(secondTransaction.candidates).toHaveLength(8);
+		expect(secondTransaction.candidates[0]).toMatchObject({
+			id: secondRows.at(-1)!.id,
+			description: 'Second needle',
+			dateDistanceDays: 0,
+			textScore: 100
+		});
+	});
+
+	it('uses accent-insensitive token overlap in SQL candidate ranking', async () => {
+		const fixture = await createFixture();
+		const created = await createExpense(fixture.context, {
+			categoryId: fixture.categoryId,
+			description: 'Café São Paulo market',
+			amount: '64.00',
+			expenseDate: '2026-07-10'
+		});
+		await stageOfxTransactions(
+			fixture.context,
+			statement([
+				'<STMTTRN><DTPOSTED>20260710<TRNAMT>-64.00<FITID>accent-ranking<NAME>Cafe Sao Paulo</STMTTRN>'
+			])
+		);
+
+		const [transaction] = await listReconciliationQueue(fixture.context);
+		expect(transaction.candidates[0]).toMatchObject({
+			id: created.id,
+			dateDistanceDays: 0,
+			textScore: 75
+		});
+	});
+
 	it('validates uploads and returns a credit-only queue without candidates', async () => {
 		const fixture = await createFixture();
 		await expect(

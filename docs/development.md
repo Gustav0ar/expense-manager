@@ -122,6 +122,8 @@ when it is not. Re-uploading the same statement must not duplicate staged rows.
 Credits remain visible but can only be ignored. Debit suggestions require an
 exact amount and a small date window; normalized description overlap only
 orders otherwise eligible candidates and is always shown as an explanation.
+Postgres ranks and limits the best eight candidates independently for each bank
+transaction; never reintroduce a workspace-wide candidate cutoff.
 
 CURDEF is normalized and stored with each row. A statement currency that does
 not match the workspace remains visible but can only be ignored; it cannot

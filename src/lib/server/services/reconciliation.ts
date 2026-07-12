@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { and, asc, eq, inArray, isNull, gte, lte } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { translate } from '$lib/i18n';
 import { maxMoneyCents } from '$lib/money-limits';
 import { db } from '$lib/server/db';
@@ -183,88 +183,162 @@ export async function listReconciliationQueue(
 ): Promise<ReconciliationQueueItem[]> {
 	if (!canReconcileExpenses(context.role)) return [];
 	const dateWindowDays = boundedDateWindow(options.dateWindowDays);
-	const transactions = await db
-		.select({
-			id: bankTransaction.id,
-			postedDate: bankTransaction.postedDate,
-			signedAmountCents: bankTransaction.signedAmountCents,
-			description: bankTransaction.description,
-			memo: bankTransaction.memo,
-			sourceCurrency: bankTransaction.sourceCurrency
-		})
-		.from(bankTransaction)
-		.where(
-			and(
-				eq(bankTransaction.workspaceId, context.workspaceId),
-				eq(bankTransaction.status, 'pending')
-			)
+	const rows = await db.execute<ReconciliationQueueSqlRow>(sql`
+		with pending_transactions as (
+			select
+				bt.id,
+				bt.posted_date,
+				bt.signed_amount_cents,
+				bt.description,
+				bt.memo,
+				bt.source_currency,
+				array(
+					select distinct token
+					from regexp_split_to_table(
+						trim(regexp_replace(
+							regexp_replace(lower(normalize(bt.description, NFKD)), U&'[\\0300-\\036f]', '', 'g'),
+							'[^a-z0-9]+', ' ', 'g'
+						)),
+						'[[:space:]]+'
+					) as token
+					where length(token) > 1
+				) as description_tokens
+			from bank_transaction bt
+			where bt.workspace_id = ${context.workspaceId}
+				and bt.status = 'pending'
+			order by bt.posted_date asc, bt.id asc
+			limit 100
 		)
-		.orderBy(asc(bankTransaction.postedDate), asc(bankTransaction.id))
-		.limit(100);
-	const debits = transactions.filter((row) => row.signedAmountCents < 0);
-	if (debits.length === 0)
-		return transactions.map((row) => ({
-			...row,
-			isCredit: true,
-			currencyMismatch: row.sourceCurrency !== null && row.sourceCurrency !== context.currency,
-			candidates: []
-		}));
-	const amounts = [...new Set(debits.map((row) => -row.signedAmountCents))];
-	const dates = debits.map((row) => row.postedDate).sort();
-	const from = shiftIsoDate(dates[0], -dateWindowDays);
-	const to = shiftIsoDate(dates.at(-1)!, dateWindowDays);
-	const expenses = await db
-		.select({
-			id: expense.id,
-			description: expense.description,
-			amountCents: expense.amountCents,
-			expenseDate: expense.expenseDate,
-			paymentStatus: expense.paymentStatus
-		})
-		.from(expense)
-		.where(
-			and(
-				eq(expense.workspaceId, context.workspaceId),
-				isNull(expense.deletedAt),
-				eq(expense.status, 'posted'),
-				eq(expense.reviewStatus, 'approved'),
-				inArray(expense.paymentStatus, ['unpaid', 'paid']),
-				inArray(expense.amountCents, amounts),
-				gte(expense.expenseDate, from),
-				lte(expense.expenseDate, to)
-			)
-		)
-		.orderBy(asc(expense.expenseDate), asc(expense.id))
-		.limit(1000);
-	return transactions.map((transaction) => {
-		const isCredit = transaction.signedAmountCents > 0;
-		const currencyMismatch =
-			transaction.sourceCurrency !== null && transaction.sourceCurrency !== context.currency;
-		const candidates =
-			isCredit || currencyMismatch
-				? []
-				: expenses
-						.filter(
-							(candidate) =>
-								candidate.amountCents === -transaction.signedAmountCents &&
-								daysApart(candidate.expenseDate, transaction.postedDate) <= dateWindowDays
-						)
-						.map((candidate) => ({
-							...candidate,
-							dateDistanceDays: daysApart(candidate.expenseDate, transaction.postedDate),
-							textScore: descriptionOverlap(transaction.description, candidate.description)
-						}))
-						.sort(
-							(a, b) =>
-								a.dateDistanceDays - b.dateDistanceDays ||
-								b.textScore - a.textScore ||
-								a.expenseDate.localeCompare(b.expenseDate) ||
-								a.id - b.id
-						)
-						.slice(0, 8);
-		return { ...transaction, isCredit, currencyMismatch, candidates };
-	});
+		select
+			t.id as transaction_id,
+			t.posted_date,
+			t.signed_amount_cents,
+			t.description as transaction_description,
+			t.memo,
+			t.source_currency,
+			candidate.id as candidate_id,
+			candidate.description as candidate_description,
+			candidate.amount_cents as candidate_amount_cents,
+			candidate.expense_date as candidate_expense_date,
+			candidate.payment_status as candidate_payment_status,
+			candidate.date_distance_days,
+			candidate.text_score
+		from pending_transactions t
+		left join lateral (
+			select ranked.*
+			from (
+				select
+					e.id,
+					e.description,
+					e.amount_cents,
+					e.expense_date,
+					e.payment_status,
+					abs(e.expense_date - t.posted_date)::int as date_distance_days,
+					coalesce(round(
+						100.0 * (
+							select count(*)
+							from (
+								select token from unnest(t.description_tokens) as token
+								intersect
+								select token from unnest(expense_text.tokens) as token
+							) shared_tokens
+						) / nullif((
+							select count(*)
+							from (
+								select token from unnest(t.description_tokens) as token
+								union
+								select token from unnest(expense_text.tokens) as token
+							) combined_tokens
+						), 0)
+					), 0)::int as text_score
+				from expense e
+				cross join lateral (
+					select array(
+						select distinct token
+						from regexp_split_to_table(
+							trim(regexp_replace(
+								regexp_replace(lower(normalize(e.description, NFKD)), U&'[\\0300-\\036f]', '', 'g'),
+								'[^a-z0-9]+', ' ', 'g'
+							)),
+							'[[:space:]]+'
+						) as token
+						where length(token) > 1
+					) as tokens
+				) expense_text
+				where t.signed_amount_cents < 0
+					and (t.source_currency is null or t.source_currency = ${context.currency})
+					and e.workspace_id = ${context.workspaceId}
+					and e.deleted_at is null
+					and e.status = 'posted'
+					and e.review_status = 'approved'
+					and e.payment_status in ('unpaid', 'paid')
+					and e.amount_cents = -t.signed_amount_cents
+					and abs(e.expense_date - t.posted_date) <= ${dateWindowDays}
+			) ranked
+			order by
+				ranked.date_distance_days asc,
+				ranked.text_score desc,
+				ranked.expense_date asc,
+				ranked.id asc
+			limit 8
+		) candidate on true
+		order by t.posted_date asc, t.id asc,
+			candidate.date_distance_days asc,
+			candidate.text_score desc,
+			candidate.expense_date asc,
+			candidate.id asc
+	`);
+
+	const queue = new Map<number, ReconciliationQueueItem>();
+	for (const row of rows) {
+		const id = Number(row.transaction_id);
+		let transaction = queue.get(id);
+		if (!transaction) {
+			const signedAmountCents = Number(row.signed_amount_cents);
+			const sourceCurrency = row.source_currency;
+			transaction = {
+				id,
+				postedDate: row.posted_date,
+				signedAmountCents,
+				description: row.transaction_description,
+				memo: row.memo,
+				sourceCurrency,
+				isCredit: signedAmountCents > 0,
+				currencyMismatch: sourceCurrency !== null && sourceCurrency !== context.currency,
+				candidates: []
+			};
+			queue.set(id, transaction);
+		}
+		if (row.candidate_id !== null) {
+			transaction.candidates.push({
+				id: Number(row.candidate_id),
+				description: row.candidate_description!,
+				amountCents: Number(row.candidate_amount_cents),
+				expenseDate: row.candidate_expense_date!,
+				paymentStatus: row.candidate_payment_status!,
+				dateDistanceDays: Number(row.date_distance_days),
+				textScore: Number(row.text_score)
+			});
+		}
+	}
+	return [...queue.values()];
 }
+
+type ReconciliationQueueSqlRow = {
+	transaction_id: number | string;
+	posted_date: string;
+	signed_amount_cents: number | string;
+	transaction_description: string;
+	memo: string | null;
+	source_currency: string | null;
+	candidate_id: number | string | null;
+	candidate_description: string | null;
+	candidate_amount_cents: number | string | null;
+	candidate_expense_date: string | null;
+	candidate_payment_status: string | null;
+	date_distance_days: number | null;
+	text_score: number | null;
+};
 
 export async function decideBankTransaction(
 	context: WorkspaceContext,
@@ -546,10 +620,4 @@ export function descriptionOverlap(left: string, right: string) {
 
 function daysApart(left: string, right: string) {
 	return Math.abs(Date.parse(`${left}T00:00:00Z`) - Date.parse(`${right}T00:00:00Z`)) / 86_400_000;
-}
-
-function shiftIsoDate(value: string, days: number) {
-	const date = new Date(`${value}T00:00:00Z`);
-	date.setUTCDate(date.getUTCDate() + days);
-	return date.toISOString().slice(0, 10);
 }
