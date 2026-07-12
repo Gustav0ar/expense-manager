@@ -39,10 +39,11 @@
 		categories: CategoryItem[];
 		returnTo: string;
 		locale: string;
+		onRefresh?: () => void | Promise<void>;
 		t: (key: string, params?: Record<string, string | number | null | undefined>) => string;
 	};
 
-	let { catalogs, categories, returnTo, locale, t }: Props = $props();
+	let { catalogs, categories, returnTo, locale, onRefresh, t }: Props = $props();
 
 	const pageSize = 8;
 	const tabOrder: SupportCatalogKind[] = ['paymentMethod', 'vendor', 'costCenter', 'category'];
@@ -73,7 +74,8 @@
 	let catalogCreating = $state(false);
 
 	// ── public API ───────────────────────────────────────────────────────────────
-	export function open() {
+	export async function open() {
+		await onRefresh?.();
 		if (!dialogEl?.open) dialogEl?.showModal();
 	}
 
@@ -250,6 +252,7 @@
 				if (result.type === 'success') {
 					const d = supportCatalogActionData(result.data);
 					await update({ reset: resetOnSuccess, invalidateAll: true });
+					await onRefresh?.();
 					if (resetOnSuccess && d?.catalogKind) {
 						activeTab = d.catalogKind;
 						catalogSearch[d.catalogKind] = '';
@@ -349,6 +352,7 @@
 				{categories}
 				{returnTo}
 				{locale}
+				{onRefresh}
 				{t}
 			/>
 		</div>

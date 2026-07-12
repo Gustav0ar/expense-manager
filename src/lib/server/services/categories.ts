@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { category } from '$lib/server/db/schema';
 import type { WorkspaceContext } from './workspaces';
@@ -21,7 +21,41 @@ type CategoryUsageRow = {
 	child_count: number | string;
 };
 
-export async function listCategories(context: WorkspaceContext, includeArchived = false) {
+export async function listCategories(
+	context: WorkspaceContext,
+	includeArchived = false,
+	includeUsage = true
+) {
+	if (!includeUsage) {
+		const rows = await db
+			.select({
+				id: category.id,
+				name: category.name,
+				color: category.color,
+				icon: category.icon,
+				isArchived: category.isArchived,
+				createdAt: category.createdAt
+			})
+			.from(category)
+			.where(
+				and(
+					eq(category.workspaceId, context.workspaceId),
+					includeArchived ? undefined : eq(category.isArchived, false)
+				)
+			)
+			.orderBy(asc(category.isArchived), asc(category.name));
+
+		return rows.map((row) => ({
+			...row,
+			expenseCount: 0,
+			recurringCount: 0,
+			budgetCount: 0,
+			ruleCount: 0,
+			childCount: 0,
+			associationCount: 0
+		}));
+	}
+
 	const rows = await db.execute<CategoryUsageRow>(
 		categoryUsageSql(context.workspaceId, { includeArchived })
 	);

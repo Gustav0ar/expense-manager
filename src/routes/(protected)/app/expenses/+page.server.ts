@@ -41,8 +41,8 @@ export const load: PageServerLoad = async (event) => {
 		throw error(400, translate(event.locals.locale, 'Filters are invalid.'));
 
 	const [categories, catalogs, expenses, expenseSummary] = await Promise.all([
-		listCategories(context, true),
-		listExpenseCatalogs(context),
+		listCategories(context, false, false),
+		listExpenseCatalogs(context, false, false),
 		listExpenses(context, parsedFilters.data),
 		getExpenseListSummary(context, parsedFilters.data)
 	]);
