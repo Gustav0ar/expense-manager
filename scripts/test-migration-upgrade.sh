@@ -215,9 +215,19 @@ assert_ofx_reconciliation() {
 			      ))
 			 + (SELECT count(*) FROM pg_constraint
 			    WHERE conname = 'bank_transaction_expense_id_expense_id_fk'
-			      AND contype = 'f' AND confdeltype = 'n')"
+			      AND contype = 'f' AND confdeltype = 'n')
+			 + (SELECT count(*) FROM pg_proc
+			    WHERE proname IN (
+			      'assert_bank_transaction_expense_integrity',
+			      'guard_linked_expense_reconciliation_integrity'
+			    ))
+			 + (SELECT count(*) FROM pg_trigger
+			    WHERE tgname IN (
+			      'bank_transaction_expense_integrity_trigger',
+			      'linked_expense_reconciliation_integrity_trigger'
+			    ) AND NOT tgisinternal)"
 	)"
-	if [ "${schema_count}" != "22" ]; then
+	if [ "${schema_count}" != "26" ]; then
 		echo "${target_label} does not have the guarded OFX reconciliation schema." >&2
 		exit 1
 	fi

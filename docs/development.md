@@ -138,9 +138,16 @@ ignore decisions. Confirmation locks the staged transaction and candidate
 expense, then writes the payment-state transition, one-to-one transaction link
 and audit event in one database transaction. Never accept normalized OFX rows,
 amounts, dates or eligibility claims from the browser, and never auto-reconcile.
-The ledger-to-expense foreign key uses `ON DELETE SET NULL`: ordinary soft
-deletion preserves the link, while a later retention purge may remove the
-expense without erasing the decided bank ledger row or its audit history.
+Material edits, rejection, payment reset and moving a linked expense to trash
+must reopen the bank transaction and record `bank_transaction.reversed` in the
+same database transaction. A reopened expense retains its payment date and
+becomes paid unless the requested transition explicitly makes it unpaid. An
+edit that leaves amount, date, currency and financial state compatible keeps
+the verified link. Database integrity triggers guard service bypasses and use a
+transaction-scoped advisory lock to serialize direct expense/link mutations.
+The ledger-to-expense foreign key uses `ON DELETE SET NULL`, so a later hard
+retention purge or operator-level hard delete cannot erase the bank ledger row
+or its audit history. Normal soft deletion reopens the transaction first.
 
 ### Invitation membership contracts
 

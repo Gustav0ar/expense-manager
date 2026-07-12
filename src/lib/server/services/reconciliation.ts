@@ -272,7 +272,7 @@ export async function decideBankTransaction(
 		| { transactionId: number; decision: 'ignore' }
 		| { transactionId: number; decision: 'match'; expenseId: number }
 		| { transactionId: number; decision: 'create'; categoryId: number },
-	options: { now?: Date; onBeforeAudit?: () => void } = {}
+	options: { now?: Date; onBeforeAudit?: () => void | Promise<void> } = {}
 ) {
 	assertReconciler(context);
 	const now = options.now ?? new Date();
@@ -459,7 +459,7 @@ export async function decideBankTransaction(
 					eq(bankTransaction.workspaceId, context.workspaceId)
 				)
 			);
-		options.onBeforeAudit?.();
+		await options.onBeforeAudit?.();
 		await tx.insert(auditEvent).values({
 			workspaceId: context.workspaceId,
 			actorUserId: context.userId,
