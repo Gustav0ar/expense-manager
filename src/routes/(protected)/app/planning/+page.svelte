@@ -53,7 +53,7 @@
 			</form>
 		{/if}
 	</div>
-	<nav class="settings-tabs" aria-label={t('Planning')}>
+	<nav class="planning-tabs" aria-label={t('Planning')}>
 		<a
 			href={resolve(planningSectionPath('budgets'))}
 			class:active={data.section === 'budgets'}
@@ -90,3 +90,54 @@
 		<ImportsReconciliationSection {data} {form} />
 	{/if}
 </section>
+
+<style>
+	.planning-tabs {
+		display: flex;
+		width: fit-content;
+		max-width: 100%;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		margin-bottom: 1rem;
+		padding: 0.3rem;
+		border: 1px solid var(--color-line-soft);
+		border-radius: 10px;
+		background: var(--color-surface-muted);
+	}
+
+	.planning-tabs a {
+		display: inline-flex;
+		min-height: 44px;
+		align-items: center;
+		justify-content: center;
+		padding: 0.6rem 0.9rem;
+		border-radius: 8px;
+		color: var(--color-muted);
+		font-weight: 800;
+		text-align: center;
+		text-decoration: none;
+	}
+
+	.planning-tabs a:hover {
+		color: var(--color-ink);
+	}
+
+	.planning-tabs a.active {
+		background: var(--color-surface);
+		box-shadow: inset 0 0 0 1px var(--color-line);
+		color: var(--color-primary-strong);
+	}
+
+	@media (max-width: 42rem) {
+		.planning-tabs {
+			display: grid;
+			width: 100%;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+
+		.planning-tabs a {
+			padding-inline: 0.4rem;
+			font-size: 0.82rem;
+		}
+	}
+</style>
