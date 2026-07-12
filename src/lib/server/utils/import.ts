@@ -20,6 +20,31 @@ export type ExpenseImportParseResult = {
 	errors: string[];
 };
 
+export const maxExpenseImportRows = 500;
+export const maxExpenseImportBytes = 1 * 1024 * 1024;
+export const portableExpenseCsvMarker = '# expense-manager-expenses:v1';
+export const portableExpenseCsvHeader = [
+	'date',
+	'description',
+	'amount',
+	'category',
+	'payment_method',
+	'vendor',
+	'cost_center',
+	'notes'
+] as const;
+
+export type PortableExpenseCsvRow = {
+	expenseDate: string;
+	description: string;
+	amountCents: number;
+	categoryName: string;
+	paymentMethod?: string | null;
+	vendor?: string | null;
+	costCenter?: string | null;
+	notes?: string | null;
+};
+
 const headerAliases = {
 	date: ['date', 'data', 'expense_date', 'dtposted', 'dia'],
 	description: ['description', 'descricao', 'descrição', 'name', 'memo', 'historico', 'histórico'],
@@ -44,8 +69,23 @@ export function parseCsvImport(content: string, locale = defaultLocale): Expense
 	const rows = parseCsvRows(content);
 	const errors: string[] = [];
 	if (rows.length === 0) return { rows: [], errors: [translate(locale, 'CSV file is empty.')] };
+	const marker = rows[0]?.[0]?.replace(/^\uFEFF/, '').trim();
+	const portable = marker === portableExpenseCsvMarker && rows[0]?.length === 1;
+	if (marker?.startsWith('# expense-manager-expenses:') && !portable) {
+		return {
+			rows: [],
+			errors: [translate(locale, 'Portable CSV version is not supported.')]
+		};
+	}
+	const headerRowIndex = portable ? 1 : 0;
+	if (!rows[headerRowIndex]) {
+		return {
+			rows: [],
+			errors: [translate(locale, 'CSV must contain date, description and amount columns.')]
+		};
+	}
 
-	const headers = rows[0].map((header) => normalizeHeader(header));
+	const headers = rows[headerRowIndex].map((header) => normalizeHeader(header));
 	const indexes = {
 		date: findHeader(headers, headerAliases.date),
 		description: findHeader(headers, headerAliases.description),
@@ -65,13 +105,13 @@ export function parseCsvImport(content: string, locale = defaultLocale): Expense
 	}
 
 	const importedRows: ImportedExpenseRow[] = [];
-	for (let index = 1; index < rows.length; index += 1) {
+	for (let index = headerRowIndex + 1; index < rows.length; index += 1) {
 		const row = rows[index];
 		if (row.every((value) => !value.trim())) continue;
 
 		const rowNumber = index + 1;
 		const expenseDate = normalizeDate(row[indexes.date]);
-		const description = row[indexes.description]?.trim() ?? '';
+		const description = importValueAt(row, indexes.description, portable) ?? '';
 		const amount = normalizeAmount(row[indexes.amount]);
 
 		if (!expenseDate || !description || !amount) {
@@ -88,15 +128,34 @@ export function parseCsvImport(content: string, locale = defaultLocale): Expense
 			expenseDate,
 			description,
 			amount,
-			categoryName: valueAt(row, indexes.category),
-			paymentMethod: valueAt(row, indexes.paymentMethod),
-			vendor: valueAt(row, indexes.vendor),
-			costCenter: valueAt(row, indexes.costCenter),
-			notes: valueAt(row, indexes.notes)
+			categoryName: importValueAt(row, indexes.category, portable),
+			paymentMethod: importValueAt(row, indexes.paymentMethod, portable),
+			vendor: importValueAt(row, indexes.vendor, portable),
+			costCenter: importValueAt(row, indexes.costCenter, portable),
+			notes: importValueAt(row, indexes.notes, portable)
 		});
 	}
 
 	return { rows: importedRows, errors };
+}
+
+export function serializePortableExpenseCsv(rows: PortableExpenseCsvRow[]) {
+	const header = portableExpenseCsvHeader.join(',');
+	const body = rows
+		.map((row) =>
+			[
+				portableCsvCell(row.expenseDate),
+				portableCsvCell(row.description),
+				formatPortableAmount(row.amountCents),
+				portableCsvCell(row.categoryName),
+				portableCsvCell(row.paymentMethod ?? ''),
+				portableCsvCell(row.vendor ?? ''),
+				portableCsvCell(row.costCenter ?? ''),
+				portableCsvCell(row.notes ?? '')
+			].join(',')
+		)
+		.join('\n');
+	return `${portableExpenseCsvMarker}\n${header}\n${body}${body ? '\n' : ''}`;
 }
 
 export function parseOfxImport(content: string, locale = defaultLocale): ExpenseImportParseResult {
@@ -203,6 +262,7 @@ function findHeader(headers: string[], aliases: readonly string[]) {
 
 function normalizeHeader(input: string) {
 	return input
+		.replace(/^\uFEFF/, '')
 		.trim()
 		.toLowerCase()
 		.normalize('NFD')
@@ -264,8 +324,24 @@ function readOfxTag(block: string, tag: string) {
 	return match?.[1]?.trim() ?? null;
 }
 
-function valueAt(row: string[], index: number) {
+function importValueAt(row: string[], index: number, portable: boolean) {
 	if (index < 0) return undefined;
-	const value = row[index]?.trim();
+	const rawValue = row[index] ?? '';
+	const value = (portable ? unprotectPortableCsvValue(rawValue) : rawValue).trim();
 	return value || undefined;
+}
+
+function formatPortableAmount(amountCents: number) {
+	const whole = Math.floor(amountCents / 100);
+	const fraction = String(amountCents % 100).padStart(2, '0');
+	return `${whole}.${fraction}`;
+}
+
+function portableCsvCell(value: string) {
+	const protectedValue = /^\s*'*[=+\-@]/.test(value) ? value.replace(/^(\s*)/, "$1'") : value;
+	return `"${protectedValue.replaceAll('"', '""')}"`;
+}
+
+function unprotectPortableCsvValue(value: string) {
+	return value.replace(/^(\s*)'(?='*[=+\-@])/, '$1');
 }

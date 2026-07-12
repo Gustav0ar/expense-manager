@@ -10,9 +10,9 @@
 
 	type Analytics = NonNullable<PageData['analytics']>;
 	type AnalyticsRow = Analytics['items'][number];
+	type ReportExportPath = '/app/reports/export.csv' | '/app/reports/portable.csv';
 
 	let { data } = $props<{ data: PageData }>();
-	const exportPath = resolve('/app/reports/export.csv');
 	const currency = $derived(data.currentWorkspace?.currency ?? 'USD');
 	const isAnalytical = $derived(data.filters.groupBy === 'expense');
 	const isPeriod = $derived(
@@ -24,9 +24,10 @@
 	const reportPeriod = $derived(
 		isPeriod ? (data.filters.groupBy as 'week' | 'month' | 'year') : undefined
 	);
-	const exportUrl = $derived(createExportUrl(data.filters));
-
-	function createExportUrl(filters: PageData['filters']) {
+	function createExportPath(
+		path: ReportExportPath,
+		filters: PageData['filters']
+	): `${ReportExportPath}?${string}` {
 		const params = [
 			queryParam('from', filters.from),
 			queryParam('to', filters.to),
@@ -44,7 +45,7 @@
 		if (filters.paymentStatus) params.push(queryParam('paymentStatus', filters.paymentStatus));
 		if (filters.q) params.push(queryParam('q', filters.q));
 
-		return `${exportPath}?${params.join('&')}`;
+		return `${path}?${params.join('&')}`;
 	}
 
 	function queryParam(key: string, value: string) {
@@ -88,8 +89,28 @@
 			<span class="eyebrow">{t('Analysis')}</span>
 			<h2>{t('Reports')}</h2>
 		</div>
-		<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-		<a class="button secondary" href={exportUrl}>CSV</a>
+		<div class="inline-actions">
+			<a
+				class="button secondary"
+				href={resolve(createExportPath('/app/reports/export.csv', data.filters))}
+				>{t('Report CSV')}</a
+			>
+			<a
+				class="button secondary"
+				href={resolve(createExportPath('/app/reports/portable.csv', data.filters))}
+				title={t(
+					'Download a versioned CSV that can be imported again (up to {count} expenses and 1 MB).',
+					{
+						count: 500
+					}
+				)}>{t('Portable CSV')}</a
+			>
+			<a
+				class="button secondary"
+				href={resolve('/app/reports/portable-template.csv')}
+				title={t('Download the versioned import template.')}>{t('CSV template')}</a
+			>
+		</div>
 	</div>
 
 	<section class="panel no-print">

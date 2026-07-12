@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { parseCsvImport, parseExpenseImport, parseOfxImport } from './import';
+import {
+	parseCsvImport,
+	parseExpenseImport,
+	parseOfxImport,
+	portableExpenseCsvMarker,
+	serializePortableExpenseCsv
+} from './import';
 
 describe('expense import parser', () => {
 	it('parses Portuguese CSV with semicolon delimiter', () => {
@@ -47,6 +53,49 @@ describe('expense import parser', () => {
 			amount: '12,30',
 			notes: 'linha final'
 		});
+	});
+
+	it('round-trips the versioned portable contract with decimals, raw names and safe formulas', () => {
+		const csv = serializePortableExpenseCsv([
+			{
+				expenseDate: '2026-06-25',
+				description: '=SUM(1,2)',
+				amountCents: 12_540,
+				categoryName: '🍽 Meals',
+				paymentMethod: 'Corporate card',
+				vendor: "'@literal vendor",
+				costCenter: 'Operations',
+				notes: 'Quoted "note", with comma'
+			}
+		]);
+
+		expect(csv).toContain(`${portableExpenseCsvMarker}\ndate,description,amount,category`);
+		expect(csv).toContain('"\'=SUM(1,2)"');
+		expect(csv).toContain('125.40');
+		const result = parseCsvImport(csv);
+		expect(result.errors).toEqual([]);
+		expect(result.rows).toEqual([
+			{
+				rowNumber: 3,
+				expenseDate: '2026-06-25',
+				description: '=SUM(1,2)',
+				amount: '125,40',
+				categoryName: '🍽 Meals',
+				paymentMethod: 'Corporate card',
+				vendor: "'@literal vendor",
+				costCenter: 'Operations',
+				notes: 'Quoted "note", with comma'
+			}
+		]);
+	});
+
+	it('rejects an unknown portable CSV version without treating its marker as a header', () => {
+		const result = parseCsvImport(
+			'# expense-manager-expenses:v2\ndate,description,amount\n2026-01-01,Future,1.00\n'
+		);
+
+		expect(result.rows).toEqual([]);
+		expect(result.errors).toEqual(['Portable CSV version is not supported.']);
 	});
 
 	it('rejects explicit positive credits instead of converting them to expenses', () => {

@@ -18,6 +18,8 @@ import { canReviewExpenses, canWriteExpenses } from '$lib/server/security/roles'
 import { sha256 } from '$lib/server/utils/crypto';
 import {
 	parseExpenseImport,
+	maxExpenseImportBytes,
+	maxExpenseImportRows,
 	type ExpenseImportParseResult,
 	type ExpenseImportSource
 } from '$lib/server/utils/import';
@@ -46,8 +48,6 @@ import {
 import type { WorkspaceContext } from './workspaces';
 import { lockWorkspaceCurrency } from './workspace-currency';
 
-const maxImportBytes = 1 * 1024 * 1024;
-const maxImportRows = 500;
 export const importPreviewTtlMs = 15 * 60 * 1000;
 export const confirmedImportPreviewRetentionMs = 24 * 60 * 60 * 1000;
 export const importPreviewCleanupBatchSize = 1000;
@@ -229,10 +229,12 @@ export async function previewImportExpenses(
 	assertImportInput(context, input);
 	const content = await input.file.text();
 	const parsed = parseExpenseImport(input.sourceType, content, context.locale);
-	if (parsed.rows.length > maxImportRows) {
+	if (parsed.rows.length > maxExpenseImportRows) {
 		throw error(
 			400,
-			translate(context.locale, 'Import at most {count} rows at a time.', { count: maxImportRows })
+			translate(context.locale, 'Import at most {count} rows at a time.', {
+				count: maxExpenseImportRows
+			})
 		);
 	}
 
@@ -647,7 +649,7 @@ function assertImportInput(context: WorkspaceContext, input: ImportExpensesInput
 		throw error(403, translate(context.locale, 'Permission denied.'));
 	if (!input.file || input.file.size === 0)
 		throw error(400, translate(context.locale, 'File is required.'));
-	if (input.file.size > maxImportBytes)
+	if (input.file.size > maxExpenseImportBytes)
 		throw error(400, translate(context.locale, 'File is larger than 1 MB.'));
 }
 
