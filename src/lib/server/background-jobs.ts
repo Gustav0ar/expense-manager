@@ -25,6 +25,7 @@ type BackgroundJobName =
 type BackgroundJobResult = {
 	skipped?: boolean;
 	failed?: number;
+	errors?: number;
 	pending?: number;
 	reconciliation?: {
 		missingActive: number;
@@ -222,7 +223,10 @@ export class BackgroundJobCoordinator {
 			.then((result) => {
 				const completedAt = this.now();
 				state.lastCompletedAt = completedAt;
-				state.lastFailedCount = result?.failed ?? 0;
+				// Some schedulers keep processing other workspaces after an internal
+				// workspace failure and report those failures as `errors`. Treat those
+				// partial failures exactly like durable failed work for health purposes.
+				state.lastFailedCount = (result?.failed ?? 0) + (result?.errors ?? 0);
 				state.lastPendingCount = result?.pending ?? 0;
 				state.lastMissingActiveCount = result?.reconciliation?.missingActive ?? 0;
 				state.lastMissingRetainedCount = result?.reconciliation?.missingRetained ?? 0;

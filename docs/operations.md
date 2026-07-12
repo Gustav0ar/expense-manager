@@ -809,7 +809,9 @@ scheduler, durable invitation-delivery scheduler, expense-trash purge, email-del
 under `backgroundJobs`. Each job
 exposes its attempt count, advisory-lock skip count, last
 attempt/completion/success/error timestamps, last duration, cumulative failed
-work items and latest failed count. The overall
+work items and latest failed count. Per-workspace errors from schedulers that
+continue processing the rest of a batch count as failed work and degrade the
+job even when the scheduler promise itself resolves. The overall
 background-job state can be `starting`, `ok` or `degraded`. Automatic budget
 alerts run hourly and remain disabled for a workspace until an owner or
 administrator opts in from the Budget page.
