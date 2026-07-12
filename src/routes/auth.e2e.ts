@@ -1,16 +1,10 @@
 import { expect, type APIResponse, type Page, test } from '@playwright/test';
+import { testPassword as password, uniqueEmail } from '../../tests/playwright/fixtures';
 
-test.describe.configure({ mode: 'serial' });
 test.use({
 	locale: 'pt-BR',
 	extraHTTPHeaders: { 'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8' }
 });
-
-const password = ['test', 'password', '123'].join('-');
-
-function uniqueEmail(prefix: string) {
-	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-}
 
 function loginForm(page: Page) {
 	return page.locator('form').filter({ has: page.getByRole('button', { name: 'Entrar' }) });

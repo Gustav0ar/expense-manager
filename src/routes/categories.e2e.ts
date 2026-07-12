@@ -1,30 +1,19 @@
 import { expect, type Page, test } from '@playwright/test';
 import { categoryEmojiValues } from '../lib/category-emojis';
+import { registerAndCreateWorkspace as setupWorkspace } from '../../tests/playwright/fixtures';
 
-test.describe.configure({ mode: 'serial' });
 test.use({
 	locale: 'pt-BR',
 	extraHTTPHeaders: { 'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8' }
 });
 
-function uniqueEmail(prefix: string) {
-	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-}
-
 async function registerAndCreateWorkspace(page: Page, workspaceName = 'Categorias E2E') {
-	await page.goto('/register');
-	await page.getByLabel('Nome').fill('Category Tester');
-	await page.getByLabel('Email').fill(uniqueEmail('categories'));
-	await page.locator('input[name="password"]').fill(['test', 'password', '123'].join('-'));
-	await page
-		.locator('input[name="passwordConfirmation"]')
-		.fill(['test', 'password', '123'].join('-'));
-	await page.getByRole('button', { name: 'Criar conta' }).click();
-
-	await expect(page).toHaveURL(/\/app\/onboarding/);
-	await page.getByLabel('Nome').fill(workspaceName);
-	await page.getByRole('button', { name: 'Criar workspace' }).click();
-	await expect(page).toHaveURL(/\/app\/dashboard/);
+	await setupWorkspace(page, {
+		emailPrefix: 'categories',
+		locale: 'pt-BR',
+		userName: 'Category Tester',
+		workspaceName
+	});
 }
 
 function newCategoryForm(page: Page) {

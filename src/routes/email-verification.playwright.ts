@@ -1,10 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-
-const password = ['test', 'password', '123'].join('-');
-
-function uniqueEmail(prefix: string) {
-	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-}
+import { testPassword as password, uniqueEmail } from '../../tests/playwright/fixtures';
 
 async function registerAccount(page: Page, input: { email: string; name: string }) {
 	await page.goto('/register');

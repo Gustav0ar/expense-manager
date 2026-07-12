@@ -2,8 +2,8 @@ import { expect, type Page, test } from '@playwright/test';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
+import { registerAndCreateWorkspace } from '../playwright/fixtures';
 
-const password = ['test', 'password', '123'].join('-');
 const kib = 1024;
 
 type AssetBudget = {
@@ -46,10 +46,6 @@ const runtimeBudget: RuntimeBudget = {
 	transferBytes: 1_200 * kib
 };
 
-function uniqueEmail(prefix: string) {
-	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-}
-
 function collectFiles(root: string, extensions: string[]) {
 	const files: string[] = [];
 	for (const entry of readdirSync(root)) {
@@ -65,18 +61,13 @@ function collectFiles(root: string, extensions: string[]) {
 }
 
 async function registerAndSeed(page: Page) {
-	await page.goto('/register');
-	await page.getByLabel('Name').fill('Performance User');
-	await page.getByLabel('Email').fill(uniqueEmail('performance'));
-	await page.getByLabel('Password', { exact: true }).fill(password);
-	await page.getByLabel('Confirm password').fill(password);
-	await page.getByRole('button', { name: 'Create account' }).click();
-
-	await expect(page).toHaveURL(/\/app\/onboarding/);
-	await page.getByLabel('Name').fill('Performance Workspace');
-	await page.getByLabel('Currency').fill('USD');
-	await page.getByRole('button', { name: 'Create workspace' }).click();
-	await expect(page).toHaveURL(/\/app\/dashboard/);
+	await registerAndCreateWorkspace(page, {
+		currency: 'USD',
+		emailPrefix: 'performance',
+		locale: 'en-US',
+		userName: 'Performance User',
+		workspaceName: 'Performance Workspace'
+	});
 
 	await page.goto('/app/categories');
 	const categoryForm = page.locator('form.stack');

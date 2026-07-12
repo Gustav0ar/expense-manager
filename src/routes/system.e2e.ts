@@ -1,58 +1,27 @@
-import { expect, type APIResponse, type Locator, type Page, test } from '@playwright/test';
+import { expect, type APIResponse, type Page, test } from '@playwright/test';
+import {
+	createWorkspace as setupWorkspace,
+	registerAccount as registerTestAccount,
+	uniqueEmail
+} from '../../tests/playwright/fixtures';
 
-test.describe.configure({ mode: 'serial' });
 test.use({
 	locale: 'pt-BR',
 	extraHTTPHeaders: { 'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8' }
 });
 
-const password = ['test', 'password', '123'].join('-');
-
-function uniqueEmail(prefix: string) {
-	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-}
-
 async function registerAccount(page: Page, input: { email?: string; name?: string } = {}) {
 	const email = input.email ?? uniqueEmail('system');
-	await page.goto('/register');
-	const form = page
-		.locator('form')
-		.filter({ has: page.getByRole('button', { name: 'Criar conta' }) });
-	await expect(form.getByRole('button', { name: 'Criar conta' })).toBeVisible();
-	await fillRegisterForm(form, { email, name: input.name ?? 'System User' });
-	await form.getByRole('button', { name: 'Criar conta' }).click();
+	await registerTestAccount(
+		page,
+		{ email, name: input.name ?? 'System User' },
+		{ locale: 'pt-BR' }
+	);
 	return email;
 }
 
-async function fillRegisterForm(form: Locator, input: { email: string; name: string }) {
-	const name = form.locator('input[name="name"]');
-	const email = form.locator('input[name="email"]');
-	const passwordInput = form.locator('input[name="password"]');
-	const passwordConfirmationInput = form.locator('input[name="passwordConfirmation"]');
-
-	for (let attempt = 0; attempt < 3; attempt += 1) {
-		await name.fill(input.name);
-		await email.fill(input.email);
-		await passwordInput.fill(password);
-		await passwordConfirmationInput.fill(password);
-
-		try {
-			await expect(name).toHaveValue(input.name, { timeout: 1000 });
-			await expect(email).toHaveValue(input.email, { timeout: 1000 });
-			await expect(passwordInput).toHaveValue(password, { timeout: 1000 });
-			await expect(passwordConfirmationInput).toHaveValue(password, { timeout: 1000 });
-			return;
-		} catch (err) {
-			if (attempt === 2) throw err;
-		}
-	}
-}
-
 async function createWorkspace(page: Page, name = 'Sistema E2E') {
-	await expect(page).toHaveURL(/\/app\/onboarding/);
-	await page.getByLabel('Nome').fill(name);
-	await page.getByRole('button', { name: 'Criar workspace' }).click();
-	await expect(page).toHaveURL(/\/app\/dashboard/);
+	await setupWorkspace(page, { locale: 'pt-BR', name });
 }
 
 async function registerAndCreateWorkspace(page: Page, workspaceName = 'Sistema E2E') {

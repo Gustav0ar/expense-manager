@@ -1,12 +1,14 @@
 import { expect, type Page, test } from '@playwright/test';
+import {
+	createWorkspace,
+	registerAccount,
+	testPassword,
+	uniqueEmail
+} from '../playwright/fixtures';
 
-const password = process.env.SMOKE_PASSWORD ?? ['test', 'password', '123'].join('-');
+const password = process.env.SMOKE_PASSWORD ?? testPassword;
 const isExternalSmoke = Boolean(process.env.SMOKE_BASE_URL);
 const runWriteSmoke = !isExternalSmoke || process.env.SMOKE_WRITE_TESTS === 'true';
-
-function uniqueEmail(prefix: string) {
-	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-}
 
 async function loginOrRegister(page: Page) {
 	const configuredEmail = process.env.SMOKE_EMAIL;
@@ -17,18 +19,18 @@ async function loginOrRegister(page: Page) {
 		await page.getByLabel('Password').fill(password);
 		await page.getByRole('button', { name: 'Login' }).click();
 	} else {
-		await page.goto('/register');
-		await page.getByLabel('Name').fill('Smoke User');
-		await page.getByLabel('Email').fill(uniqueEmail('smoke'));
-		await page.getByLabel('Password', { exact: true }).fill(password);
-		await page.getByLabel('Confirm password').fill(password);
-		await page.getByRole('button', { name: 'Create account' }).click();
+		await registerAccount(page, {
+			email: uniqueEmail('smoke'),
+			name: 'Smoke User',
+			password
+		});
 	}
 
 	if (page.url().includes('/app/onboarding')) {
-		await page.getByLabel('Name').fill('Smoke Workspace');
-		await page.getByLabel('Currency').fill('USD');
-		await page.getByRole('button', { name: 'Create workspace' }).click();
+		await createWorkspace(page, {
+			currency: 'USD',
+			name: 'Smoke Workspace'
+		});
 	}
 
 	await expect(page).toHaveURL(/\/app\/dashboard/);
