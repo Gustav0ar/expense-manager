@@ -104,6 +104,14 @@ Playwright configurations are split by runtime mode:
 
 Functional `*.e2e.ts` specs are colocated under `src/routes/` so route behavior and its coverage move together. Cross-cutting quality specs live under `tests/quality/`.
 
+Reuse the identity, registration and workspace setup helpers in
+`tests/playwright/fixtures.ts` when a spec only needs an authenticated starting
+state. Pass the spec's locale explicitly so accessible-name assertions keep
+testing the intended language. Authentication-focused specs may keep their form
+steps inline when those steps are the behavior under test. Specs use Playwright's
+default per-file execution mode: one failure does not skip unrelated tests, and
+tests are not made parallel unless a suite opts in deliberately.
+
 ### Expense dialog actions
 
 Support-catalog and category forms use SvelteKit progressive enhancement. Enhanced create, update, archive, delete and restore actions return a scoped `catalogAction` or `categoryAction` payload so the dialog can refresh its data and display the result without closing. Native form submissions still redirect to the validated `returnTo` URL. Keep both paths covered when adding a dialog mutation.

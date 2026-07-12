@@ -1,41 +1,22 @@
 import { expect, type Browser, type Locator, type Page, test } from '@playwright/test';
+import {
+	registerAccount,
+	registerAndCreateWorkspace as setupWorkspace,
+	uniqueEmail
+} from '../../tests/playwright/fixtures';
 
-test.describe.configure({ mode: 'serial' });
 test.use({
 	locale: 'pt-BR',
 	extraHTTPHeaders: { 'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8' }
 });
 
-function uniqueEmail(prefix: string) {
-	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-}
-
 async function registerAndCreateWorkspace(page: Page, workspaceName = 'Despesas E2E') {
-	await page.goto('/register');
-	await page.getByLabel('Nome').fill('Expense Tester');
-	await page.getByLabel('Email').fill(uniqueEmail('expenses'));
-	await page.locator('input[name="password"]').fill(['test', 'password', '123'].join('-'));
-	await page
-		.locator('input[name="passwordConfirmation"]')
-		.fill(['test', 'password', '123'].join('-'));
-	await page.getByRole('button', { name: 'Criar conta' }).click();
-
-	await expect(page).toHaveURL(/\/app\/onboarding/);
-	await page.getByLabel('Nome').fill(workspaceName);
-	await page.getByRole('button', { name: 'Criar workspace' }).click();
-	await expect(page).toHaveURL(/\/app\/dashboard/);
-}
-
-async function registerAccount(page: Page, input: { email: string; name: string; next?: string }) {
-	const target = input.next ? `/register?next=${encodeURIComponent(input.next)}` : '/register';
-	await page.goto(target);
-	await page.getByLabel('Nome').fill(input.name);
-	await page.getByLabel('Email').fill(input.email);
-	await page.locator('input[name="password"]').fill(['test', 'password', '123'].join('-'));
-	await page
-		.locator('input[name="passwordConfirmation"]')
-		.fill(['test', 'password', '123'].join('-'));
-	await page.getByRole('button', { name: 'Criar conta' }).click();
+	await setupWorkspace(page, {
+		emailPrefix: 'expenses',
+		locale: 'pt-BR',
+		userName: 'Expense Tester',
+		workspaceName
+	});
 }
 
 async function inviteAndAcceptMember(browser: Browser, page: Page) {
@@ -54,11 +35,14 @@ async function inviteAndAcceptMember(browser: Browser, page: Page) {
 	});
 	const memberPage = await context.newPage();
 	const invitePath = new URL(inviteUrl!, 'http://localhost:4173').pathname;
-	await registerAccount(memberPage, {
-		email,
-		name: 'Expense Member',
-		next: invitePath
-	});
+	await registerAccount(
+		memberPage,
+		{
+			email,
+			name: 'Expense Member'
+		},
+		{ locale: 'pt-BR', path: `/register?next=${encodeURIComponent(invitePath)}` }
+	);
 	await expect(memberPage).toHaveURL(/\/invite\//);
 	await memberPage.getByRole('button', { name: 'Aceitar convite' }).click();
 	await expect(memberPage).toHaveURL(/\/app\/dashboard/);

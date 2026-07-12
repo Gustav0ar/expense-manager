@@ -1,55 +1,16 @@
 import { expect, type Browser, type Locator, type Page, test } from '@playwright/test';
 import { generateTotpCode } from '../lib/server/utils/totp';
+import {
+	createWorkspace,
+	registerAccount,
+	testPassword,
+	uniqueEmail
+} from '../../tests/playwright/fixtures';
 
-test.describe.configure({ mode: 'serial' });
 test.use({
 	locale: 'pt-BR',
 	extraHTTPHeaders: { 'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8' }
 });
-
-function uniqueEmail(prefix: string) {
-	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-}
-
-async function submitRegisterForm(
-	page: Page,
-	input: { email: string; name: string },
-	buttonName = 'Criar conta'
-) {
-	const form = page.locator('form').filter({ has: page.getByRole('button', { name: buttonName }) });
-	const password = ['test', 'password', '123'].join('-');
-	await form.locator('input[name="name"]').fill(input.name);
-	await form.locator('input[name="email"]').fill(input.email);
-	await form.locator('input[name="password"]').fill(password);
-	await form.locator('input[name="passwordConfirmation"]').fill(password);
-	await expect(form.locator('input[name="name"]')).toHaveValue(input.name);
-	await expect(form.locator('input[name="email"]')).toHaveValue(input.email);
-	await expect(form.locator('input[name="password"]')).toHaveValue(password);
-	await expect(form.locator('input[name="passwordConfirmation"]')).toHaveValue(password);
-	await form.getByRole('button', { name: buttonName }).click();
-}
-
-async function registerAccount(
-	page: Page,
-	input: { email: string; name: string },
-	options: { buttonName?: string; path?: string } = {}
-) {
-	const buttonName = options.buttonName ?? 'Criar conta';
-	const path = options.path ?? '/register';
-
-	for (let attempt = 0; attempt < 3; attempt += 1) {
-		await page.goto(path);
-		await page.waitForLoadState('networkidle');
-		await submitRegisterForm(page, input, buttonName);
-
-		try {
-			await expect(page).not.toHaveURL(/\/register/, { timeout: 5000 });
-			return;
-		} catch (error) {
-			if (attempt === 2) throw error;
-		}
-	}
-}
 
 async function browserDateLabel(page: Page, value: string) {
 	return page.evaluate((dateValue) => {
@@ -268,15 +229,17 @@ async function expectMinimumInteractiveTargetSize(page: Page) {
 async function registerAndCreateWorkspace(page: Page, workspaceName = 'Minhas despesas') {
 	const email = uniqueEmail('user');
 
-	await page.goto('/register');
-	await page.waitForLoadState('networkidle');
-	await expect(page.locator('html')).toHaveAttribute('data-theme', 'system');
-	await submitRegisterForm(page, { email, name: 'Test User' });
-
-	await expect(page).toHaveURL(/\/app\/onboarding/);
-	await page.getByLabel('Nome').fill(workspaceName);
-	await page.getByRole('button', { name: 'Criar workspace' }).click();
-	await expect(page).toHaveURL(/\/app\/dashboard/);
+	await registerAccount(
+		page,
+		{ email, name: 'Test User' },
+		{
+			locale: 'pt-BR',
+			beforeSubmit: async (registrationPage) => {
+				await expect(registrationPage.locator('html')).toHaveAttribute('data-theme', 'system');
+			}
+		}
+	);
+	await createWorkspace(page, { locale: 'pt-BR', name: workspaceName });
 
 	return { email, workspaceName };
 }
@@ -312,8 +275,11 @@ async function acceptInviteAsUser(browser: Browser, inviteUrl: string, email: st
 	});
 	const page = await context.newPage();
 	const invitePath = new URL(inviteUrl, 'http://localhost:4173').pathname;
-	await page.goto(`/register?next=${encodeURIComponent(invitePath)}`);
-	await submitRegisterForm(page, { email, name: 'Member User' });
+	await registerAccount(
+		page,
+		{ email, name: 'Member User' },
+		{ locale: 'pt-BR', path: `/register?next=${encodeURIComponent(invitePath)}` }
+	);
 	await expect(page).toHaveURL(/\/invite\//);
 	await page.getByRole('button', { name: 'Aceitar convite' }).click();
 	await expect(page).toHaveURL(/\/app\/dashboard/);
@@ -503,7 +469,7 @@ test.describe('english locale defaults', () => {
 		await page.goto('/register');
 		await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 		await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible();
-		await registerAccount(page, { email, name: 'Test User' }, { buttonName: 'Create account' });
+		await registerAccount(page, { email, name: 'Test User' }, { locale: 'en-US' });
 
 		await expect(page).toHaveURL(/\/app\/onboarding/);
 		await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
@@ -1585,7 +1551,7 @@ test('covers MFA setup, challenge and invalid code handling', async ({ page }) =
 	await page.locator('form[action="/logout"] button').click();
 	await expect(page).toHaveURL(/\/login/);
 	await page.getByLabel('Email').fill(email);
-	await page.getByLabel('Senha').fill(['test', 'password', '123'].join('-'));
+	await page.getByLabel('Senha').fill(testPassword);
 	await page.getByRole('button', { name: 'Entrar' }).click();
 	await expect(page).toHaveURL(/\/mfa/);
 	await page.goto(invitePath);

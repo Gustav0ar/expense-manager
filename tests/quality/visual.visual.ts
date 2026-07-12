@@ -1,24 +1,14 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
-
-const password = ['test', 'password', '123'].join('-');
-
-function uniqueEmail(prefix: string) {
-	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-}
+import { registerAndCreateWorkspace } from '../playwright/fixtures';
 
 async function registerAndSeed(page: Page) {
-	await page.goto('/register');
-	await page.getByLabel('Name').fill('Visual User');
-	await page.getByLabel('Email').fill(uniqueEmail('visual'));
-	await page.getByLabel('Password', { exact: true }).fill(password);
-	await page.getByLabel('Confirm password').fill(password);
-	await page.getByRole('button', { name: 'Create account' }).click();
-
-	await expect(page).toHaveURL(/\/app\/onboarding/);
-	await page.getByLabel('Name').fill('Visual Workspace');
-	await page.getByLabel('Currency').fill('USD');
-	await page.getByRole('button', { name: 'Create workspace' }).click();
-	await expect(page).toHaveURL(/\/app\/dashboard/);
+	await registerAndCreateWorkspace(page, {
+		currency: 'USD',
+		emailPrefix: 'visual',
+		locale: 'en-US',
+		userName: 'Visual User',
+		workspaceName: 'Visual Workspace'
+	});
 
 	await page.goto('/app/categories');
 	const categoryForm = page.locator('form.stack');

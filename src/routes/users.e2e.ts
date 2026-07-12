@@ -6,14 +6,16 @@ import {
 	type Page,
 	test
 } from '@playwright/test';
+import {
+	registerAccount,
+	registerAndCreateWorkspace as setupWorkspace,
+	uniqueEmail
+} from '../../tests/playwright/fixtures';
 
-test.describe.configure({ mode: 'serial' });
 test.use({
 	locale: 'pt-BR',
 	extraHTTPHeaders: { 'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8' }
 });
-
-const password = ['test', 'password', '123'].join('-');
 
 type InvitedUserSession = {
 	context: BrowserContext;
@@ -21,53 +23,13 @@ type InvitedUserSession = {
 	page: Page;
 };
 
-function uniqueEmail(prefix: string) {
-	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-}
-
-async function registerAccount(page: Page, input: { email: string; name: string; next?: string }) {
-	const search = input.next ? `?next=${encodeURIComponent(input.next)}` : '';
-	await page.goto(`/register${search}`);
-	const form = page
-		.locator('form')
-		.filter({ has: page.getByRole('button', { name: 'Criar conta' }) });
-	await expect(form.getByRole('button', { name: 'Criar conta' })).toBeVisible();
-	await fillRegisterForm(form, input);
-	await form.getByRole('button', { name: 'Criar conta' }).click();
-}
-
-async function fillRegisterForm(form: Locator, input: { email: string; name: string }) {
-	const name = form.locator('input[name="name"]');
-	const email = form.locator('input[name="email"]');
-	const passwordInput = form.locator('input[name="password"]');
-	const passwordConfirmationInput = form.locator('input[name="passwordConfirmation"]');
-
-	for (let attempt = 0; attempt < 3; attempt += 1) {
-		await name.fill(input.name);
-		await email.fill(input.email);
-		await passwordInput.fill(password);
-		await passwordConfirmationInput.fill(password);
-
-		try {
-			await expect(name).toHaveValue(input.name, { timeout: 1000 });
-			await expect(email).toHaveValue(input.email, { timeout: 1000 });
-			await expect(passwordInput).toHaveValue(password, { timeout: 1000 });
-			await expect(passwordConfirmationInput).toHaveValue(password, { timeout: 1000 });
-			return;
-		} catch (err) {
-			if (attempt === 2) throw err;
-		}
-	}
-}
-
 async function registerAndCreateWorkspace(page: Page, workspaceName = 'Usuários E2E') {
-	const email = uniqueEmail('users-owner');
-	await registerAccount(page, { email, name: 'Owner User' });
-	await expect(page).toHaveURL(/\/app\/onboarding/);
-	await page.getByLabel('Nome').fill(workspaceName);
-	await page.getByRole('button', { name: 'Criar workspace' }).click();
-	await expect(page).toHaveURL(/\/app\/dashboard/);
-	return { email, workspaceName };
+	return setupWorkspace(page, {
+		emailPrefix: 'users-owner',
+		locale: 'pt-BR',
+		userName: 'Owner User',
+		workspaceName
+	});
 }
 
 function usersInviteForm(page: Page) {
@@ -161,7 +123,14 @@ async function acceptInvite(
 		extraHTTPHeaders: { 'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8' }
 	});
 	const page = await context.newPage();
-	await registerAccount(page, { email: input.email, name: input.name, next: invitePath });
+	await registerAccount(
+		page,
+		{ email: input.email, name: input.name },
+		{
+			locale: 'pt-BR',
+			path: `/register?next=${encodeURIComponent(invitePath)}`
+		}
+	);
 	await expect(page).toHaveURL(/\/invite\//);
 	await page.getByRole('button', { name: 'Aceitar convite' }).click();
 	await expect(page).toHaveURL(/\/app\/dashboard/);
@@ -499,7 +468,14 @@ async function acceptInviteWithWrongEmail(
 		extraHTTPHeaders: { 'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8' }
 	});
 	const page = await context.newPage();
-	await registerAccount(page, { email, name: 'Wrong Invite User', next: invitePath });
+	await registerAccount(
+		page,
+		{ email, name: 'Wrong Invite User' },
+		{
+			locale: 'pt-BR',
+			path: `/register?next=${encodeURIComponent(invitePath)}`
+		}
+	);
 	await expect(page).toHaveURL(/\/invite\//);
 	await expect(page.getByRole('button', { name: 'Aceitar convite' })).toBeVisible();
 	return { context, email, page };

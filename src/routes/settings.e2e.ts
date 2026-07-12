@@ -7,14 +7,16 @@ import {
 	test
 } from '@playwright/test';
 import { generateTotpCode } from '../lib/server/utils/totp';
+import {
+	registerAccount,
+	registerAndCreateWorkspace as setupWorkspace,
+	uniqueEmail
+} from '../../tests/playwright/fixtures';
 
-test.describe.configure({ mode: 'serial' });
 test.use({
 	locale: 'pt-BR',
 	extraHTTPHeaders: { 'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8' }
 });
-
-const password = ['test', 'password', '123'].join('-');
 
 type UserSession = {
 	context: BrowserContext;
@@ -22,28 +24,13 @@ type UserSession = {
 	page: Page;
 };
 
-function uniqueEmail(prefix: string) {
-	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-}
-
-async function registerAccount(page: Page, input: { email: string; name: string; next?: string }) {
-	const search = input.next ? `?next=${encodeURIComponent(input.next)}` : '';
-	await page.goto(`/register${search}`);
-	await page.getByLabel('Nome').fill(input.name);
-	await page.getByLabel('Email').fill(input.email);
-	await page.locator('input[name="password"]').fill(password);
-	await page.locator('input[name="passwordConfirmation"]').fill(password);
-	await page.getByRole('button', { name: 'Criar conta' }).click();
-}
-
 async function registerAndCreateWorkspace(page: Page, workspaceName = 'Ajustes E2E') {
-	const email = uniqueEmail('settings-owner');
-	await registerAccount(page, { email, name: 'Settings Owner' });
-	await expect(page).toHaveURL(/\/app\/onboarding/);
-	await page.getByLabel('Nome').fill(workspaceName);
-	await page.getByRole('button', { name: 'Criar workspace' }).click();
-	await expect(page).toHaveURL(/\/app\/dashboard/);
-	return { email, workspaceName };
+	return setupWorkspace(page, {
+		emailPrefix: 'settings-owner',
+		locale: 'pt-BR',
+		userName: 'Settings Owner',
+		workspaceName
+	});
 }
 
 function currentWorkspaceForm(page: Page) {
@@ -121,7 +108,14 @@ async function acceptInvite(
 		extraHTTPHeaders: { 'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8' }
 	});
 	const page = await context.newPage();
-	await registerAccount(page, { email: input.email, name: input.name, next: invitePath });
+	await registerAccount(
+		page,
+		{ email: input.email, name: input.name },
+		{
+			locale: 'pt-BR',
+			path: `/register?next=${encodeURIComponent(invitePath)}`
+		}
+	);
 	await expect(page).toHaveURL(/\/invite\//);
 	await page.getByRole('button', { name: 'Aceitar convite' }).click();
 	await expect(page).toHaveURL(/\/app\/dashboard/);

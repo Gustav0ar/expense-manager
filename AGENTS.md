@@ -77,6 +77,8 @@ The `postCreateCommand` in `devcontainer.json` runs `pnpm install`, `playwright 
 
 Functional Playwright specs are intentionally colocated with routes as `src/routes/*.e2e.ts`. Runtime-specific registration and email-verification specs also live under `src/routes/`, while visual, performance, infrastructure and smoke specs live under `tests/quality/`. See `docs/development.md` for the configuration-to-suite map.
 
+Use `tests/playwright/fixtures.ts` for routine unique identities, registration and workspace setup. Keep registration/login steps inline only when authentication behavior itself is under test, and pass locale overrides explicitly to shared helpers.
+
 Functional suites retain a Playwright trace and screenshot on failure. CI uploads `playwright-report/` and `test-results/` for seven days; inspect those artifacts before trying to reproduce a CI-only failure.
 
 ### When a test fails after UI changes
