@@ -4,6 +4,7 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { and, desc, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { translate } from '$lib/i18n';
+import { decodeCursor, encodeCursor, isSafePositiveInteger } from '$lib/server/utils/cursor';
 import { advisoryLockClient, db } from '$lib/server/db';
 import {
 	attachmentDeletion,
@@ -111,31 +112,26 @@ export async function listTrashedExpenses(
 }
 
 function encodeTrashCursor(cursor: ExpenseTrashCursor) {
-	return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+	return encodeCursor(cursor);
 }
 
 function parseTrashCursor(context: WorkspaceContext, value: string): ExpenseTrashCursor {
-	try {
-		if (value.length === 0 || value.length > 256) throw new Error('Invalid cursor length');
-		const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as unknown;
-		if (!parsed || typeof parsed !== 'object') throw new Error('Invalid cursor shape');
-		const cursor = parsed as Partial<ExpenseTrashCursor>;
-		const date = typeof cursor.d === 'string' ? new Date(cursor.d) : null;
-		if (
-			cursor.v !== 1 ||
-			cursor.w !== context.workspaceId ||
-			!Number.isSafeInteger(cursor.w) ||
-			!Number.isSafeInteger(cursor.i) ||
-			(cursor.i ?? 0) <= 0 ||
-			!date ||
-			Number.isNaN(date.getTime()) ||
-			date.toISOString() !== cursor.d
-		)
-			throw new Error('Invalid cursor values');
-		return cursor as ExpenseTrashCursor;
-	} catch {
-		throw error(400, translate(context.locale, 'Trash cursor is invalid.'));
-	}
+	const cursor = decodeCursor(value, (parsed): parsed is ExpenseTrashCursor => {
+		if (!parsed || typeof parsed !== 'object') return false;
+		const candidate = parsed as Partial<ExpenseTrashCursor>;
+		const date = typeof candidate.d === 'string' ? new Date(candidate.d) : null;
+		return (
+			candidate.v === 1 &&
+			candidate.w === context.workspaceId &&
+			isSafePositiveInteger(candidate.w) &&
+			isSafePositiveInteger(candidate.i) &&
+			date !== null &&
+			!Number.isNaN(date.getTime()) &&
+			date.toISOString() === candidate.d
+		);
+	});
+	if (!cursor) throw error(400, translate(context.locale, 'Trash cursor is invalid.'));
+	return cursor;
 }
 
 export async function restoreTrashedExpense(

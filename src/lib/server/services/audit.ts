@@ -2,6 +2,7 @@ import { auditEvent } from '$lib/server/db/schema';
 import { user } from '$lib/server/db/auth.schema';
 import { db } from '$lib/server/db';
 import { and, desc, eq, lt, type SQL } from 'drizzle-orm';
+import { decodeCursor, encodeCursor, isSafePositiveInteger } from '$lib/server/utils/cursor';
 import type { WorkspaceContext } from './workspaces';
 
 export type AuditInput = {
@@ -75,19 +76,12 @@ export async function listAuditEvents(context: WorkspaceContext, filters: AuditF
 }
 
 function encodeAuditCursor(id: number) {
-	return Buffer.from(JSON.stringify({ id }), 'utf8').toString('base64url');
+	return encodeCursor({ id });
 }
 
 function decodeAuditCursor(cursor?: string) {
-	if (!cursor) return null;
-	try {
-		const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as {
-			id?: unknown;
-		};
-		return typeof parsed.id === 'number' && Number.isInteger(parsed.id) && parsed.id > 0
-			? { id: parsed.id }
-			: null;
-	} catch {
-		return null;
-	}
+	return decodeCursor(cursor, (value): value is { id: number } => {
+		const candidate = value && typeof value === 'object' ? (value as { id?: unknown }) : null;
+		return Boolean(candidate && isSafePositiveInteger(candidate.id));
+	});
 }
