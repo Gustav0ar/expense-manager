@@ -1,5 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { decodeExpenseCursor, encodeExpenseCursor } from './cursor';
+import {
+	decodeCursor,
+	decodeExpenseCursor,
+	encodeCursor,
+	encodeExpenseCursor,
+	isSafePositiveInteger,
+	maxEncodedCursorLength
+} from './cursor';
+
+const isIdCursor = (value: unknown): value is { id: number } => {
+	const candidate = value && typeof value === 'object' ? (value as { id?: unknown }) : null;
+	return Boolean(candidate && isSafePositiveInteger(candidate.id));
+};
+
+describe('shared cursor codec', () => {
+	it('round-trips a validated payload', () => {
+		expect(decodeCursor(encodeCursor({ id: 42 }), isIdCursor)).toEqual({ id: 42 });
+	});
+
+	it('rejects oversized, malformed, and unsafe numeric payloads', () => {
+		expect(decodeCursor('x'.repeat(maxEncodedCursorLength + 1), isIdCursor)).toBeNull();
+		expect(decodeCursor('not-a-cursor', isIdCursor)).toBeNull();
+		expect(decodeCursor(encodeCursor({ id: Number.MAX_SAFE_INTEGER + 1 }), isIdCursor)).toBeNull();
+		expect(decodeCursor(encodeCursor({ id: 0 }), isIdCursor)).toBeNull();
+	});
+});
 
 describe('expense cursor', () => {
 	it('round-trips a cursor', () => {

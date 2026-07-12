@@ -17,6 +17,7 @@ import {
 } from '$lib/server/email';
 import { canManageBudgets } from '$lib/server/security/roles';
 import { randomToken } from '$lib/server/utils/crypto';
+import { decodeCursor, encodeCursor, isSafePositiveInteger } from '$lib/server/utils/cursor';
 import { mapWithConcurrency } from '$lib/server/utils/concurrency';
 import { firstDayOfMonth, startOfMonth } from '$lib/server/utils/date';
 import { formatCents } from '$lib/utils/format';
@@ -1325,21 +1326,14 @@ function isNonRetryableProviderEvent(value: string | null) {
 }
 
 function encodeBudgetAlertHistoryCursor(id: number) {
-	return Buffer.from(JSON.stringify({ id }), 'utf8').toString('base64url');
+	return encodeCursor({ id });
 }
 
 function decodeBudgetAlertHistoryCursor(value?: string) {
-	if (!value) return null;
-	try {
-		const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as {
-			id?: unknown;
-		};
-		return typeof parsed.id === 'number' && Number.isSafeInteger(parsed.id) && parsed.id > 0
-			? { id: parsed.id }
-			: null;
-	} catch {
-		return null;
-	}
+	return decodeCursor(value, (cursor): cursor is { id: number } => {
+		const candidate = cursor && typeof cursor === 'object' ? (cursor as { id?: unknown }) : null;
+		return Boolean(candidate && isSafePositiveInteger(candidate.id));
+	});
 }
 
 function lockBudgetAlertPreference(executor: Pick<typeof db, 'execute'>, workspaceId: number) {
