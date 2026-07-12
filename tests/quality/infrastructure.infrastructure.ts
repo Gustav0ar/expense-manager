@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import net from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import postgres from 'postgres';
@@ -108,6 +109,23 @@ async function stopChild(child: ChildProcess) {
 		})
 	]);
 }
+
+test('pins the VPS SSH host identity in deploy and rollback workflows', async () => {
+	const workflows = await Promise.all(
+		['deploy.yml', 'rollback.yml'].map((name) =>
+			readFile(new URL(`../../.github/workflows/${name}`, import.meta.url), 'utf8')
+		)
+	);
+
+	for (const workflow of workflows) {
+		expect(workflow).not.toContain('StrictHostKeyChecking=accept-new');
+		expect(workflow).toContain('VPS_SSH_HOST_FINGERPRINT');
+		expect(workflow).toContain('StrictHostKeyChecking=yes');
+		expect(workflow).toContain('fingerprint: ${{ secrets.VPS_SSH_HOST_FINGERPRINT }}');
+	}
+	expect(workflows[0]).toContain('"host_identifier_hash"');
+	expect(workflows[0]).not.toContain('"host_fingerprint"');
+});
 
 test('reports a real database outage through the health endpoint', async () => {
 	const port = await getFreePort();
