@@ -10,6 +10,7 @@ import {
 	type VerificationEmailRequestResult
 } from '$lib/server/services/email-verification';
 import { translate } from '$lib/i18n';
+import { safeInternalPath } from '$lib/server/security/internal-redirect';
 
 export const load: PageServerLoad = (event) => {
 	if (event.locals.user) throw redirect(303, '/app');
@@ -86,7 +87,7 @@ export const actions: Actions = {
 };
 
 function safeNext(next: string) {
-	return next.startsWith('/') && !next.startsWith('//') ? next : '/app';
+	return safeInternalPath(next, '/app');
 }
 
 function safeValues(formData: FormData, next: string) {

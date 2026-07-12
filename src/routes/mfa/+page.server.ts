@@ -4,6 +4,7 @@ import { assertRateLimit } from '$lib/server/security/rate-limit';
 import { isMfaEnabled, isMfaSessionVerified, verifyMfaChallenge } from '$lib/server/services/mfa';
 import { mfaCodeSchema, parseForm } from '$lib/server/validation';
 import { translate } from '$lib/i18n';
+import { safeInternalPath } from '$lib/server/security/internal-redirect';
 
 export const load: PageServerLoad = async (event) => {
 	if (!event.locals.user || !event.locals.session?.id) {
@@ -52,5 +53,5 @@ export const actions: Actions = {
 };
 
 function safeNext(next: string) {
-	return next.startsWith('/') && !next.startsWith('//') ? next : '/app';
+	return safeInternalPath(next, '/app');
 }

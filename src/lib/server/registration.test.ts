@@ -29,5 +29,6 @@ describe('registration access control', () => {
 		expect(getInviteTokenFromNext('/invite/test-token/extra')).toBeNull();
 		expect(getInviteTokenFromNext('https://evil.example/invite/test-token')).toBeNull();
 		expect(getInviteTokenFromNext('//evil.example/invite/test-token')).toBeNull();
+		expect(getInviteTokenFromNext('/\\evil.example/invite/test-token')).toBeNull();
 	});
 });

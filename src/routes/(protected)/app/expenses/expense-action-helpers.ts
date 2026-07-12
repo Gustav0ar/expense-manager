@@ -1,5 +1,7 @@
+import { safeInternalPath } from '$lib/server/security/internal-redirect';
+
 export function safeExpensesReturnTo(value: FormDataEntryValue | null) {
-	const path = value?.toString() || '/app/expenses';
+	const path = safeInternalPath(value?.toString(), '/app/expenses');
 	return path.startsWith('/app/expenses') && !path.startsWith('//') ? path : '/app/expenses';
 }
 
