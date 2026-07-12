@@ -106,10 +106,7 @@
 									: ''}</td
 							>
 							<td data-label={t('Actor')}>
-								<span>{item.actorName ?? item.actorUserId ?? t('System')}</span>
-								{#if item.actorName && item.actorUserId}
-									<code>{item.actorUserId}</code>
-								{/if}
+								{item.actorName ?? item.actorUserId ?? t('System')}
 							</td>
 							<td class="metadata-cell" data-label={t('Metadata')}>
 								{#if metadataSummary.length > 0}
