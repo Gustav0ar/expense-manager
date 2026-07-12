@@ -16,6 +16,7 @@ import { parseCurrencyToCents } from '$lib/server/utils/money';
 import { assertCategoryInWorkspace } from '$lib/server/utils/category';
 import { translate } from '$lib/i18n';
 import type { WorkspaceContext } from './workspaces';
+import { lockWorkspaceCurrency } from './workspace-currency';
 import { resolveExpenseCatalogSelection } from './expense-catalogs';
 import { insertAuditEvent } from './audit';
 
@@ -74,6 +75,7 @@ export async function createRecurringExpense(
 	const amountCents = parseCurrencyToCents(input.amount);
 
 	return db.transaction(async (tx) => {
+		const currentCurrency = await lockWorkspaceCurrency(tx, context.workspaceId);
 		const [created] = await tx
 			.insert(recurringExpense)
 			.values({
@@ -82,7 +84,7 @@ export async function createRecurringExpense(
 				createdByUserId: context.userId,
 				description: input.description,
 				amountCents,
-				currency: context.currency,
+				currency: currentCurrency,
 				frequency: input.frequency,
 				intervalCount: input.intervalCount,
 				startDate: input.startDate,

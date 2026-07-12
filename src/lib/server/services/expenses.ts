@@ -25,6 +25,7 @@ import {
 	vendor
 } from '$lib/server/db/schema';
 import type { WorkspaceContext } from './workspaces';
+import { lockWorkspaceCurrency } from './workspace-currency';
 import {
 	canReconcileExpenses,
 	canReviewExpenses,
@@ -294,7 +295,11 @@ function buildExpenseConditions(
 	return conditions;
 }
 
-export async function createExpense(context: WorkspaceContext, input: ExpenseInput) {
+export async function createExpense(
+	context: WorkspaceContext,
+	input: ExpenseInput,
+	options: { afterCurrencyLock?: () => Promise<void> } = {}
+) {
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
@@ -310,6 +315,8 @@ export async function createExpense(context: WorkspaceContext, input: ExpenseInp
 	const competencyMonth = input.competencyMonth ? startOfMonth(input.competencyMonth) : null;
 
 	const created = await db.transaction(async (tx) => {
+		const currentCurrency = await lockWorkspaceCurrency(tx, context.workspaceId);
+		await options.afterCurrencyLock?.();
 		const rows = await tx
 			.insert(expense)
 			.values(
@@ -319,7 +326,7 @@ export async function createExpense(context: WorkspaceContext, input: ExpenseInp
 					createdByUserId: context.userId,
 					description: input.description,
 					amountCents,
-					currency: context.currency,
+					currency: currentCurrency,
 					expenseDate: addMonths(input.expenseDate, index),
 					paymentMethodId: catalogSelection.paymentMethodId,
 					paymentMethod: catalogSelection.paymentMethodName,
@@ -387,13 +394,14 @@ export async function updateExpense(context: WorkspaceContext, id: number, input
 	const shouldResetReview = !canReviewExpenses(context.role);
 
 	await db.transaction(async (tx) => {
+		const currentCurrency = await lockWorkspaceCurrency(tx, context.workspaceId);
 		const [updated] = await tx
 			.update(expense)
 			.set({
 				categoryId: input.categoryId,
 				description: input.description,
 				amountCents: parseCurrencyToCents(input.amount),
-				currency: context.currency,
+				currency: currentCurrency,
 				expenseDate: input.expenseDate,
 				paymentMethodId: catalogSelection.paymentMethodId,
 				paymentMethod: catalogSelection.paymentMethodName,

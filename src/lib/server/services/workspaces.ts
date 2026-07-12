@@ -1,9 +1,8 @@
 import { error, redirect, type Cookies, type RequestEvent } from '@sveltejs/kit';
-import { and, count, desc, eq, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import {
 	auditEvent,
-	expense,
 	workspace,
 	workspaceInvitation,
 	workspaceInvitationDelivery,
@@ -23,6 +22,7 @@ import {
 	encryptInvitationToken,
 	InvitationTokenDecryptionError
 } from './invitation-token';
+import { lockWorkspaceCurrency } from './workspace-currency';
 
 export type WorkspaceContext = {
 	userId: string;
@@ -145,30 +145,49 @@ export async function createWorkspace(
 
 export async function updateWorkspace(
 	context: WorkspaceContext,
-	input: { name: string; weekStartsOn: number; currency: string }
+	input: { name: string; weekStartsOn: number; currency: string },
+	options: { afterCurrencyLock?: () => Promise<void> } = {}
 ) {
 	if (!canManageWorkspace(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
-	if (input.currency && input.currency.toUpperCase() !== context.currency.toUpperCase()) {
-		const [{ value: expenseCount }] = await db
-			.select({ value: count() })
-			.from(expense)
-			.where(eq(expense.workspaceId, context.workspaceId));
-
-		if (expenseCount > 0) {
-			throw error(
-				422,
-				translate(
-					context.locale,
-					'Cannot change currency: this workspace has {count} live or retained expense(s). Remove them permanently first.',
-					{ count: expenseCount }
-				)
-			);
-		}
-	}
-
 	const updated = await db.transaction(async (tx) => {
+		const currentCurrency = await lockWorkspaceCurrency(tx, context.workspaceId);
+		await options.afterCurrencyLock?.();
+		if (input.currency.toUpperCase() !== currentCurrency.toUpperCase()) {
+			const [artifacts] = await tx.execute<{
+				expense_count: number;
+				recurring_count: number;
+				budget_count: number;
+				preview_count: number;
+				legacy_bank_count: number;
+			}>(sql`
+				select
+					(select count(*)::int from expense where workspace_id = ${context.workspaceId}) as expense_count,
+					(select count(*)::int from recurring_expense where workspace_id = ${context.workspaceId}) as recurring_count,
+					(select count(*)::int from category_budget where workspace_id = ${context.workspaceId}) as budget_count,
+					(select count(*)::int from import_preview
+						where workspace_id = ${context.workspaceId}
+							and status = 'pending' and expires_at > now()) as preview_count,
+					(select count(*)::int from bank_transaction
+						where workspace_id = ${context.workspaceId}
+							and status = 'pending' and source_currency is null) as legacy_bank_count
+			`);
+			const artifactCount = Object.values(artifacts ?? {}).reduce(
+				(total, value) => total + Number(value),
+				0
+			);
+			if (artifactCount > 0) {
+				throw error(
+					422,
+					translate(
+						context.locale,
+						'Cannot change currency while this workspace has monetary records. Remove or finish them first.'
+					)
+				);
+			}
+		}
+
 		const [row] = await tx
 			.update(workspace)
 			.set({
