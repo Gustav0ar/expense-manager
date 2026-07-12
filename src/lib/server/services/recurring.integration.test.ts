@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { user } from '$lib/server/db/auth.schema';
 import {
 	category,
@@ -88,7 +88,8 @@ describe('recurring expense service integration', () => {
 		const generated = await db
 			.select({ date: expense.expenseDate, reviewStatus: expense.reviewStatus })
 			.from(expense)
-			.where(eq(expense.sourceRecurringExpenseId, schedule.id));
+			.where(eq(expense.sourceRecurringExpenseId, schedule.id))
+			.orderBy(asc(expense.expenseDate));
 		expect(generated).toEqual([
 			{ date: '2026-06-01', reviewStatus: 'approved' },
 			{ date: '2026-06-08', reviewStatus: 'approved' },
