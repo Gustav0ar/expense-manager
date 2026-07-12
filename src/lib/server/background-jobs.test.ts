@@ -194,6 +194,40 @@ describe('BackgroundJobCoordinator', () => {
 		await coordinator.stop();
 	});
 
+	it('surfaces scheduler workspace errors instead of reporting a successful cycle', async () => {
+		const recurringScheduler = vi
+			.fn()
+			.mockResolvedValueOnce({ processed: 2, created: 1, errors: 1 })
+			.mockResolvedValueOnce({ processed: 1, created: 1, errors: 0 });
+		const coordinator = new BackgroundJobCoordinator({
+			verificationCleanup: vi.fn().mockResolvedValue({ deletedUsers: 0 }),
+			recurringScheduler,
+			budgetAlertScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			invitationDeliveryScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			attachmentDeletionScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			expenseTrashPurgeScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			emailDeliveryCleanup: vi.fn().mockResolvedValue({ skipped: true }),
+			recurringIntervalMs: 100
+		});
+
+		coordinator.start(true);
+		await coordinator.waitForIdle();
+		expect(coordinator.health().jobs.recurringScheduler).toMatchObject({
+			status: 'degraded',
+			failures: 1,
+			lastFailedCount: 1
+		});
+
+		await vi.advanceTimersByTimeAsync(100);
+		await coordinator.waitForIdle();
+		expect(coordinator.health().jobs.recurringScheduler).toMatchObject({
+			status: 'ok',
+			failures: 1,
+			lastFailedCount: 0
+		});
+		await coordinator.stop();
+	});
+
 	it('exposes attachment queue and reconciliation counts without storage paths', async () => {
 		const coordinator = new BackgroundJobCoordinator({
 			verificationCleanup: vi.fn().mockResolvedValue({ deletedUsers: 0 }),
