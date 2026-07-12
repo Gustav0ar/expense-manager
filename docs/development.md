@@ -137,7 +137,7 @@ Expense selection and lazily prepared detail state are cleared when the list URL
 
 The support-catalog picker follows the ARIA tab pattern: one tab is in the keyboard tab order, arrow keys wrap between tabs, and Home/End move to the first/last tab. Every tab controls the stable `support-catalog-panel` element.
 
-The expense list is exposed as an ARIA table with explicit column indexes, expandable rows and a full-width details row. Responsive CSS may visually hide the header, but must keep it in the accessibility tree so column relationships remain available to assistive technology.
+The expense list is exposed as an ARIA treegrid with explicit column indexes, level-one expandable rows and a level-two full-width details row. This permits `aria-expanded` on each expense row while preserving valid grid relationships. Responsive CSS may visually hide the header, but must keep it in the accessibility tree so column relationships remain available to assistive technology.
 
 ### Import safety contracts
 
@@ -282,6 +282,13 @@ than guessing their meaning.
 ## Run Quality Gates
 
 The quality gates add screenshot regression, performance budget, infrastructure failure and smoke coverage on top of the functional E2E suite:
+
+Every surface captured by the visual suite is also scanned with `@axe-core/playwright` against
+WCAG 2.0, 2.1 and 2.2 A/AA tags at that capture's viewport. Do not exclude rules or page regions to
+make the gate pass: fix confirmed violations. A rule may be narrowed only for a documented false
+positive that identifies the exact rule, element and standards rationale. The audit desktop/mobile
+baselines intentionally run in the light theme; dynamic timestamps are visually hidden only for
+screenshot stability and remain present in the accessibility scan and functional tests.
 
 ```bash
 podman compose -f .devcontainer/compose.yml exec app pnpm test:visual
