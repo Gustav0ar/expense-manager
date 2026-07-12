@@ -11,13 +11,13 @@
 
 	let {
 		items,
-		empty = 'No data',
+		empty,
 		period,
 		currency = 'USD',
 		locale
 	}: {
 		items: Item[];
-		empty?: string;
+		empty: string;
 		period?: DatePeriod;
 		currency?: string;
 		locale?: string;

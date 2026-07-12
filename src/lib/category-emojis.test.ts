@@ -1,20 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { ptBrMessages } from './i18n/messages';
 import { categoryEmojiLabels, categoryEmojiValues } from './category-emojis';
 
-describe('category emojis', () => {
-	it('keeps every allowed emoji mapped to a business label', () => {
-		expect(categoryEmojiValues.length).toBeGreaterThan(20);
-		expect(new Set(categoryEmojiValues).size).toBe(categoryEmojiValues.length);
-
-		for (const emoji of categoryEmojiValues) {
-			expect(categoryEmojiLabels[emoji]).toMatch(/\S/);
+describe('category emoji labels', () => {
+	it('has one localized label for every supported emoji', () => {
+		expect(Object.keys(categoryEmojiLabels)).toEqual(categoryEmojiValues);
+		for (const label of Object.values(categoryEmojiLabels)) {
+			expect(ptBrMessages).toHaveProperty(label);
 		}
-	});
-
-	it('contains expected business-oriented categories', () => {
-		expect(categoryEmojiLabels['🧾']).toBe('Accounting');
-		expect(categoryEmojiLabels['👥']).toBe('Employees');
-		expect(categoryEmojiLabels['🧰']).toBe('Supplies');
-		expect(categoryEmojiLabels['🧼']).toBe('Cleaning');
 	});
 });

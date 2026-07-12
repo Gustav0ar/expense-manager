@@ -5,6 +5,7 @@ import { ptBrMessages } from './i18n/messages';
 import {
 	auditActions,
 	auditEntityTypes,
+	auditMetadataFields,
 	redactAuditMetadata,
 	summarizeAuditMetadata
 } from './audit-registry';
@@ -47,7 +48,7 @@ describe('audit registry', () => {
 	});
 
 	it('has unique localized action and entity options', () => {
-		for (const options of [auditActions, auditEntityTypes]) {
+		for (const options of [auditActions, auditEntityTypes, auditMetadataFields]) {
 			expect(new Set(options.map(([value]) => value))).toHaveLength(options.length);
 			for (const [, label] of options) expect(ptBrMessages).toHaveProperty(label);
 		}
