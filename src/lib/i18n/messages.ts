@@ -804,6 +804,7 @@ export const ptBrMessages = {
 	'Bank transaction created': 'Lançamento bancário criado',
 	'Bank transaction ignored': 'Lançamento bancário ignorado',
 	'Bank transaction matched': 'Lançamento bancário conciliado',
+	'Bank transaction reconciliation reversed': 'Conciliação do lançamento bancário revertida',
 	'Budget alert delivery': 'Envio de alerta de orçamento',
 	'Budget alert delivery retried': 'Nova tentativa de envio de alerta de orçamento',
 	'Budget alert preference': 'Preferência de alerta de orçamento',
