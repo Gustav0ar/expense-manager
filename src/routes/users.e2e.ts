@@ -245,6 +245,18 @@ test('covers invitations, every assignable role, acceptance, role changes and re
 
 		const roleCycleEmail = uniqueEmail('users-role-cycle');
 		const initialInviteUrl = await inviteUser(page, roleCycleEmail, 'viewer');
+		await page.evaluate(() => {
+			Object.defineProperty(navigator, 'clipboard', {
+				configurable: true,
+				value: { writeText: () => Promise.reject(new Error('permission denied')) }
+			});
+		});
+		await page.getByRole('button', { name: 'Copiar link' }).click();
+		await expect(
+			page.getByRole('alert').filter({ hasText: 'Não foi possível copiar.' })
+		).toBeVisible();
+		await expect(page.locator('.invite-url-code')).toHaveText(initialInviteUrl);
+		await expect(membersPanel(page).getByRole('columnheader', { name: 'Ações' })).toBeAttached();
 		const stableInviteUrl = await inviteUser(page, roleCycleEmail, 'member', 'viewer');
 		expect(new URL(stableInviteUrl).pathname).toBe(new URL(initialInviteUrl).pathname);
 		await expect(invitationRows(page, roleCycleEmail)).toHaveCount(1);

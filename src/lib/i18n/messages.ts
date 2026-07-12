@@ -615,6 +615,8 @@ export const ptBrMessages = {
 		'O link do convite foi renovado. O envio do email será tentado novamente automaticamente.',
 	'Copy link': 'Copiar link',
 	'Copy all': 'Copiar tudo',
+	'Copy failed. Select and copy the link manually.':
+		'Não foi possível copiar. Selecione e copie o link manualmente.',
 	'Copied!': 'Copiado!',
 	'Scan this QR code with your authenticator app': 'Escaneie este QR code com seu app autenticador',
 	'Disabling MFA will reduce your account security.':
