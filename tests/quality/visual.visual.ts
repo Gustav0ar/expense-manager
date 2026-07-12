@@ -29,7 +29,7 @@ async function registerAndSeed(page: Page) {
 	await expenseForm.getByRole('button', { name: 'Add' }).click();
 	await expect(expenseRow(page, 'Visual expense')).toBeVisible();
 
-	await page.goto('/app/planning?section=imports&periodMonth=2026-06');
+	await page.goto('/app/planning?section=budgets&periodMonth=2026-06');
 	const budgetForm = page.locator('form[action="?/upsertBudget"]').first();
 	await budgetForm.getByLabel('Category').selectOption({ label: '🧰 Operations' });
 	await budgetForm.getByLabel('Value').fill('500.00');
@@ -80,7 +80,7 @@ test('captures stable desktop and mobile app surfaces', async ({ page }) => {
 	await expect(page.getByRole('heading', { name: 'Analytical' })).toBeVisible();
 	await capture(page, page.locator('.app-shell'), 'reports-analytical-desktop.png');
 
-	await page.goto('/app/planning?periodMonth=2026-06');
+	await page.goto('/app/planning?section=imports&periodMonth=2026-06');
 	let importForm = page.locator('form[action="?/importExpenses"]');
 	await importForm.getByLabel('Format').selectOption('ofx');
 	await importForm.locator('input[type="file"]').setInputFiles({

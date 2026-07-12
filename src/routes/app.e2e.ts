@@ -1262,7 +1262,7 @@ test('covers planning, imports, attachments and audit flows', async ({ page }) =
 
 	await page.goto('/app/settings/audit');
 	await expect(page.getByRole('cell', { name: 'expense_import.completed' }).first()).toBeVisible();
-	await page.getByLabel('Ação').fill('expense_attachment.created');
+	await page.getByLabel('Ação', { exact: true }).selectOption('expense_attachment.created');
 	await page.getByRole('button', { name: 'Filtrar' }).click();
 	await expect(page.getByRole('cell', { name: 'expense_attachment.created' })).toBeVisible();
 });
