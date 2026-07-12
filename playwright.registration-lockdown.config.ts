@@ -15,6 +15,7 @@ export default defineConfig({
 		command: previewCommand(' --host 0.0.0.0 --port 4174'),
 		env: {
 			ALLOW_REGISTRATION: 'false',
+			AUTH_RATE_LIMIT_IP_MAX: '10000',
 			BETTER_AUTH_RATE_LIMIT_MAX: '1000',
 			DATABASE_URL: database.databaseUrl!,
 			EMAIL_DELIVERY: 'log',

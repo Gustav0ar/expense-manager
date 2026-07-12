@@ -14,6 +14,7 @@ export default defineConfig({
 	webServer: {
 		command: previewCommand(' --host 0.0.0.0 --port 4175'),
 		env: {
+			AUTH_RATE_LIMIT_IP_MAX: '10000',
 			BETTER_AUTH_RATE_LIMIT_MAX: '1000',
 			DATABASE_URL: database.databaseUrl!,
 			EMAIL_DELIVERY: 'log',
