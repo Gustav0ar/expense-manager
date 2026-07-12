@@ -3,6 +3,7 @@ import {
 	authEmailSchema,
 	auditFilterSchema,
 	budgetAlertHistoryFilterSchema,
+	bulkReviewIdsSchema,
 	budgetAlertSchema,
 	budgetAlertPreferenceSchema,
 	budgetSchema,
@@ -15,6 +16,7 @@ import {
 	expenseReviewSchema,
 	expenseSchema,
 	idSchema,
+	maxBulkReviewIds,
 	importExpenseSchema,
 	inviteSchema,
 	isValidIsoDate,
@@ -38,6 +40,15 @@ describe('validation schemas', () => {
 		expect(idSchema.safeParse('0').success).toBe(false);
 		expect(idSchema.safeParse('1.5').success).toBe(false);
 		expect(idSchema.safeParse('abc').success).toBe(false);
+	});
+
+	it('bounds and deduplicates bulk review ids', () => {
+		expect(bulkReviewIdsSchema.parse(['3', '3', '8'])).toEqual([3, 8]);
+		expect(bulkReviewIdsSchema.safeParse(['3.5']).success).toBe(false);
+		expect(bulkReviewIdsSchema.safeParse(['Infinity']).success).toBe(false);
+		expect(
+			bulkReviewIdsSchema.safeParse(Array.from({ length: maxBulkReviewIds + 1 }, () => '1')).success
+		).toBe(false);
 	});
 
 	it('validates workspace data and applies defaults', () => {

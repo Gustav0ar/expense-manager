@@ -8,6 +8,12 @@ const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const maxRangeDays = 3660;
 
 export const idSchema = z.coerce.number().int().positive();
+export const maxBulkReviewIds = 100;
+export const bulkReviewIdsSchema = z
+	.array(idSchema)
+	.min(1)
+	.max(maxBulkReviewIds)
+	.transform((ids) => [...new Set(ids)]);
 const optionalIdSchema = z.preprocess(
 	(value) => (value === '' ? undefined : value),
 	idSchema.optional()
