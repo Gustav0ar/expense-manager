@@ -35,7 +35,7 @@ local production-like testing or for a standalone Caddy deployment.
 ## Recommended Variables
 
 - `BETTER_AUTH_SECRET_PREVIOUS_SOURCE_FILE`: optional path to a file containing
-  the previous application secret during the bounded invitation-key rotation
+  previous application secrets during the bounded invitation and MFA-key rotation
   window. It defaults to `/dev/null`; see [`docs/email.md`](email.md) before
   rotating `BETTER_AUTH_SECRET`.
 - `UPLOAD_DIR`: attachment path inside the container. The compose file uses `/app/uploads` by default.
