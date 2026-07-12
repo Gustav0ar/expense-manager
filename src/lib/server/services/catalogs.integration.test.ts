@@ -239,6 +239,48 @@ describe('category and expense catalog integration', () => {
 			vendors: [expect.objectContaining({ id: usedVendor.id, isArchived: true })]
 		});
 	});
+
+	it('loads lightweight category and catalog options without usage aggregates', async () => {
+		const fixture = await createFixture();
+		const [paymentMethod, vendor, costCenter] = await Promise.all([
+			createExpenseCatalogItem(fixture.context, {
+				kind: 'paymentMethod',
+				name: 'Lightweight payment method'
+			}),
+			createExpenseCatalogItem(fixture.context, {
+				kind: 'vendor',
+				name: 'Lightweight vendor'
+			}),
+			createExpenseCatalogItem(fixture.context, {
+				kind: 'costCenter',
+				name: 'Lightweight cost center'
+			})
+		]);
+
+		const [categories, catalogs] = await Promise.all([
+			listCategories(fixture.context, false, false),
+			listExpenseCatalogs(fixture.context, false, false)
+		]);
+		expect(categories).toContainEqual(
+			expect.objectContaining({
+				id: fixture.categoryId,
+				expenseCount: 0,
+				recurringCount: 0,
+				budgetCount: 0,
+				ruleCount: 0,
+				childCount: 0,
+				associationCount: 0
+			})
+		);
+		expect(catalogs).toMatchObject({
+			paymentMethods: [{ id: paymentMethod.id, expenseCount: 0, recurringCount: 0 }],
+			vendors: [{ id: vendor.id, expenseCount: 0, recurringCount: 0 }],
+			costCenters: [{ id: costCenter.id, expenseCount: 0, recurringCount: 0 }]
+		});
+
+		await expect(listCategories(fixture.context, true, false)).resolves.toEqual(categories);
+		await expect(listExpenseCatalogs(fixture.context, true, false)).resolves.toEqual(catalogs);
+	});
 });
 
 async function createFixture() {
