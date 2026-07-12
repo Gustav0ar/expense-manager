@@ -1,6 +1,8 @@
-import { expect, type Browser, type Locator, type Page, test } from '@playwright/test';
+import { expect, type Browser, type Page, test } from '@playwright/test';
 import { generateTotpCode } from '../lib/server/utils/totp';
 import {
+	chooseSearchableOption,
+	expectSearchableOptionAbsent,
 	createWorkspace,
 	registerAccount,
 	testPassword,
@@ -388,20 +390,6 @@ function catalogTabLabel(kind: 'paymentMethod' | 'vendor' | 'costCenter') {
 	if (kind === 'paymentMethod') return 'Pagamentos';
 	if (kind === 'vendor') return 'Fornecedores';
 	return 'Centros de custo';
-}
-
-async function chooseSearchableOption(scope: Page | Locator, label: string, option: string) {
-	const combobox = scope.getByRole('combobox', { name: label });
-	await combobox.fill(option);
-	await scope.getByRole('option', { name: option, exact: true }).click();
-	await expect(combobox).toHaveValue(option);
-}
-
-async function expectSearchableOptionAbsent(scope: Page | Locator, label: string, option: string) {
-	const combobox = scope.getByRole('combobox', { name: label });
-	await combobox.fill(option);
-	await expect(scope.getByRole('option', { name: option, exact: true })).toHaveCount(0);
-	await combobox.press('Escape');
 }
 
 type ExpenseFixtureInput = {

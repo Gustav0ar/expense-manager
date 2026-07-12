@@ -1,5 +1,7 @@
 import { expect, type Browser, type Locator, type Page, test } from '@playwright/test';
 import {
+	clearSearchableOption,
+	chooseSearchableOption,
 	registerAccount,
 	registerAndCreateWorkspace as setupWorkspace,
 	uniqueEmail
@@ -196,18 +198,6 @@ async function openCatalogDialog(page: Page, kind: 'paymentMethod' | 'vendor' | 
 	const dialog = await openSupportCatalogDialog(page);
 	await dialog.getByRole('tab', { name: new RegExp(tabLabel(kind)) }).click();
 	return dialog;
-}
-
-async function chooseSearchableOption(scope: Page | Locator, label: string, option: string) {
-	const combobox = scope.getByRole('combobox', { name: label });
-	await combobox.fill(option);
-	await scope.getByRole('option', { name: option, exact: true }).click();
-	await expect(combobox).toHaveValue(option);
-}
-
-async function clearSearchableOption(scope: Page | Locator, label: string) {
-	await scope.getByRole('button', { name: `Limpar ${label}` }).click();
-	await expect(scope.getByRole('combobox', { name: label })).toHaveValue('');
 }
 
 function expenseRow(page: Page, text: string) {
