@@ -293,6 +293,18 @@ export function registerExpenseLifecycleTests(context: ServiceIntegrationTestCon
 		await expect(bulkReviewExpenses(fixture.context, [], 'approved')).rejects.toMatchObject({
 			status: 400
 		});
+		await expect(
+			bulkReviewExpenses(fixture.context, [Number.NaN], 'approved')
+		).rejects.toMatchObject({
+			status: 400
+		});
+		await expect(
+			bulkReviewExpenses(
+				fixture.context,
+				Array.from({ length: 101 }, () => e1.ids[0]),
+				'approved'
+			)
+		).rejects.toMatchObject({ status: 400 });
 	});
 
 	it('bulk-reject only affects pending, unpaid expenses', async () => {

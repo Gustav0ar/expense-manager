@@ -5,6 +5,7 @@ import { actions } from './+page.server';
 const mocks = vi.hoisted(() => ({
 	createCategory: vi.fn(),
 	createExpenseCatalogItem: vi.fn(),
+	bulkReviewExpenses: vi.fn(),
 	removeExpenseCatalogItem: vi.fn(),
 	removeCategory: vi.fn(),
 	requireWorkspaceContext: vi.fn(),
@@ -36,7 +37,7 @@ vi.mock('$lib/server/services/expense-catalogs', () => ({
 }));
 
 vi.mock('$lib/server/services/expenses', () => ({
-	bulkReviewExpenses: vi.fn(),
+	bulkReviewExpenses: mocks.bulkReviewExpenses,
 	createExpense: vi.fn(),
 	deleteExpense: vi.fn(),
 	getExpenseListSummary: vi.fn(),
@@ -150,6 +151,24 @@ async function attachExpense(file: File, fields: Record<string, string> = {}, lo
 		}),
 		locals: { locale }
 	} as Parameters<NonNullable<typeof actions.attach>>[0]);
+}
+
+async function bulkReview(ids: string[], decision = 'approved', locale = 'pt-BR') {
+	const action = actions.bulkReview;
+	if (!action) throw new Error('bulkReview action is not registered');
+	const formData = new FormData();
+	for (const id of ids) formData.append('id', id);
+	formData.set('decision', decision);
+	formData.set('returnTo', '/app/expenses');
+
+	return action({
+		request: new Request('http://localhost/app/expenses?/bulkReview', {
+			method: 'POST',
+			body: formData,
+			headers: new Headers({ 'x-sveltekit-action': 'true' })
+		}),
+		locals: { locale }
+	} as Parameters<NonNullable<typeof actions.bulkReview>>[0]);
 }
 
 describe('expenses page createCatalog action', () => {
@@ -517,5 +536,34 @@ describe('expenses page attachment actions', () => {
 				message: 'Anexo acima de 2 MB.'
 			}
 		});
+	});
+});
+
+describe('expenses page bulk review action', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mocks.requireWorkspaceContext.mockResolvedValue(mocks.context);
+	});
+
+	it('rejects malformed and oversized selections before calling the service', async () => {
+		const malformed = await bulkReview(['3.5']);
+		expect(malformed).toMatchObject({ status: 400, data: { message: 'Despesa inválida.' } });
+
+		const oversized = await bulkReview(Array.from({ length: 101 }, () => '1'));
+		expect(oversized).toMatchObject({ status: 400, data: { message: 'Despesa inválida.' } });
+		expect(mocks.bulkReviewExpenses).not.toHaveBeenCalled();
+	});
+
+	it('deduplicates a valid selection before invoking the service', async () => {
+		mocks.bulkReviewExpenses.mockResolvedValue({ count: 2 });
+
+		try {
+			await bulkReview(['7', '7', '9']);
+			throw new Error('Expected bulk review to redirect');
+		} catch (reviewResult) {
+			expect(isRedirect(reviewResult)).toBe(true);
+		}
+
+		expect(mocks.bulkReviewExpenses).toHaveBeenCalledWith(mocks.context, [7, 9], 'approved');
 	});
 });

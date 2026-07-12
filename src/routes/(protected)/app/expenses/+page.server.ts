@@ -25,6 +25,7 @@ import {
 	expenseReviewSchema,
 	expenseSchema,
 	idSchema,
+	bulkReviewIdsSchema,
 	parseForm
 } from '$lib/server/validation';
 import { canReconcileExpenses, canReviewExpenses } from '$lib/server/security/roles';
@@ -175,17 +176,22 @@ export const actions: Actions = {
 	bulkReview: async (event) => {
 		const context = await requireWorkspaceContext(event);
 		const formData = await event.request.formData();
-		const ids = formData.getAll('id').map(Number).filter(Boolean);
+		const rawIds = formData.getAll('id');
+		const parsedIds = bulkReviewIdsSchema.safeParse(rawIds);
 		const decision = formData.get('decision') as string;
 		if (decision !== 'approved' && decision !== 'rejected') {
 			return fail(400, { message: translate(event.locals.locale, 'Invalid decision.') });
 		}
-		if (ids.length === 0) {
-			return fail(400, { message: translate(event.locals.locale, 'No expenses selected.') });
+		if (!parsedIds.success) {
+			const message =
+				rawIds.length === 0
+					? translate(event.locals.locale, 'No expenses selected.')
+					: translate(event.locals.locale, 'Invalid expense.');
+			return fail(400, { message });
 		}
 
 		try {
-			await bulkReviewExpenses(context, ids, decision);
+			await bulkReviewExpenses(context, parsedIds.data, decision);
 		} catch (err) {
 			return handleServiceError(err);
 		}

@@ -27,6 +27,7 @@ import { insertAuditEvent } from './audit';
 import { randomToken } from '$lib/server/utils/crypto';
 import { resolveExpenseCatalogSelection } from './expense-catalogs';
 import { translate } from '$lib/i18n';
+import { bulkReviewIdsSchema } from '$lib/server/validation';
 import { attachmentDeletionGraceMs, buildAttachmentDeletionRows } from './attachment-deletion';
 import { expenseTrashDates } from './expense-trash';
 import {
@@ -711,7 +712,14 @@ export async function bulkReviewExpenses(
 ) {
 	if (!canReviewExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
-	if (ids.length === 0) throw error(400, translate(context.locale, 'No expenses selected.'));
+	const parsedIds = bulkReviewIdsSchema.safeParse(ids);
+	if (!parsedIds.success) {
+		throw error(
+			400,
+			translate(context.locale, ids.length === 0 ? 'No expenses selected.' : 'Invalid expense.')
+		);
+	}
+	const uniqueIds = parsedIds.data;
 
 	const reviewedAt = new Date();
 
@@ -739,7 +747,7 @@ export async function bulkReviewExpenses(
 			})
 			.where(
 				and(
-					inArray(expense.id, ids),
+					inArray(expense.id, uniqueIds),
 					eq(expense.workspaceId, context.workspaceId),
 					eq(expense.status, 'posted'),
 					eq(expense.reviewStatus, 'pending'),
