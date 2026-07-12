@@ -83,6 +83,11 @@ local and CI Playwright runs must have `CREATEDB`; setup fails before tests with
 an explicit error when it does not. External `SMOKE_BASE_URL` runs do not create
 or drop any database because they target an already deployed environment.
 
+Functional browser suites raise only the shared-IP authentication limit so many
+parallel registrations from localhost do not exhaust the production NAT guard.
+Per-identifier limits remain at their production defaults, preserving the login
+and registration abuse tests.
+
 The teardown safety check requires the generated prefix and an exact match
 between the generated name, target URL, host, port and user. It refuses the
 development database, `postgres`, production-style names and cross-host
