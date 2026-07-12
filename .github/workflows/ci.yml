@@ -93,7 +93,17 @@ jobs:
       - run: docker build --target migrator -t expense-manager-migrate:ci .
       - run: docker build --target backup -t expense-manager-backup:ci .
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e
+      - run: PLAYWRIGHT_PREBUILT=true pnpm test:e2e
+      - name: Upload functional Playwright diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: playwright-functional-${{ github.run_id }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
   quality:
     name: Quality / ${{ matrix.suite }}

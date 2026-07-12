@@ -20,3 +20,8 @@ export function configurePlaywrightDatabase(suite: string, enabled = true) {
 		} satisfies DatabaseLifecycle
 	};
 }
+
+export function previewCommand(argumentsValue = '') {
+	const build = process.env.PLAYWRIGHT_SKIP_WEB_SERVER_BUILD === 'true' ? '' : 'pnpm build && ';
+	return `${build}pnpm preview${argumentsValue}`;
+}

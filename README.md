@@ -87,6 +87,7 @@ pnpm test:unit
 pnpm test:e2e
 pnpm test:visual
 pnpm test:performance
+pnpm test:query-plans
 pnpm test:infrastructure
 pnpm test:smoke
 pnpm test:prometheus-rules

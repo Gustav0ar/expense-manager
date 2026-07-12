@@ -65,6 +65,14 @@ podman compose -f .devcontainer/compose.yml exec app pnpm exec playwright instal
 podman compose -f .devcontainer/compose.yml exec app pnpm test:e2e
 ```
 
+`pnpm test:e2e` performs one production build, then starts three separate Node
+preview processes so normal, registration-lockdown and email-verification
+runtime environment variables stay independent. `pnpm verify` and CI set
+`PLAYWRIGHT_PREBUILT=true` only after completing the same production build, so
+they do not rebuild it. Direct `playwright test` commands still build by default.
+Functional configurations retain traces and screenshots only on failure, and CI
+uploads `playwright-report/` plus `test-results/` for seven days.
+
 Every local Playwright configuration derives a unique database named with the
 strict `expense_manager_pw_` prefix, creates it through the configured
 PostgreSQL role, applies the complete migration ledger in global setup, and
@@ -257,13 +265,21 @@ The quality gates add screenshot regression, performance budget, infrastructure 
 ```bash
 podman compose -f .devcontainer/compose.yml exec app pnpm test:visual
 podman compose -f .devcontainer/compose.yml exec app pnpm test:performance
+podman compose -f .devcontainer/compose.yml exec app pnpm test:query-plans
 podman compose -f .devcontainer/compose.yml exec app pnpm test:infrastructure
 podman compose -f .devcontainer/compose.yml exec app pnpm test:smoke
 podman compose -f .devcontainer/compose.yml exec app pnpm test:prometheus-rules
 podman compose -f .devcontainer/compose.yml exec app pnpm test:quality
 ```
 
-`pnpm test:quality` includes all four Playwright quality suites plus Prometheus rule scenarios. Rebuild the development container after changing `.devcontainer/Containerfile` so `promtool` is available. CI runs the Playwright suites as a parallel matrix and Prometheus rules as a separate required job, while functional E2E remains in the main verification job.
+`pnpm test:quality` includes all four Playwright quality suites, the bounded-query
+plan regression gate and Prometheus rule scenarios. The query-plan gate runs
+`EXPLAIN (FORMAT JSON)` against realistic catalog usage and fails when an
+unbounded per-row query pattern returns. Rebuild the development container after
+changing `.devcontainer/Containerfile` so `promtool` is available. CI runs the
+Playwright suites and query-plan gate as a parallel matrix, with Prometheus rules
+as a separate required job, while functional E2E remains in the main verification
+job.
 
 The client asset budgets are measured from a production build under
 `.svelte-kit/output/client/_app/immutable`. Vite replaces this output on every
