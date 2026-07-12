@@ -21,7 +21,7 @@ export const actions: Actions = {
 			scope: 'auth:forgot-password',
 			identifier: parsed.data.email,
 			windowSeconds: 300,
-			max: 3
+			identifierMax: 3
 		});
 
 		await auth.api.requestPasswordReset({

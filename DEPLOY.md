@@ -77,19 +77,22 @@ individual protected environment secrets:
 
 Set these in `Settings -> Environments -> production -> Variables`.
 
-| Variable                      | Default                    | Notes                                                                                  |
-| ----------------------------- | -------------------------- | -------------------------------------------------------------------------------------- |
-| `DEPLOY_PATH`                 | `/opt/expense-manager`     | Directory on the VPS that stores compose files and `.env`.                             |
-| `COMPOSE_COMMAND`             | `docker compose`           | Use `podman compose` only if your VPS supports it.                                     |
-| `REGISTRY`                    | `ghcr.io`                  | Container registry.                                                                    |
-| `IMAGE_OWNER_LOWERCASE`       | `<github-owner-lowercase>` | Lowercase GitHub user or organization that owns the package.                           |
-| `IMAGE_CLEANUP_ENABLED`       | `true`                     | Removes old Expense Manager image tags after successful deploys and rollbacks.         |
-| `CONTAINER_PLATFORMS`         | `linux/amd64,linux/arm64`  | Optional image platforms. Set to the VPS architecture only for faster private deploys. |
-| `BACKUP_ENABLED`              | `true`                     | Set to `false` only to bootstrap without remote backups.                               |
-| `OTEL_TRACING_ENABLED`        | `false`                    | Set to `true` only when an OTLP traces endpoint is reachable by the app container.     |
-| `OTEL_SERVICE_NAME`           | `expense-manager`          | Service name shown in tracing tools.                                                   |
-| `OTEL_TRACES_SAMPLE_RATE`     | `0.1`                      | Root request trace sample rate from `0` to `1`. Start low on small VPS hosts.          |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty                      | Generic OTLP HTTP endpoint, for example `http://tempo:4318`.                           |
+| Variable                         | Default                    | Notes                                                                                  |
+| -------------------------------- | -------------------------- | -------------------------------------------------------------------------------------- |
+| `DEPLOY_PATH`                    | `/opt/expense-manager`     | Directory on the VPS that stores compose files and `.env`.                             |
+| `COMPOSE_COMMAND`                | `docker compose`           | Use `podman compose` only if your VPS supports it.                                     |
+| `REGISTRY`                       | `ghcr.io`                  | Container registry.                                                                    |
+| `IMAGE_OWNER_LOWERCASE`          | `<github-owner-lowercase>` | Lowercase GitHub user or organization that owns the package.                           |
+| `IMAGE_CLEANUP_ENABLED`          | `true`                     | Removes old Expense Manager image tags after successful deploys and rollbacks.         |
+| `CONTAINER_PLATFORMS`            | `linux/amd64,linux/arm64`  | Optional image platforms. Set to the VPS architecture only for faster private deploys. |
+| `BACKUP_ENABLED`                 | `true`                     | Set to `false` only to bootstrap without remote backups.                               |
+| `AUTH_RATE_LIMIT_IDENTIFIER_MAX` | empty                      | Optional global per-identifier auth limit; leave empty for stricter per-flow defaults. |
+| `AUTH_RATE_LIMIT_IP_MAX`         | empty                      | Optional shared-network IP limit; leave empty for 20x each per-flow identifier limit.  |
+| `AUTH_RATE_LIMIT_WINDOW_SECONDS` | empty                      | Optional global auth-window override; leave empty for per-flow windows.                |
+| `OTEL_TRACING_ENABLED`           | `false`                    | Set to `true` only when an OTLP traces endpoint is reachable by the app container.     |
+| `OTEL_SERVICE_NAME`              | `expense-manager`          | Service name shown in tracing tools.                                                   |
+| `OTEL_TRACES_SAMPLE_RATE`        | `0.1`                      | Root request trace sample rate from `0` to `1`. Start low on small VPS hosts.          |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`    | empty                      | Generic OTLP HTTP endpoint, for example `http://tempo:4318`.                           |
 
 Avoid storing personal values in variables if you do not want them visible to
 collaborators. Use secrets for hostnames, IPs, usernames and every application
@@ -149,6 +152,9 @@ BETTER_AUTH_SECRET=<openssl rand -base64 32>
 BETTER_AUTH_SECRET_PREVIOUS=
 REQUIRE_EMAIL_VERIFICATION=true
 ALLOW_REGISTRATION=false
+AUTH_RATE_LIMIT_IDENTIFIER_MAX=
+AUTH_RATE_LIMIT_IP_MAX=
+AUTH_RATE_LIMIT_WINDOW_SECONDS=
 
 POSTGRES_DB=expense_manager
 POSTGRES_USER=expense_manager

@@ -4,30 +4,48 @@ import { db } from '$lib/server/db';
 import { rateLimitBucket } from '$lib/server/db/schema';
 import { sha256 } from '$lib/server/utils/crypto';
 import { translate } from '$lib/i18n';
+import { getPrivateEnv } from '$lib/server/config';
 import { getClientIp } from './client-ip';
 
 type RateLimitOptions = {
 	scope: string;
-	identifier?: string;
+	identifier: string;
 	windowSeconds: number;
-	max: number;
+	identifierMax: number;
+	ipMax?: number;
 };
 
 const cleanupIntervalMs = 60 * 60 * 1000;
+const defaultIpLimitMultiplier = 20;
+const postgresIntegerMax = 2_147_483_647;
+const rateLimitKeyVersion = 'rate-limit:v2';
 let lastRateLimitCleanupAt = 0;
 
 export async function assertRateLimit(event: RequestEvent, options: RateLimitOptions) {
 	await cleanupExpiredRateLimitBuckets();
 
 	const ip = getClientIp(event);
-	const identifier = options.identifier ? options.identifier.toLowerCase() : '';
-	const key = sha256(`${options.scope}:${ip}:${identifier}`);
-	const resetAt = new Date(Date.now() + options.windowSeconds * 1000);
+	const identifier = normalizeRateLimitIdentifier(options.identifier);
+	const limits = resolveRateLimits(options);
+	const dimensions = [
+		{
+			key: rateLimitKey(options.scope, 'ip', ip),
+			max: limits.ipMax
+		},
+		{
+			key: rateLimitKey(options.scope, 'identifier', identifier),
+			max: limits.identifierMax
+		}
+	];
+	const resetAt = new Date(Date.now() + limits.windowSeconds * 1000);
 	const resetAtIso = resetAt.toISOString();
 
-	const [bucket] = await db
+	// Both independent dimensions are consumed by one INSERT ... ON CONFLICT
+	// statement. PostgreSQL applies the statement atomically, so a concurrent
+	// attempt cannot increment one dimension without the other.
+	const buckets = await db
 		.insert(rateLimitBucket)
-		.values({ key, count: 1, resetAt })
+		.values(dimensions.map(({ key }) => ({ key, count: 1, resetAt })))
 		.onConflictDoUpdate({
 			target: rateLimitBucket.key,
 			set: {
@@ -36,17 +54,52 @@ export async function assertRateLimit(event: RequestEvent, options: RateLimitOpt
 				updatedAt: new Date()
 			}
 		})
-		.returning({ count: rateLimitBucket.count, resetAt: rateLimitBucket.resetAt });
+		.returning({
+			key: rateLimitBucket.key,
+			count: rateLimitBucket.count,
+			resetAt: rateLimitBucket.resetAt
+		});
 
-	if (bucket.count > options.max) {
+	const limitsByKey = new Map(dimensions.map((dimension) => [dimension.key, dimension.max]));
+	const blocked = buckets.filter((bucket) => bucket.count > (limitsByKey.get(bucket.key) ?? 0));
+	if (blocked.length > 0) {
+		const retryAt = new Date(Math.max(...blocked.map((bucket) => bucket.resetAt.getTime())));
 		const time = new Intl.DateTimeFormat(event.locals.locale, { timeStyle: 'medium' }).format(
-			bucket.resetAt
+			retryAt
 		);
 		throw error(
 			429,
 			translate(event.locals.locale, 'Too many attempts. Try again after {time}.', { time })
 		);
 	}
+}
+
+export function normalizeRateLimitIdentifier(value: string) {
+	return value.normalize('NFKC').trim().toLowerCase();
+}
+
+function rateLimitKey(scope: string, dimension: 'ip' | 'identifier', value: string) {
+	return sha256(`${rateLimitKeyVersion}:${scope}:${dimension}:${value}`);
+}
+
+function resolveRateLimits(options: RateLimitOptions) {
+	const identifierMax = positiveIntegerEnv('AUTH_RATE_LIMIT_IDENTIFIER_MAX', options.identifierMax);
+	const defaultIpMax = Math.min(
+		postgresIntegerMax,
+		options.ipMax ?? identifierMax * defaultIpLimitMultiplier
+	);
+	return {
+		identifierMax,
+		ipMax: positiveIntegerEnv('AUTH_RATE_LIMIT_IP_MAX', defaultIpMax),
+		windowSeconds: positiveIntegerEnv('AUTH_RATE_LIMIT_WINDOW_SECONDS', options.windowSeconds)
+	};
+}
+
+function positiveIntegerEnv(name: string, fallback: number) {
+	const value = getPrivateEnv(name);
+	if (!value) return fallback;
+	const parsed = Number(value);
+	return Number.isInteger(parsed) && parsed > 0 && parsed <= postgresIntegerMax ? parsed : fallback;
 }
 
 async function cleanupExpiredRateLimitBuckets() {

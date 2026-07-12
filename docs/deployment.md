@@ -45,6 +45,9 @@ local production-like testing or for a standalone Caddy deployment.
 - `DB_POOL_MAX`: maximum application query-pool size. Each app process may open one additional dedicated connection while holding a scheduler advisory lock.
 - `TRUST_PROXY_HEADERS`: use `true` only when the app is not directly exposed and only receives traffic through a trusted reverse proxy.
 - `TRUSTED_PROXY_CIDR`: immediate reverse proxy subnet allowed to supply forwarded client addresses. It is required when `TRUST_PROXY_HEADERS=true` and accepts comma-separated IPv4/IPv6 CIDRs. There is intentionally no broad private-network default: configure the narrowest deployment-specific CIDR and place the app and proxy on a dedicated network whenever possible.
+- `AUTH_RATE_LIMIT_IDENTIFIER_MAX`: optional global override for the stricter normalized-identifier bucket. Leave empty to retain each flow's reviewed default.
+- `AUTH_RATE_LIMIT_IP_MAX`: optional global override for the independent client-IP bucket. Leave empty to use 20 times each flow's identifier limit so normal NAT/shared networks have headroom while cross-account spraying remains bounded.
+- `AUTH_RATE_LIMIT_WINDOW_SECONDS`: optional global window override. Leave empty to retain the login, registration, reset and MFA-specific windows.
 
 Before upgrading an existing deployment, set `TRUSTED_PROXY_CIDR` explicitly if
 `TRUST_PROXY_HEADERS=true`; production startup now rejects missing, empty or

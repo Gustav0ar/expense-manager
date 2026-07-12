@@ -58,7 +58,7 @@ export const actions: Actions = {
 			scope: 'auth:register',
 			identifier: parsed.data.email,
 			windowSeconds: 60,
-			max: 3
+			identifierMax: 3
 		});
 
 		if (isEmailVerificationRequired()) {

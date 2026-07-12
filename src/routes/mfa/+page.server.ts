@@ -35,7 +35,7 @@ export const actions: Actions = {
 			scope: 'auth:mfa',
 			identifier: event.locals.user.id,
 			windowSeconds: 60,
-			max: 8
+			identifierMax: 8
 		});
 
 		const verified = await verifyMfaChallenge({

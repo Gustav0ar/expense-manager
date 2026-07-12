@@ -27,7 +27,7 @@ export const actions: Actions = {
 			scope: 'auth:reset-password',
 			identifier: parsed.data.token,
 			windowSeconds: 300,
-			max: 5
+			identifierMax: 5
 		});
 
 		try {

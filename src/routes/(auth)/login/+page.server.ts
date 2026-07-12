@@ -41,7 +41,7 @@ export const actions: Actions = {
 			scope: 'auth:login',
 			identifier: parsed.data.email,
 			windowSeconds: 60,
-			max: 5
+			identifierMax: 5
 		});
 
 		try {
