@@ -868,18 +868,7 @@ async function claimLegacyBudgetAlertDeliveries(
 					isNull(budgetAlertDelivery.level),
 					isNull(budgetAlertDelivery.stage),
 					inArray(sql`lower(${budgetAlertDelivery.recipientEmail})`, eligibleEmails),
-					sql`${budgetAlertDelivery.attemptCount} < ${budgetAlertDeliveryMaxAttempts}`,
-					or(
-						inArray(budgetAlertDelivery.status, ['pending', 'failed']),
-						and(
-							eq(budgetAlertDelivery.status, 'sending'),
-							lt(budgetAlertDelivery.claimExpiresAt, now)
-						)
-					),
-					or(
-						isNull(budgetAlertDelivery.lastProviderEvent),
-						sql`${budgetAlertDelivery.lastProviderEvent} not in ('bounce', 'blocked', 'spam', 'unsub')`
-					)
+					...claimableBudgetAlertDeliveryConditions(now)
 				)
 			)
 			.orderBy(asc(budgetAlertDelivery.id))
@@ -901,18 +890,7 @@ async function claimLegacyBudgetAlertDeliveries(
 			.where(
 				and(
 					inArray(budgetAlertDelivery.id, eligibleIds),
-					sql`${budgetAlertDelivery.attemptCount} < ${budgetAlertDeliveryMaxAttempts}`,
-					or(
-						inArray(budgetAlertDelivery.status, ['pending', 'failed']),
-						and(
-							eq(budgetAlertDelivery.status, 'sending'),
-							lt(budgetAlertDelivery.claimExpiresAt, now)
-						)
-					),
-					or(
-						isNull(budgetAlertDelivery.lastProviderEvent),
-						sql`${budgetAlertDelivery.lastProviderEvent} not in ('bounce', 'blocked', 'spam', 'unsub')`
-					)
+					...claimableBudgetAlertDeliveryConditions(now)
 				)
 			)
 			.returning({
@@ -949,27 +927,8 @@ async function deliverClaimedLegacyBudgetAlerts(
 				context.locale,
 				`budget-alert:${delivery.providerReference}`
 			);
-			const updated = await db
-				.update(budgetAlertDelivery)
-				.set({
-					status: 'sent',
-					sentAt: now,
-					claimToken: null,
-					claimExpiresAt: null,
-					lastErrorCategory: null,
-					provider: receipt?.provider ?? null,
-					providerMessageId: receipt?.messageId ?? null,
-					providerMessageUuid: receipt?.messageUuid ?? null,
-					updatedAt: now
-				})
-				.where(
-					and(
-						eq(budgetAlertDelivery.id, delivery.id),
-						eq(budgetAlertDelivery.claimToken, claimToken)
-					)
-				)
-				.returning({ id: budgetAlertDelivery.id });
-			sentCount += updated.length;
+			const sent = await markBudgetAlertDeliverySent(delivery.id, claimToken, now, receipt);
+			sentCount += sent;
 		} catch (sendError) {
 			const errorCategory = classifyBudgetAlertDeliveryError(sendError);
 			console.error(
@@ -980,23 +939,13 @@ async function deliverClaimedLegacyBudgetAlerts(
 					errorCategory
 				})
 			);
-			const updated = await db
-				.update(budgetAlertDelivery)
-				.set({
-					status: 'failed',
-					claimToken: null,
-					claimExpiresAt: null,
-					lastErrorCategory: errorCategory,
-					updatedAt: now
-				})
-				.where(
-					and(
-						eq(budgetAlertDelivery.id, delivery.id),
-						eq(budgetAlertDelivery.claimToken, claimToken)
-					)
-				)
-				.returning({ id: budgetAlertDelivery.id });
-			failedCount += updated.length;
+			const failed = await markBudgetAlertDeliveryFailed(
+				delivery.id,
+				claimToken,
+				now,
+				errorCategory
+			);
+			failedCount += failed;
 		}
 	});
 	return { sentCount, failedCount };
@@ -1167,18 +1116,7 @@ async function claimBudgetAlertDeliveries(
 			.where(
 				and(
 					inArray(budgetAlertDelivery.id, eligibleIds),
-					sql`${budgetAlertDelivery.attemptCount} < ${budgetAlertDeliveryMaxAttempts}`,
-					or(
-						inArray(budgetAlertDelivery.status, ['pending', 'failed']),
-						and(
-							eq(budgetAlertDelivery.status, 'sending'),
-							lt(budgetAlertDelivery.claimExpiresAt, now)
-						)
-					),
-					or(
-						isNull(budgetAlertDelivery.lastProviderEvent),
-						sql`${budgetAlertDelivery.lastProviderEvent} not in ('bounce', 'blocked', 'spam', 'unsub')`
-					)
+					...claimableBudgetAlertDeliveryConditions(now)
 				)
 			)
 			.returning({
@@ -1257,27 +1195,8 @@ async function deliverClaimedBudgetAlerts(
 				context.locale,
 				`budget-alert:${delivery.providerReference}`
 			);
-			const updated = await db
-				.update(budgetAlertDelivery)
-				.set({
-					status: 'sent',
-					sentAt: now,
-					claimToken: null,
-					claimExpiresAt: null,
-					lastErrorCategory: null,
-					provider: receipt?.provider ?? null,
-					providerMessageId: receipt?.messageId ?? null,
-					providerMessageUuid: receipt?.messageUuid ?? null,
-					updatedAt: now
-				})
-				.where(
-					and(
-						eq(budgetAlertDelivery.id, delivery.id),
-						eq(budgetAlertDelivery.claimToken, claimToken)
-					)
-				)
-				.returning({ id: budgetAlertDelivery.id });
-			sentCount += updated.length;
+			const sent = await markBudgetAlertDeliverySent(delivery.id, claimToken, now, receipt);
+			sentCount += sent;
 		} catch (sendError) {
 			failedCount++;
 			const errorCategory = classifyBudgetAlertDeliveryError(sendError);
@@ -1289,24 +1208,68 @@ async function deliverClaimedBudgetAlerts(
 					errorCategory
 				})
 			);
-			await db
-				.update(budgetAlertDelivery)
-				.set({
-					status: 'failed',
-					claimToken: null,
-					claimExpiresAt: null,
-					lastErrorCategory: errorCategory,
-					updatedAt: now
-				})
-				.where(
-					and(
-						eq(budgetAlertDelivery.id, delivery.id),
-						eq(budgetAlertDelivery.claimToken, claimToken)
-					)
-				);
+			await markBudgetAlertDeliveryFailed(delivery.id, claimToken, now, errorCategory);
 		}
 	});
 	return { sentCount, failedCount };
+}
+
+function claimableBudgetAlertDeliveryConditions(now: Date) {
+	return [
+		sql`${budgetAlertDelivery.attemptCount} < ${budgetAlertDeliveryMaxAttempts}`,
+		or(
+			inArray(budgetAlertDelivery.status, ['pending', 'failed']),
+			and(eq(budgetAlertDelivery.status, 'sending'), lt(budgetAlertDelivery.claimExpiresAt, now))
+		)!,
+		or(
+			isNull(budgetAlertDelivery.lastProviderEvent),
+			sql`${budgetAlertDelivery.lastProviderEvent} not in ('bounce', 'blocked', 'spam', 'unsub')`
+		)!
+	];
+}
+
+async function markBudgetAlertDeliverySent(
+	id: number,
+	claimToken: string,
+	now: Date,
+	receipt: MailDeliveryReceipt | void
+) {
+	const updated = await db
+		.update(budgetAlertDelivery)
+		.set({
+			status: 'sent',
+			sentAt: now,
+			claimToken: null,
+			claimExpiresAt: null,
+			lastErrorCategory: null,
+			provider: receipt?.provider ?? null,
+			providerMessageId: receipt?.messageId ?? null,
+			providerMessageUuid: receipt?.messageUuid ?? null,
+			updatedAt: now
+		})
+		.where(and(eq(budgetAlertDelivery.id, id), eq(budgetAlertDelivery.claimToken, claimToken)))
+		.returning({ id: budgetAlertDelivery.id });
+	return updated.length;
+}
+
+async function markBudgetAlertDeliveryFailed(
+	id: number,
+	claimToken: string,
+	now: Date,
+	errorCategory: BudgetAlertErrorCategory
+) {
+	const updated = await db
+		.update(budgetAlertDelivery)
+		.set({
+			status: 'failed',
+			claimToken: null,
+			claimExpiresAt: null,
+			lastErrorCategory: errorCategory,
+			updatedAt: now
+		})
+		.where(and(eq(budgetAlertDelivery.id, id), eq(budgetAlertDelivery.claimToken, claimToken)))
+		.returning({ id: budgetAlertDelivery.id });
+	return updated.length;
 }
 
 export function classifyBudgetAlertDeliveryError(errorValue: unknown): BudgetAlertErrorCategory {
