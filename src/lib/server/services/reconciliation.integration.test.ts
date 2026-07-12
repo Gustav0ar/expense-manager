@@ -11,7 +11,13 @@ import {
 	workspaceMember
 } from '$lib/server/db/schema';
 import { db } from '$lib/server/db';
-import { createExpense } from './expenses';
+import {
+	createExpense,
+	deleteExpense,
+	reviewExpense,
+	updateExpense,
+	updateExpensePaymentStatus
+} from './expenses';
 import {
 	decideBankTransaction,
 	listReconciliationQueue,
@@ -268,6 +274,187 @@ describe.sequential('OFX reconciliation integration', () => {
 		).toHaveLength(1);
 	});
 
+	it('atomically reopens linked bank decisions before incompatible generic mutations', async () => {
+		const fixture = await createFixture();
+		const edited = await createAndMatchExpense(fixture, {
+			description: 'Edit reconciliation',
+			amount: '21.00',
+			expenseDate: '2026-07-10',
+			fitId: 'reverse-edit'
+		});
+		await updateExpense(fixture.context, edited.expenseId, {
+			categoryId: fixture.categoryId,
+			description: 'Edit reconciliation corrected',
+			amount: '22.00',
+			expenseDate: '2026-07-10'
+		});
+		await expectReversed(edited.transactionId, edited.expenseId, {
+			paymentStatus: 'paid',
+			amountCents: 2200,
+			deletedAt: null
+		});
+
+		const rejected = await createAndMatchExpense(fixture, {
+			description: 'Reject reconciliation',
+			amount: '23.00',
+			expenseDate: '2026-07-11',
+			fitId: 'reverse-reject'
+		});
+		await reviewExpense(fixture.context, rejected.expenseId, {
+			reviewStatus: 'rejected',
+			reason: 'Not a workspace expense'
+		});
+		await expectReversed(rejected.transactionId, rejected.expenseId, {
+			paymentStatus: 'unpaid',
+			reviewStatus: 'rejected',
+			deletedAt: null
+		});
+
+		const unpaid = await createAndMatchExpense(fixture, {
+			description: 'Payment reconciliation',
+			amount: '24.00',
+			expenseDate: '2026-07-12',
+			fitId: 'reverse-payment'
+		});
+		await updateExpensePaymentStatus(fixture.context, unpaid.expenseId, {
+			paymentStatus: 'unpaid'
+		});
+		await expectReversed(unpaid.transactionId, unpaid.expenseId, {
+			paymentStatus: 'unpaid',
+			paidAt: null,
+			deletedAt: null
+		});
+
+		const trashed = await createAndMatchExpense(fixture, {
+			description: 'Trash reconciliation',
+			amount: '25.00',
+			expenseDate: '2026-07-13',
+			fitId: 'reverse-trash'
+		});
+		await deleteExpense(fixture.context, trashed.expenseId);
+		await expectReversed(trashed.transactionId, trashed.expenseId, {
+			paymentStatus: 'paid',
+			deletedAt: expect.any(Date)
+		});
+
+		const reversals = await db
+			.select({ action: auditEvent.action, metadata: auditEvent.metadata })
+			.from(auditEvent)
+			.where(
+				and(
+					eq(auditEvent.workspaceId, fixture.context.workspaceId),
+					eq(auditEvent.action, 'bank_transaction.reversed')
+				)
+			);
+		expect(reversals).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					metadata: expect.objectContaining({ reason: 'expense_edited' })
+				}),
+				expect.objectContaining({
+					metadata: expect.objectContaining({ reason: 'expense_rejected' })
+				}),
+				expect.objectContaining({
+					metadata: expect.objectContaining({ reason: 'payment_status_changed' })
+				}),
+				expect.objectContaining({
+					metadata: expect.objectContaining({ reason: 'expense_trashed' })
+				})
+			])
+		);
+		expect(reversals).toHaveLength(4);
+		expect(
+			await db
+				.select({ id: auditEvent.id })
+				.from(auditEvent)
+				.where(
+					and(
+						eq(auditEvent.workspaceId, fixture.context.workspaceId),
+						eq(auditEvent.action, 'bank_transaction.matched')
+					)
+				)
+		).toHaveLength(4);
+	});
+
+	it('keeps compatible edits linked and blocks direct incompatible writes', async () => {
+		const fixture = await createFixture();
+		const linked = await createAndMatchExpense(fixture, {
+			description: 'Compatible edit',
+			amount: '31.00',
+			expenseDate: '2026-07-10',
+			fitId: 'compatible-edit'
+		});
+		await updateExpense(fixture.context, linked.expenseId, {
+			categoryId: fixture.categoryId,
+			description: 'Compatible edit with clearer notes',
+			amount: '31.00',
+			expenseDate: '2026-07-10',
+			notes: 'Description-only changes retain the verified financial link.'
+		});
+		const [decision] = await db
+			.select({ status: bankTransaction.status, expenseId: bankTransaction.expenseId })
+			.from(bankTransaction)
+			.where(eq(bankTransaction.id, linked.transactionId));
+		expect(decision).toEqual({ status: 'matched', expenseId: linked.expenseId });
+
+		await expect(
+			db.update(expense).set({ amountCents: 3200 }).where(eq(expense.id, linked.expenseId))
+		).rejects.toMatchObject({ cause: { code: '23514' } });
+		const [unchanged] = await db
+			.select({ amountCents: expense.amountCents, paymentStatus: expense.paymentStatus })
+			.from(expense)
+			.where(eq(expense.id, linked.expenseId));
+		expect(unchanged).toEqual({ amountCents: 3100, paymentStatus: 'reconciled' });
+	});
+
+	it('serializes a generic edit behind an in-flight match and reverses the committed link', async () => {
+		const fixture = await createFixture();
+		const created = await createExpense(fixture.context, {
+			categoryId: fixture.categoryId,
+			description: 'Concurrent edit',
+			amount: '41.00',
+			expenseDate: '2026-07-10'
+		});
+		await stageOfxTransactions(
+			fixture.context,
+			statement([
+				'<STMTTRN><DTPOSTED>20260710<TRNAMT>-41.00<FITID>concurrent-edit<NAME>Concurrent edit</STMTTRN>'
+			])
+		);
+		const [transaction] = await db
+			.select({ id: bankTransaction.id })
+			.from(bankTransaction)
+			.where(eq(bankTransaction.providerTransactionId, 'concurrent-edit'));
+		let releaseMatch!: () => void;
+		const matchCanFinish = new Promise<void>((resolve) => (releaseMatch = resolve));
+		let matchLocked!: () => void;
+		const matchHasLocks = new Promise<void>((resolve) => (matchLocked = resolve));
+		const matching = decideBankTransaction(
+			fixture.context,
+			{ transactionId: transaction.id, decision: 'match', expenseId: created.id },
+			{
+				onBeforeAudit: async () => {
+					matchLocked();
+					await matchCanFinish;
+				}
+			}
+		);
+		await matchHasLocks;
+		const editing = updateExpense(fixture.context, created.id, {
+			categoryId: fixture.categoryId,
+			description: 'Concurrent edit changed',
+			amount: '42.00',
+			expenseDate: '2026-07-10'
+		});
+		releaseMatch();
+		await expect(Promise.all([matching, editing])).resolves.toHaveLength(2);
+		await expectReversed(transaction.id, created.id, {
+			amountCents: 4200,
+			paymentStatus: 'paid',
+			deletedAt: null
+		});
+	});
+
 	it('creates through the import path, ignores credits, and rejects unauthorized/cross-workspace decisions', async () => {
 		const fixture = await createFixture();
 		const other = await createFixture();
@@ -399,6 +586,68 @@ describe.sequential('OFX reconciliation integration', () => {
 		).resolves.toHaveLength(0);
 	});
 });
+
+async function createAndMatchExpense(
+	fixture: Awaited<ReturnType<typeof createFixture>>,
+	input: { amount: string; description: string; expenseDate: string; fitId: string }
+) {
+	const created = await createExpense(fixture.context, {
+		categoryId: fixture.categoryId,
+		description: input.description,
+		amount: input.amount,
+		expenseDate: input.expenseDate
+	});
+	const compactDate = input.expenseDate.replaceAll('-', '');
+	await stageOfxTransactions(
+		fixture.context,
+		statement([
+			`<STMTTRN><DTPOSTED>${compactDate}<TRNAMT>-${input.amount}<FITID>${input.fitId}<NAME>${input.description}</STMTTRN>`
+		])
+	);
+	const [transaction] = await db
+		.select({ id: bankTransaction.id })
+		.from(bankTransaction)
+		.where(
+			and(
+				eq(bankTransaction.workspaceId, fixture.context.workspaceId),
+				eq(bankTransaction.providerTransactionId, input.fitId)
+			)
+		);
+	await decideBankTransaction(fixture.context, {
+		transactionId: transaction.id,
+		decision: 'match',
+		expenseId: created.id
+	});
+	return { expenseId: created.id, transactionId: transaction.id };
+}
+
+async function expectReversed(
+	transactionId: number,
+	expenseId: number,
+	expenseShape: Record<string, unknown>
+) {
+	const [decision] = await db
+		.select({
+			status: bankTransaction.status,
+			expenseId: bankTransaction.expenseId,
+			decidedAt: bankTransaction.decidedAt,
+			decidedByUserId: bankTransaction.decidedByUserId
+		})
+		.from(bankTransaction)
+		.where(eq(bankTransaction.id, transactionId));
+	expect(decision).toEqual({
+		status: 'pending',
+		expenseId: null,
+		decidedAt: null,
+		decidedByUserId: null
+	});
+	const [expenseRow] = await db.select().from(expense).where(eq(expense.id, expenseId));
+	expect(expenseRow).toMatchObject({
+		...expenseShape,
+		reconciledAt: null,
+		reconciledByUserId: null
+	});
+}
 
 async function createFixture() {
 	const ownerId = `reconcile-owner-${randomUUID()}`;

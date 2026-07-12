@@ -49,6 +49,11 @@ import { resolveExpenseCatalogSelection } from './expense-catalogs';
 import { translate } from '$lib/i18n';
 import { attachmentDeletionGraceMs, buildAttachmentDeletionRows } from './attachment-deletion';
 import { expenseTrashDates } from './expense-trash';
+import {
+	isLinkedReconciliationCompatible,
+	lockLinkedBankTransaction,
+	reverseLinkedBankTransaction
+} from './reconciliation-integrity';
 
 export type ExpenseInput = {
 	categoryId: number;
@@ -365,7 +370,7 @@ export async function updateExpense(context: WorkspaceContext, id: number, input
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
-	const [current] = await db
+	const [snapshot] = await db
 		.select({
 			paymentMethodId: expense.paymentMethodId,
 			vendorId: expense.vendorId,
@@ -382,25 +387,64 @@ export async function updateExpense(context: WorkspaceContext, id: number, input
 			)
 		)
 		.limit(1);
-	if (!current) throw error(404, translate(context.locale, 'Expense not found.'));
-	if (current.paymentStatus !== 'unpaid' && !canReconcileExpenses(context.role)) {
+	if (!snapshot) throw error(404, translate(context.locale, 'Expense not found.'));
+	if (snapshot.paymentStatus !== 'unpaid' && !canReconcileExpenses(context.role)) {
 		throw error(403, translate(context.locale, 'Permission denied.'));
 	}
 
 	const catalogSelection = await resolveExpenseCatalogSelection(context.workspaceId, input, {
-		allowedArchivedIds: current,
+		allowedArchivedIds: snapshot,
 		locale: context.locale
 	});
 	const shouldResetReview = !canReviewExpenses(context.role);
+	const amountCents = parseCurrencyToCents(input.amount);
+	const competencyMonth = input.competencyMonth ? startOfMonth(input.competencyMonth) : null;
 
 	await db.transaction(async (tx) => {
 		const currentCurrency = await lockWorkspaceCurrency(tx, context.workspaceId);
+		let linked = await lockLinkedBankTransaction(tx, context.workspaceId, id);
+		const [current] = await tx
+			.select()
+			.from(expense)
+			.where(
+				and(
+					eq(expense.id, id),
+					eq(expense.workspaceId, context.workspaceId),
+					isNull(expense.deletedAt)
+				)
+			)
+			.limit(1)
+			.for('update');
+		if (!current) throw error(404, translate(context.locale, 'Expense not found.'));
+		if (current.paymentStatus !== 'unpaid' && !canReconcileExpenses(context.role))
+			throw error(403, translate(context.locale, 'Permission denied.'));
+		// A match may have committed while this transaction waited for the expense row.
+		linked ??= await lockLinkedBankTransaction(tx, context.workspaceId, id);
+		const nextState = {
+			...current,
+			amountCents,
+			currency: currentCurrency,
+			expenseDate: input.expenseDate,
+			reviewStatus: shouldResetReview ? 'pending' : current.reviewStatus,
+			paymentStatus: shouldResetReview ? 'unpaid' : current.paymentStatus
+		};
+		const reversesReconciliation =
+			linked !== null && !isLinkedReconciliationCompatible(linked, nextState);
+		if (reversesReconciliation) {
+			await reverseLinkedBankTransaction(tx, {
+				actorUserId: context.userId,
+				expenseId: id,
+				linked,
+				reason: 'expense_edited',
+				workspaceId: context.workspaceId
+			});
+		}
 		const [updated] = await tx
 			.update(expense)
 			.set({
 				categoryId: input.categoryId,
 				description: input.description,
-				amountCents: parseCurrencyToCents(input.amount),
+				amountCents,
 				currency: currentCurrency,
 				expenseDate: input.expenseDate,
 				paymentMethodId: catalogSelection.paymentMethodId,
@@ -409,7 +453,7 @@ export async function updateExpense(context: WorkspaceContext, id: number, input
 				vendor: catalogSelection.vendorName,
 				costCenterId: catalogSelection.costCenterId,
 				costCenter: catalogSelection.costCenterName,
-				competencyMonth: input.competencyMonth ? startOfMonth(input.competencyMonth) : null,
+				competencyMonth,
 				notes: input.notes || null,
 				...(shouldResetReview
 					? {
@@ -422,16 +466,19 @@ export async function updateExpense(context: WorkspaceContext, id: number, input
 							reconciledAt: null,
 							reconciledByUserId: null
 						}
-					: {})
+					: reversesReconciliation
+						? {
+								paymentStatus: 'paid' as const,
+								reconciledAt: null,
+								reconciledByUserId: null
+							}
+						: {})
 			})
 			.where(
 				and(
 					eq(expense.id, id),
 					eq(expense.workspaceId, context.workspaceId),
-					isNull(expense.deletedAt),
-					// Re-assert the payment status we checked above so a concurrent
-					// reconciliation between the SELECT and this UPDATE is detected.
-					shouldResetReview ? eq(expense.paymentStatus, 'unpaid') : sql`true`
+					isNull(expense.deletedAt)
 				)
 			)
 			.returning({ id: expense.id });
@@ -445,7 +492,13 @@ export async function updateExpense(context: WorkspaceContext, id: number, input
 			action: 'expense.updated',
 			entityType: 'expense',
 			entityId: id,
-			metadata: shouldResetReview ? { reviewStatus: 'pending' } : undefined
+			metadata:
+				shouldResetReview || reversesReconciliation
+					? {
+							...(shouldResetReview ? { reviewStatus: 'pending' } : {}),
+							...(reversesReconciliation ? { reconciliationReversed: true } : {})
+						}
+					: undefined
 		});
 	});
 }
@@ -461,52 +514,56 @@ export async function reviewExpense(
 		throw error(400, translate(context.locale, 'Check review data.'));
 	}
 
-	const [current] = await db
-		.select({ reviewStatus: expense.reviewStatus, paymentStatus: expense.paymentStatus })
-		.from(expense)
-		.where(
-			and(
-				eq(expense.id, id),
-				eq(expense.workspaceId, context.workspaceId),
-				isNull(expense.deletedAt)
-			)
-		)
-		.limit(1);
-
-	if (!current) throw error(404, translate(context.locale, 'Expense not found.'));
-
-	// Rejecting a paid or reconciled expense would silently wipe the payment
-	// record. Only allow it when the actor also has reconcile rights.
-	if (
-		input.reviewStatus === 'rejected' &&
-		current.paymentStatus !== 'unpaid' &&
-		!canReconcileExpenses(context.role)
-	) {
-		throw error(403, translate(context.locale, 'Cannot reject a paid or reconciled expense.'));
-	}
-
 	const reviewedAt = new Date();
-	const reviewUpdate =
-		input.reviewStatus === 'rejected'
-			? {
-					reviewStatus: input.reviewStatus,
-					reviewedByUserId: context.userId,
-					reviewedAt,
-					reviewRejectionReason: input.reason || null,
-					paymentStatus: 'unpaid' as const,
-					paidAt: null,
-					reconciledAt: null,
-					reconciledByUserId: null
-				}
-			: {
-					reviewStatus: input.reviewStatus,
-					reviewedByUserId: context.userId,
-					reviewedAt,
-					reviewRejectionReason: null
-				};
-
-	// Re-assert the reviewStatus we read to detect concurrent changes (409).
 	await db.transaction(async (tx) => {
+		let linked = await lockLinkedBankTransaction(tx, context.workspaceId, id);
+		const [current] = await tx
+			.select()
+			.from(expense)
+			.where(
+				and(
+					eq(expense.id, id),
+					eq(expense.workspaceId, context.workspaceId),
+					isNull(expense.deletedAt)
+				)
+			)
+			.limit(1)
+			.for('update');
+		if (!current) throw error(404, translate(context.locale, 'Expense not found.'));
+		if (
+			input.reviewStatus === 'rejected' &&
+			current.paymentStatus !== 'unpaid' &&
+			!canReconcileExpenses(context.role)
+		)
+			throw error(403, translate(context.locale, 'Cannot reject a paid or reconciled expense.'));
+		linked ??= await lockLinkedBankTransaction(tx, context.workspaceId, id);
+		if (input.reviewStatus === 'rejected' && linked) {
+			await reverseLinkedBankTransaction(tx, {
+				actorUserId: context.userId,
+				expenseId: id,
+				linked,
+				reason: 'expense_rejected',
+				workspaceId: context.workspaceId
+			});
+		}
+		const reviewUpdate =
+			input.reviewStatus === 'rejected'
+				? {
+						reviewStatus: input.reviewStatus,
+						reviewedByUserId: context.userId,
+						reviewedAt,
+						reviewRejectionReason: input.reason || null,
+						paymentStatus: 'unpaid' as const,
+						paidAt: null,
+						reconciledAt: null,
+						reconciledByUserId: null
+					}
+				: {
+						reviewStatus: input.reviewStatus,
+						reviewedByUserId: context.userId,
+						reviewedAt,
+						reviewRejectionReason: null
+					};
 		const [updated] = await tx
 			.update(expense)
 			.set(reviewUpdate)
@@ -514,7 +571,6 @@ export async function reviewExpense(
 				and(
 					eq(expense.id, id),
 					eq(expense.workspaceId, context.workspaceId),
-					eq(expense.reviewStatus, current.reviewStatus),
 					isNull(expense.deletedAt)
 				)
 			)
@@ -545,40 +601,41 @@ export async function updateExpensePaymentStatus(
 	if (!canReconcileExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
-	const [current] = await db
-		.select({ paymentStatus: expense.paymentStatus, paidAt: expense.paidAt })
-		.from(expense)
-		.where(
-			and(
-				eq(expense.id, id),
-				eq(expense.workspaceId, context.workspaceId),
-				eq(expense.reviewStatus, 'approved'),
-				isNull(expense.deletedAt)
-			)
-		)
-		.limit(1);
-
-	if (!current) throw error(404, translate(context.locale, 'Approved expense not found.'));
-
-	// Enforce valid state-machine transitions. Downgrading a reconciled expense
-	// back to 'paid' is blocked — reconciliation is a terminal financial state
-	// that should not be silently reversed. All other transitions are allowed,
-	// including unpaid → reconciled (a valid shortcut when reconciling from a
-	// bank import without a separate 'mark as paid' step).
-	if (input.paymentStatus === 'paid' && current.paymentStatus === 'reconciled') {
-		throw error(
-			400,
-			translate(context.locale, 'Cannot change payment status of a reconciled expense.')
-		);
-	}
-
-	// When reconciling an already-paid expense, preserve the original paidAt
-	// unless the caller explicitly supplies a new value.
-	const paidAt =
-		input.paymentStatus === 'unpaid' ? null : (input.paidAt ?? current.paidAt ?? todayIso());
-
-	// Re-assert current paymentStatus to detect concurrent changes (409).
 	await db.transaction(async (tx) => {
+		let linked = await lockLinkedBankTransaction(tx, context.workspaceId, id);
+		const [current] = await tx
+			.select()
+			.from(expense)
+			.where(
+				and(
+					eq(expense.id, id),
+					eq(expense.workspaceId, context.workspaceId),
+					eq(expense.reviewStatus, 'approved'),
+					isNull(expense.deletedAt)
+				)
+			)
+			.limit(1)
+			.for('update');
+		if (!current) throw error(404, translate(context.locale, 'Approved expense not found.'));
+		if (input.paymentStatus === 'paid' && current.paymentStatus === 'reconciled')
+			throw error(
+				400,
+				translate(context.locale, 'Cannot change payment status of a reconciled expense.')
+			);
+		linked ??= await lockLinkedBankTransaction(tx, context.workspaceId, id);
+		if (linked && input.paymentStatus !== 'reconciled') {
+			await reverseLinkedBankTransaction(tx, {
+				actorUserId: context.userId,
+				expenseId: id,
+				linked,
+				reason: 'payment_status_changed',
+				workspaceId: context.workspaceId
+			});
+		}
+		// When reconciling an already-paid expense, preserve the original paidAt
+		// unless the caller explicitly supplies a new value.
+		const paidAt =
+			input.paymentStatus === 'unpaid' ? null : (input.paidAt ?? current.paidAt ?? todayIso());
 		const [updated] = await tx
 			.update(expense)
 			.set({
@@ -592,7 +649,6 @@ export async function updateExpensePaymentStatus(
 					eq(expense.id, id),
 					eq(expense.workspaceId, context.workspaceId),
 					eq(expense.reviewStatus, 'approved'),
-					eq(expense.paymentStatus, current.paymentStatus),
 					isNull(expense.deletedAt)
 				)
 			)
@@ -616,47 +672,54 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 	if (!canWriteExpenses(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
 
-	const [current] = await db
-		.select({
-			reviewStatus: expense.reviewStatus,
-			paymentStatus: expense.paymentStatus
-		})
-		.from(expense)
-		.where(
-			and(
-				eq(expense.id, id),
-				eq(expense.workspaceId, context.workspaceId),
-				isNull(expense.deletedAt)
-			)
-		)
-		.limit(1);
-
-	if (!current) throw error(404, translate(context.locale, 'Expense not found.'));
-	if (current.reviewStatus !== 'pending' && !canReviewExpenses(context.role)) {
-		throw error(403, translate(context.locale, 'Permission denied.'));
-	}
-	if (current.paymentStatus !== 'unpaid' && !canReconcileExpenses(context.role)) {
-		throw error(403, translate(context.locale, 'Permission denied.'));
-	}
-
 	const { deletedAt, trashExpiresAt } = expenseTrashDates();
 	await db.transaction(async (tx) => {
-		const [deleted] = await tx
-			.update(expense)
-			.set({ deletedAt, trashExpiresAt })
+		let linked = await lockLinkedBankTransaction(tx, context.workspaceId, id);
+		const [current] = await tx
+			.select()
+			.from(expense)
 			.where(
 				and(
 					eq(expense.id, id),
 					eq(expense.workspaceId, context.workspaceId),
-					isNull(expense.deletedAt),
-					// Re-assert the statuses we checked above so a concurrent approval
-					// or payment between the SELECT and this UPDATE is detected.
-					canReviewExpenses(context.role)
-						? sql`true`
-						: eq(expense.reviewStatus, current.reviewStatus),
-					canReconcileExpenses(context.role)
-						? sql`true`
-						: eq(expense.paymentStatus, current.paymentStatus)
+					isNull(expense.deletedAt)
+				)
+			)
+			.limit(1)
+			.for('update');
+		if (!current) throw error(404, translate(context.locale, 'Expense not found.'));
+		if (current.reviewStatus !== 'pending' && !canReviewExpenses(context.role))
+			throw error(403, translate(context.locale, 'Permission denied.'));
+		if (current.paymentStatus !== 'unpaid' && !canReconcileExpenses(context.role))
+			throw error(403, translate(context.locale, 'Permission denied.'));
+		linked ??= await lockLinkedBankTransaction(tx, context.workspaceId, id);
+		if (linked) {
+			await reverseLinkedBankTransaction(tx, {
+				actorUserId: context.userId,
+				expenseId: id,
+				linked,
+				reason: 'expense_trashed',
+				workspaceId: context.workspaceId
+			});
+		}
+		const [deleted] = await tx
+			.update(expense)
+			.set({
+				deletedAt,
+				trashExpiresAt,
+				...(linked
+					? {
+							paymentStatus: 'paid' as const,
+							reconciledAt: null,
+							reconciledByUserId: null
+						}
+					: {})
+			})
+			.where(
+				and(
+					eq(expense.id, id),
+					eq(expense.workspaceId, context.workspaceId),
+					isNull(expense.deletedAt)
 				)
 			)
 			.returning({ id: expense.id });
@@ -702,7 +765,8 @@ export async function deleteExpense(context: WorkspaceContext, id: number) {
 			actorUserId: context.userId,
 			action: 'expense.deleted',
 			entityType: 'expense',
-			entityId: id
+			entityId: id,
+			metadata: linked ? { reconciliationReversed: true } : undefined
 		});
 	});
 }
