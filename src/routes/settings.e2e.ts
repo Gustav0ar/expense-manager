@@ -399,44 +399,47 @@ test('covers audit filters, metadata, empty state, pagination and invalid filter
 	await expect(auditRows(page).first()).toBeVisible();
 
 	await page.goto('/app/settings/audit');
-	await page.getByLabel('Ação').fill('workspace.updated');
-	await page.getByLabel('Entidade').fill('workspace');
+	await page.getByLabel('Ação', { exact: true }).selectOption('workspace.updated');
+	await page.getByLabel('Entidade', { exact: true }).selectOption('workspace');
 	await page.getByRole('button', { name: 'Filtrar' }).click();
 	await expect(page).toHaveURL(/action=workspace\.updated/);
 	await expect(page).toHaveURL(/entityType=workspace/);
 	await expect(auditRows(page).first()).toContainText('workspace.updated');
-	await expect(auditRows(page).first()).toContainText('workspace');
-	await expect(page.getByRole('link', { name: 'Próxima página' })).toBeVisible();
+	await expect(auditRows(page).first()).toContainText('Workspace atualizado');
+	await expect(auditRows(page).first()).toContainText('Settings Owner');
+	await expect(page.getByRole('link', { name: 'Próxima página' })).toHaveAttribute(
+		'href',
+		/app\/settings\/audit\?action=workspace\.updated&entityType=workspace&cursor=/
+	);
 	await page.getByRole('link', { name: 'Próxima página' }).click();
 	await expect(page).toHaveURL(/action=workspace\.updated/);
 	await expect(page).toHaveURL(/entityType=workspace/);
 	await expect(auditRows(page).first()).toContainText('workspace.updated');
-	await expect(auditRows(page).first()).toContainText('workspace');
+	await expect(auditRows(page).first()).toContainText('Workspace atualizado');
 
 	await page.goto('/app/settings/audit');
-	await page.getByLabel('Ação').fill('workspace_member.invited');
-	await page.getByLabel('Entidade').fill('workspace_invitation');
+	await page.getByLabel('Ação', { exact: true }).selectOption('workspace_member.invited');
+	await page.getByLabel('Entidade', { exact: true }).selectOption('workspace_invitation');
 	await page.getByRole('button', { name: 'Filtrar' }).click();
 	await expect(auditRows(page)).toHaveCount(1);
 	await expect(auditRows(page).first()).toContainText('workspace_member.invited');
-	await expect(auditRows(page).first()).toContainText('workspace_invitation');
+	await expect(auditRows(page).first()).toContainText('Convite do workspace');
 	await expect(auditRows(page).first()).toContainText(invitedEmail);
-	await expect(auditRows(page).first()).toContainText('"role":"viewer"');
+	await expect(auditRows(page).first()).toContainText('Visualizador');
+	await auditRows(page).first().getByText('Ver metadados técnicos').click();
+	await expect(auditRows(page).first().locator('pre')).toContainText('"role": "viewer"');
 
-	await page.goto('/app/settings/audit');
-	await page.getByLabel('Ação').fill('missing.event');
+	await page.getByLabel('Ação', { exact: true }).selectOption('category.created');
 	await page.getByRole('button', { name: 'Filtrar' }).click();
 	await expect(page.getByText('Nenhum evento encontrado.')).toBeVisible();
 	await page.getByRole('link', { name: 'Limpar' }).click();
 	await expect(page).toHaveURL(/\/app\/settings\/audit$/);
 	await expect(auditRows(page).first()).toBeVisible();
 
-	expect((await page.request.get(`/app/settings/audit?action=${'x'.repeat(121)}`)).status()).toBe(
+	expect((await page.request.get('/app/settings/audit?action=missing.event')).status()).toBe(400);
+	expect((await page.request.get('/app/settings/audit?entityType=other_workspace')).status()).toBe(
 		400
 	);
-	expect(
-		(await page.request.get(`/app/settings/audit?entityType=${'x'.repeat(81)}`)).status()
-	).toBe(400);
 });
 
 test('logout button is hidden on desktop sidebar and visible in settings on mobile', async ({

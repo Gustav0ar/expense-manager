@@ -429,6 +429,9 @@ describe('validation schemas', () => {
 			action: 'expense.created',
 			cursor: 'abc'
 		});
+		expect(auditFilterSchema.parse({ action: '', entityType: '' })).toEqual({});
+		expect(auditFilterSchema.safeParse({ action: 'expense.typo' }).success).toBe(false);
+		expect(auditFilterSchema.safeParse({ entityType: 'other_workspace' }).success).toBe(false);
 		expect(mfaCodeSchema.safeParse({ code: '123456' }).success).toBe(true);
 	});
 

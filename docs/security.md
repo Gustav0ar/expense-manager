@@ -16,7 +16,8 @@
 - Attachments with size limit, MIME allowlist, authenticated download and blocking when the expense was removed
 - Attachment upload and download through streaming to avoid large buffers in the Node process
 - Soft delete for expenses
-- Audit trail for main actions with filters by action and entity
+- Workspace-scoped audit trail with allowlisted action/entity filters, actor display names and
+  recursively redacted technical metadata
 - Request ID and `Server-Timing` in HTTP responses
 - Security headers in the global hook and Caddy
 - CSP in production

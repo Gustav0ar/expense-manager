@@ -482,6 +482,7 @@ describe('workspace service integration', () => {
 
 		const firstPage = await listAuditEvents(context, { action, limit: 2 });
 		expect(firstPage.items).toHaveLength(2);
+		expect(firstPage.items[0]).toMatchObject({ actorName: owner.name, actorUserId: owner.id });
 		expect(firstPage.nextCursor).toEqual(expect.any(String));
 		const secondPage = await listAuditEvents(context, {
 			action,
