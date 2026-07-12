@@ -256,7 +256,9 @@ test('covers invitations, every assignable role, acceptance, role changes and re
 			page.getByRole('alert').filter({ hasText: 'Não foi possível copiar.' })
 		).toBeVisible();
 		await expect(page.locator('.invite-url-code')).toHaveText(initialInviteUrl);
-		await expect(membersPanel(page).getByRole('columnheader', { name: 'Ações' })).toBeAttached();
+		await expect(
+			membersPanel(page).getByRole('columnheader', { name: 'Ações', includeHidden: true })
+		).toBeAttached();
 		const stableInviteUrl = await inviteUser(page, roleCycleEmail, 'member', 'viewer');
 		expect(new URL(stableInviteUrl).pathname).toBe(new URL(initialInviteUrl).pathname);
 		await expect(invitationRows(page, roleCycleEmail)).toHaveCount(1);
