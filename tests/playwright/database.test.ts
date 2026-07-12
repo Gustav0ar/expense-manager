@@ -8,6 +8,7 @@ import {
 	playwrightDatabaseExists,
 	type PlaywrightDatabaseDescriptor
 } from './database';
+import { configurePlaywrightDatabase } from './config';
 
 const created: PlaywrightDatabaseDescriptor[] = [];
 
@@ -32,6 +33,31 @@ describe.sequential('Playwright isolated databases', () => {
 		expect(first.databaseName.length).toBeLessThanOrEqual(63);
 		expect(new URL(first.databaseUrl).host).toBe(new URL(baseUrl).host);
 		expect(new URL(first.databaseUrl).username).toBe(new URL(baseUrl).username);
+	});
+
+	it('reuses one descriptor when Playwright evaluates its config more than once', () => {
+		const original = {
+			baseUrl: process.env.PLAYWRIGHT_BASE_DATABASE_URL,
+			databaseName: process.env.PLAYWRIGHT_DATABASE_NAME,
+			databaseUrl: process.env.DATABASE_URL
+		};
+		try {
+			delete process.env.PLAYWRIGHT_BASE_DATABASE_URL;
+			delete process.env.PLAYWRIGHT_DATABASE_NAME;
+			process.env.DATABASE_URL = original.databaseUrl;
+
+			const first = configurePlaywrightDatabase('reload');
+			const databaseName = process.env.PLAYWRIGHT_DATABASE_NAME;
+			const second = configurePlaywrightDatabase('reload');
+
+			expect(databaseName).toBeTruthy();
+			expect(second.databaseUrl).toBe(first.databaseUrl);
+			expect(process.env.PLAYWRIGHT_DATABASE_NAME).toBe(databaseName);
+		} finally {
+			setOptionalEnvironment('PLAYWRIGHT_BASE_DATABASE_URL', original.baseUrl);
+			setOptionalEnvironment('PLAYWRIGHT_DATABASE_NAME', original.databaseName);
+			setOptionalEnvironment('DATABASE_URL', original.databaseUrl);
+		}
 	});
 
 	it('rejects development, production and mismatched drop targets', () => {
@@ -71,6 +97,11 @@ describe.sequential('Playwright isolated databases', () => {
 		).resolves.toEqual([false, false]);
 	});
 });
+
+function setOptionalEnvironment(name: string, value: string | undefined) {
+	if (value === undefined) delete process.env[name];
+	else process.env[name] = value;
+}
 
 function requiredDatabaseUrl() {
 	const databaseUrl = process.env.DATABASE_URL;

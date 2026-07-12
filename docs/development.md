@@ -82,6 +82,8 @@ database. Concurrent suites receive different names. The database role used by
 local and CI Playwright runs must have `CREATEDB`; setup fails before tests with
 an explicit error when it does not. External `SMOKE_BASE_URL` runs do not create
 or drop any database because they target an already deployed environment.
+Repeated Playwright config evaluation reuses the same validated descriptor so
+workers and global setup cannot diverge onto different database names.
 
 Functional browser suites raise only the shared-IP authentication limit so many
 parallel registrations from localhost do not exhaust the production NAT guard.
