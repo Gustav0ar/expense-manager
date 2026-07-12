@@ -1,5 +1,5 @@
 import { defineConfig } from '@playwright/test';
-import { configurePlaywrightDatabase } from './tests/playwright/config';
+import { configurePlaywrightDatabase, previewCommand } from './tests/playwright/config';
 
 const database = configurePlaywrightDatabase('registration');
 
@@ -7,10 +7,12 @@ export default defineConfig({
 	...database.lifecycle,
 	workers: 1,
 	use: {
-		baseURL: 'http://localhost:4174'
+		baseURL: 'http://localhost:4174',
+		screenshot: 'only-on-failure',
+		trace: 'retain-on-failure'
 	},
 	webServer: {
-		command: 'pnpm build && pnpm preview --host 0.0.0.0 --port 4174',
+		command: previewCommand(' --host 0.0.0.0 --port 4174'),
 		env: {
 			ALLOW_REGISTRATION: 'false',
 			BETTER_AUTH_RATE_LIMIT_MAX: '1000',

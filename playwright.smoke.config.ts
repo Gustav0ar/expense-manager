@@ -1,5 +1,5 @@
 import { defineConfig } from '@playwright/test';
-import { configurePlaywrightDatabase } from './tests/playwright/config';
+import { configurePlaywrightDatabase, previewCommand } from './tests/playwright/config';
 
 const smokeBaseURL = process.env.SMOKE_BASE_URL?.replace(/\/$/, '') ?? 'http://localhost:4173';
 const isExternalSmoke = Boolean(process.env.SMOKE_BASE_URL);
@@ -19,7 +19,7 @@ export default defineConfig({
 	webServer: isExternalSmoke
 		? undefined
 		: {
-				command: 'pnpm build && pnpm preview',
+				command: previewCommand(),
 				env: {
 					DATABASE_URL: database.databaseUrl!,
 					EMAIL_DELIVERY: 'log',

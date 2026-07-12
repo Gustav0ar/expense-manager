@@ -1,5 +1,5 @@
 import { defineConfig } from '@playwright/test';
-import { configurePlaywrightDatabase } from './tests/playwright/config';
+import { configurePlaywrightDatabase, previewCommand } from './tests/playwright/config';
 
 const database = configurePlaywrightDatabase('performance');
 
@@ -15,7 +15,7 @@ export default defineConfig({
 		timezoneId: 'UTC'
 	},
 	webServer: {
-		command: 'pnpm build && pnpm preview',
+		command: previewCommand(),
 		env: {
 			DATABASE_URL: database.databaseUrl!,
 			EMAIL_DELIVERY: 'log',

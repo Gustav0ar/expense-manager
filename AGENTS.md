@@ -44,6 +44,7 @@ $COMPOSE --file .devcontainer/compose.yml exec app sh -c "cd /workspaces/expense
 | Unit tests             | `pnpm test:unit`                                                     |
 | E2E tests              | `pnpm exec playwright test src/routes/<file>.e2e.ts --timeout=60000` |
 | All E2E                | `pnpm test:e2e`                                                      |
+| Query-plan gate        | `pnpm test:query-plans`                                              |
 | Type check             | `pnpm check`                                                         |
 
 ### Working with worktrees
@@ -70,13 +71,13 @@ Do **not** set these manually when running inside the container — they are alr
 
 ### Playwright / E2E
 
-Playwright chromium is pre-installed in the container at `/home/node/.cache/ms-playwright/`. The `playwright.config.ts` builds the app and starts `pnpm preview` on port 4173 automatically before running tests — no manual server start needed.
+Playwright chromium is pre-installed in the container at `/home/node/.cache/ms-playwright/`. A direct `playwright test` command builds the app and starts `pnpm preview` automatically. `pnpm test:e2e` builds once and reuses that artifact across the normal, registration-lockdown and email-verification runtime modes. `pnpm verify` and CI reuse the production build they already created. No manual server start is needed.
 
 The `postCreateCommand` in `devcontainer.json` runs `pnpm install`, `playwright install chromium`, and `pnpm db:migrate` automatically on container creation.
 
-**Known pre-existing E2E failure:** `settings.e2e.ts` › `covers security MFA setup…` fails on HEAD due to a timing issue with `'MFA ativado.'` text — not caused by our changes.
-
 Functional Playwright specs are intentionally colocated with routes as `src/routes/*.e2e.ts`. Runtime-specific registration and email-verification specs also live under `src/routes/`, while visual, performance, infrastructure and smoke specs live under `tests/quality/`. See `docs/development.md` for the configuration-to-suite map.
+
+Functional suites retain a Playwright trace and screenshot on failure. CI uploads `playwright-report/` and `test-results/` for seven days; inspect those artifacts before trying to reproduce a CI-only failure.
 
 ### When a test fails after UI changes
 

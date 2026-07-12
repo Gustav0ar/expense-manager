@@ -1,5 +1,5 @@
 import { defineConfig } from '@playwright/test';
-import { configurePlaywrightDatabase } from './tests/playwright/config';
+import { configurePlaywrightDatabase, previewCommand } from './tests/playwright/config';
 
 const database = configurePlaywrightDatabase('visual');
 
@@ -23,7 +23,7 @@ export default defineConfig({
 		viewport: { width: 1280, height: 900 }
 	},
 	webServer: {
-		command: 'pnpm build && pnpm preview',
+		command: previewCommand(),
 		env: {
 			DATABASE_URL: database.databaseUrl!,
 			EMAIL_DELIVERY: 'log',
