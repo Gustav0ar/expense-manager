@@ -565,6 +565,29 @@ test('exports grouped and analytical CSV with every group option', async ({ page
 	expect(analyticalText).toContain('"Aprovada"');
 	expect(analyticalText).toContain('"Paga"');
 	expect(analyticalText).not.toContain('Relatório obra junho');
+
+	await expect(page.getByRole('link', { name: 'CSV do relatório' })).toBeVisible();
+	await expect(page.getByRole('link', { name: 'CSV portável' })).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Modelo CSV' })).toBeVisible();
+	const portableCsv = await page.request.get(`/app/reports/portable.csv${filteredUrl.search}`);
+	await expect(portableCsv).toBeOK();
+	const portableText = await portableCsv.text();
+	expect(portableText).toContain('# expense-manager-expenses:v1');
+	expect(portableText).toContain(
+		'date,description,amount,category,payment_method,vendor,cost_center,notes'
+	);
+	expect(portableText).toContain('"Relatório admin julho"');
+	expect(portableText).toContain('250.00');
+	expect(portableText).toContain('"Administrativo"');
+	expect(portableText).not.toContain('💼 Administrativo');
+	expect(portableText).not.toContain('Aprovada');
+	expect(portableText).not.toContain('Paga');
+
+	const portableTemplate = await page.request.get('/app/reports/portable-template.csv');
+	await expect(portableTemplate).toBeOK();
+	expect(await portableTemplate.text()).toBe(
+		'# expense-manager-expenses:v1\ndate,description,amount,category,payment_method,vendor,cost_center,notes\n'
+	);
 });
 
 test('rejects invalid report filters on page and CSV export', async ({ page }) => {
@@ -584,5 +607,6 @@ test('rejects invalid report filters on page and CSV export', async ({ page }) =
 	]) {
 		expect((await page.request.get(`/app/reports?${query}`)).status()).toBe(400);
 		expect((await page.request.get(`/app/reports/export.csv?${query}`)).status()).toBe(400);
+		expect((await page.request.get(`/app/reports/portable.csv?${query}`)).status()).toBe(400);
 	}
 });

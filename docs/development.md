@@ -203,6 +203,32 @@ file. The transaction and reserved connection are released when the stream
 finishes, fails or is cancelled. Operators should investigate slow or abandoned
 downloads because a long-running snapshot can delay PostgreSQL vacuum cleanup.
 
+### Portable expense CSV contract
+
+The portable expense CSV is a separate interchange format from the analytical
+report. Version 1 starts with `# expense-manager-expenses:v1`, followed by the
+canonical import columns `date`, `description`, `amount`, `category`,
+`payment_method`, `vendor`, `cost_center` and `notes`. Amounts are decimal major
+currency units, while category and support-catalog values are their raw names;
+localized analytical labels, category icons and cent values never belong in
+this format.
+
+`/app/reports/portable.csv` applies the current report filters and refuses more
+than 500 expenses or a result above 1 MB, matching both import preview limits.
+Narrow the date or catalog filters and create multiple files for larger
+transfers. The versioned parser reverses the format's spreadsheet-formula
+protection, including literal leading apostrophes, so an untouched export can be
+imported without changing those fields. `/app/reports/portable-template.csv`
+provides the marker and header with no example expense that could be imported
+accidentally.
+
+This format recreates the fields accepted by expense import. It is not a backup
+and intentionally does not preserve database IDs, attachments, competency,
+installments, audit history, review state, payment state or reconciliation state.
+Use the database and attachment backup workflow for disaster recovery. Existing
+unversioned CSV imports remain supported; reject unknown portable versions rather
+than guessing their meaning.
+
 ### CSS ownership
 
 `src/routes/layout.css` contains application-wide primitives and styles shared by multiple routes. Expense-page, support-catalog, attachment and bulk-review rules live in `src/routes/(protected)/app/expenses/expenses.css`, which is imported by the expense page and emitted as a route-only CSS asset. Add new expense-specific responsive rules there instead of growing the global stylesheet.

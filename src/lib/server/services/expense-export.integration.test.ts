@@ -10,7 +10,9 @@ import {
 	workspace,
 	workspaceMember
 } from '$lib/server/db/schema';
+import { serializePortableExpenseCsv } from '$lib/server/utils/import';
 import { streamAnalyticalExpenseReport } from './expenses';
+import { confirmImportPreview, previewImportExpenses } from './imports';
 import type { WorkspaceContext } from './workspaces';
 
 const workspaceIds: number[] = [];
@@ -99,6 +101,72 @@ describe('analytical expense export streaming', () => {
 		} finally {
 			await iterator.return?.(undefined);
 		}
+	});
+
+	it('exports a portable CSV that the import workflow recreates without analytical labels', async () => {
+		const source = await createFixture();
+		await db.insert(expense).values({
+			workspaceId: source.context.workspaceId,
+			categoryId: source.categoryId,
+			createdByUserId: source.context.userId,
+			description: '=Portable expense',
+			amountCents: 12_540,
+			currency: source.context.currency,
+			expenseDate: '2026-06-25',
+			paymentMethod: 'Corporate card',
+			vendor: "'@Vendor literal",
+			costCenter: 'Operations',
+			notes: 'Raw portable notes'
+		});
+		const exported = [];
+		for await (const batch of streamAnalyticalExpenseReport(source.context, {
+			from: '2026-01-01',
+			to: '2026-12-31'
+		})) {
+			exported.push(...batch);
+		}
+		const csv = serializePortableExpenseCsv(
+			exported.map((row) => ({
+				expenseDate: row.expenseDate,
+				description: row.description,
+				amountCents: row.amountCents,
+				categoryName: row.categoryName,
+				paymentMethod: row.paymentMethod,
+				vendor: row.vendor,
+				costCenter: row.costCenter,
+				notes: row.notes
+			}))
+		);
+
+		const target = await createFixture();
+		const preview = await previewImportExpenses(target.context, {
+			sourceType: 'csv',
+			file: new File([csv], 'expense-manager-portable-v1.csv', { type: 'text/csv' })
+		});
+		expect(preview).toMatchObject({ proposedCount: 1, duplicateCount: 0, failedCount: 0 });
+		await confirmImportPreview(target.context, {
+			previewId: preview.previewId,
+			sourceChecksum: preview.sourceChecksum
+		});
+
+		const imported = [];
+		for await (const batch of streamAnalyticalExpenseReport(target.context, {
+			from: '2026-01-01',
+			to: '2026-12-31'
+		})) {
+			imported.push(...batch);
+		}
+		expect(imported).toHaveLength(1);
+		expect(imported[0]).toMatchObject({
+			expenseDate: '2026-06-25',
+			description: '=Portable expense',
+			amountCents: 12_540,
+			categoryName: 'Export category',
+			paymentMethod: 'Corporate card',
+			vendor: "'@Vendor literal",
+			costCenter: 'Operations',
+			notes: 'Raw portable notes'
+		});
 	});
 });
 

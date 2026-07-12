@@ -30,7 +30,7 @@ Self-hosted web system for managing expenses, categories, users, dashboards, rep
 - Streaming upload and download for attachments
 - Dashboard by period
 - Reports by category, week, month, year and payment
-- Analytical expense report with CSV export
+- Analytical expense report with complete streaming CSV and a separate versioned, import-compatible CSV
 - Email invitations
 - MFA/TOTP with recovery codes
 - Audit trail for main operations with a dedicated screen

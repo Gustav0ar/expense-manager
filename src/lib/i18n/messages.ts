@@ -97,6 +97,7 @@ export const ptBrMessages = {
 	'Create rule': 'Criar regra',
 	'Create workspace': 'Criar workspace',
 	CSV: 'CSV',
+	'CSV template': 'Modelo CSV',
 	Current: 'Atual',
 	'Current code': 'Código atual',
 	'Current usage for {period}': 'Uso atual em {period}',
@@ -120,6 +121,9 @@ export const ptBrMessages = {
 	'Distribution by category': 'Distribuição por categoria',
 	Done: 'Concluído',
 	Download: 'Download',
+	'Download a versioned CSV that can be imported again (up to {count} expenses and 1 MB).':
+		'Baixe um CSV versionado que pode ser importado novamente (até {count} despesas e 1 MB).',
+	'Download the versioned import template.': 'Baixe o modelo versionado de importação.',
 	Edit: 'Editar',
 	Email: 'Email',
 	'Email delivery': 'Envio de email',
@@ -266,6 +270,7 @@ export const ptBrMessages = {
 	Period: 'Período',
 	Planning: 'Planejamento',
 	'Planning short': 'Plano',
+	'Portable CSV': 'CSV portável',
 	'Portuguese (Brazil)': 'Português (Brasil)',
 	Previous: 'Anterior',
 	'Previous page': 'Página anterior',
@@ -287,6 +292,7 @@ export const ptBrMessages = {
 	Reject: 'Rejeitar',
 	Remove: 'Remover',
 	'Remove budget': 'Remover orçamento',
+	'Report CSV': 'CSV do relatório',
 	Reports: 'Relatórios',
 	'Reports short': 'Rel.',
 	Recipients: 'Destinatários',
@@ -572,6 +578,11 @@ export const ptBrMessages = {
 	'CSV file is empty.': 'Arquivo CSV vazio.',
 	'CSV must contain date, description and amount columns.':
 		'CSV precisa conter colunas de data, descrição e valor.',
+	'Portable CSV exceeds the 1 MB import file limit. Narrow the report filters and try again.':
+		'O CSV portável excede o limite de 1 MB para importação. Restrinja os filtros do relatório e tente novamente.',
+	'Portable CSV export supports at most {count} expenses. Narrow the report filters and try again.':
+		'A exportação de CSV portável permite no máximo {count} despesas. Restrinja os filtros do relatório e tente novamente.',
+	'Portable CSV version is not supported.': 'A versão do CSV portável não é compatível.',
 	'Line {rowNumber}: date, description or amount is invalid.':
 		'Linha {rowNumber}: data, descrição ou valor inválido.',
 	'No OFX transaction found.': 'Nenhum lançamento OFX encontrado.',
