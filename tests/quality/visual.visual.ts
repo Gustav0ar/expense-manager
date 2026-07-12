@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 import { registerAndCreateWorkspace } from '../playwright/fixtures';
 
 async function registerAndSeed(page: Page) {
@@ -61,7 +62,21 @@ async function stabilize(page: Page) {
 
 async function capture(page: Page, locator: Locator, name: string) {
 	await stabilize(page);
+	await expectA11y(page, name);
 	await expect(locator).toHaveScreenshot(name);
+}
+
+async function expectA11y(page: Page, surface: string) {
+	const results = await new AxeBuilder({ page })
+		.withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+		.analyze();
+	const violations = results.violations.map(({ id, impact, help, nodes }) => ({
+		id,
+		impact,
+		help,
+		nodes: nodes.map(({ html, target, failureSummary }) => ({ html, target, failureSummary }))
+	}));
+	expect(violations, `${surface} has WCAG A/AA violations`).toEqual([]);
 }
 
 test('captures stable desktop and mobile app surfaces', async ({ page }) => {
@@ -148,9 +163,17 @@ test('captures stable desktop and mobile app surfaces', async ({ page }) => {
 	await capture(page, notificationCenter, 'budget-notifications-mobile.png');
 
 	await page.setViewportSize({ width: 1280, height: 900 });
-	await page.goto('/app/expenses?q=Visual%20expense');
-	await expenseRow(page, 'Visual expense')
-		.getByRole('button', { name: 'Delete Visual expense' })
+	await page.goto('/app/expenses');
+	const trashExpenseForm = page.locator('form.expense-create-form');
+	await trashExpenseForm.getByLabel('Description').fill('Trash visual expense');
+	await trashExpenseForm.getByLabel('Installment amount').fill('25.00');
+	await trashExpenseForm.getByLabel('Date', { exact: true }).fill('2026-06-28');
+	await trashExpenseForm.getByLabel('Category').selectOption({ label: '🧰 Operations' });
+	await trashExpenseForm.getByRole('button', { name: 'Add' }).click();
+	await expect(expenseRow(page, 'Trash visual expense')).toBeVisible();
+	await page.goto('/app/expenses?q=Trash%20visual%20expense');
+	await expenseRow(page, 'Trash visual expense')
+		.getByRole('button', { name: 'Delete Trash visual expense' })
 		.click();
 	await page
 		.getByRole('dialog', { name: 'Delete expense?' })
@@ -163,4 +186,16 @@ test('captures stable desktop and mobile app surfaces', async ({ page }) => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390);
 	await capture(page, trashPage, 'expense-trash-mobile.png');
+
+	await page.emulateMedia({ colorScheme: 'light' });
+	await page.setViewportSize({ width: 1280, height: 900 });
+	await page.goto('/app/settings/audit');
+	await expect(page.getByRole('heading', { name: 'Audit' })).toBeVisible();
+	await page.addStyleTag({
+		content: 'main tbody td:first-child { color: transparent !important; }'
+	});
+	await capture(page, page.locator('.app-shell'), 'audit-light-desktop.png');
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390);
+	await capture(page, page.locator('.app-shell'), 'audit-light-mobile.png');
 });

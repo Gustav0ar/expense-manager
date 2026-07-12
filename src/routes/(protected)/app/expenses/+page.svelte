@@ -536,7 +536,7 @@
 		{:else}
 			<div
 				class={['expense-table', data.permissions.canReview && 'with-select']}
-				role="table"
+				role="treegrid"
 				aria-label={t('Expenses registered')}
 				aria-colcount={data.permissions.canReview ? 8 : 7}
 			>
@@ -582,12 +582,13 @@
 							<summary
 								class="expense-table-row"
 								role="row"
+								aria-level="1"
 								aria-expanded={expandedExpenseIds.has(expense.id)}
 							>
 								{#if data.permissions.canReview && expense.reviewStatus === 'pending'}
 									<span
 										class={['expense-select-label', selectedIds.has(expense.id) && 'selected']}
-										role="cell"
+										role="gridcell"
 										aria-colindex="1"
 										tabindex="-1"
 										onclick={(event) => {
@@ -622,20 +623,20 @@
 										<span class="expense-select-text">{t('Review')}</span>
 									</span>
 								{:else if data.permissions.canReview}
-									<span class="expense-select-placeholder" role="cell" aria-colindex="1">
+									<span class="expense-select-placeholder" role="gridcell" aria-colindex="1">
 										<span class="sr-only">{reviewLabel(expense.reviewStatus, t)}</span>
 									</span>
 								{/if}
 								<span
 									class="expense-table-date"
-									role="cell"
+									role="gridcell"
 									aria-colindex={data.permissions.canReview ? 2 : 1}
 								>
 									<LocalizedDate value={expense.expenseDate} />
 								</span>
 								<span
 									class="expense-table-description"
-									role="cell"
+									role="gridcell"
 									aria-colindex={data.permissions.canReview ? 3 : 2}
 								>
 									<strong>{expense.description}</strong>
@@ -654,7 +655,7 @@
 								</span>
 								<span
 									class="expense-category expense-table-category"
-									role="cell"
+									role="gridcell"
 									aria-colindex={data.permissions.canReview ? 4 : 3}
 									style={`--category-color:${expense.categoryColor}`}
 								>
@@ -663,7 +664,7 @@
 								</span>
 								<span
 									class="expense-table-muted expense-table-payment"
-									role="cell"
+									role="gridcell"
 									aria-colindex={data.permissions.canReview ? 5 : 4}
 								>
 									{expense.paymentMethod || '-'}
@@ -673,7 +674,7 @@
 								</span>
 								<span
 									class="expense-table-muted expense-table-note"
-									role="cell"
+									role="gridcell"
 									aria-colindex={data.permissions.canReview ? 6 : 5}
 								>
 									{expense.vendor || expense.costCenter || expense.notes || '-'}
@@ -685,13 +686,13 @@
 								</span>
 								<span
 									class="expense-table-amount"
-									role="cell"
+									role="gridcell"
 									aria-colindex={data.permissions.canReview ? 7 : 6}
 									>{money(expense.amountCents)}</span
 								>
 								<span
 									class="expense-table-action"
-									role="cell"
+									role="gridcell"
 									aria-colindex={data.permissions.canReview ? 8 : 7}
 								>
 									<ChevronDown size={15} />
@@ -712,10 +713,10 @@
 							</summary>
 
 							{#if hasPreparedExpenseDetails(expense.id)}
-								<div class="expense-details-body" role="row">
+								<div class="expense-details-body" role="row" aria-level="2">
 									<div
 										class="expense-details-cell"
-										role="cell"
+										role="gridcell"
 										aria-colindex="1"
 										aria-colspan={data.permissions.canReview ? 8 : 7}
 									>

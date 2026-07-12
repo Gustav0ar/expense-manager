@@ -3,6 +3,9 @@ import { configurePlaywrightDatabase, previewCommand } from './tests/playwright/
 
 const database = configurePlaywrightDatabase('visual');
 
+const port = Number(process.env.PLAYWRIGHT_PORT ?? 4173);
+const baseURL = `http://localhost:${port}`;
+
 export default defineConfig({
 	...database.lifecycle,
 	testDir: './tests/quality',
@@ -16,19 +19,19 @@ export default defineConfig({
 		}
 	},
 	use: {
-		baseURL: 'http://localhost:4173',
+		baseURL,
 		colorScheme: 'dark',
 		locale: 'en-US',
 		timezoneId: 'UTC',
 		viewport: { width: 1280, height: 900 }
 	},
 	webServer: {
-		command: previewCommand(),
+		command: previewCommand(` --port ${port}`),
 		env: {
 			DATABASE_URL: database.databaseUrl!,
 			EMAIL_DELIVERY: 'log',
-			ORIGIN: 'http://localhost:4173'
+			ORIGIN: baseURL
 		},
-		port: 4173
+		port
 	}
 });

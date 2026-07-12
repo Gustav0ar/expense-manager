@@ -850,7 +850,7 @@ test('exposes keyboard tabs and expense table relationships', async ({ page }) =
 		category: '🧰 Operacional'
 	});
 
-	const table = page.getByRole('table', { name: 'Despesas lançadas' });
+	const table = page.getByRole('treegrid', { name: 'Despesas lançadas' });
 	await expect(table).toBeVisible();
 	for (const heading of [
 		'Revisão',
@@ -867,11 +867,11 @@ test('exposes keyboard tabs and expense table relationships', async ({ page }) =
 
 	const expenseTableRow = table.getByRole('row').filter({ hasText: 'Linha acessível' });
 	await expect(expenseTableRow).toHaveAttribute('aria-expanded', 'false');
-	await expect(expenseTableRow.getByRole('cell')).toHaveCount(8);
+	await expect(expenseTableRow.getByRole('gridcell')).toHaveCount(8);
 	await expenseTableRow.focus();
 	await expenseTableRow.press('Enter');
 	await expect(expenseTableRow).toHaveAttribute('aria-expanded', 'true');
-	await expect(table.locator('.expense-details-cell[role="cell"]')).toBeVisible();
+	await expect(table.locator('.expense-details-cell[role="gridcell"]')).toBeVisible();
 });
 
 test('validates support catalog errors, search and pagination', async ({ page }) => {
