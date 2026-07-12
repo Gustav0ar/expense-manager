@@ -126,12 +126,12 @@ orders otherwise eligible candidates and is always shown as an explanation.
 CURDEF is normalized and stored with each row. A statement currency that does
 not match the workspace remains visible but can only be ignored; it cannot
 match or create an expense. Legacy OFX files with no CURDEF are accepted for
-compatibility and use the workspace currency, so operators should verify such
-files before confirming. Without FITID, identical date/amount/text rows are
-distinguished by their occurrence within one file. A truly new, identical row
-in a later no-FITID statement can therefore be treated as a re-upload; this is
-an unavoidable conservative false-positive until the provider supplies stable
-transaction identifiers.
+compatibility and snapshot the current workspace currency when staged, so
+operators should verify such files before confirming. Without FITID, identical
+date/amount/text rows are distinguished by their occurrence within one file. A
+truly new, identical row in a later no-FITID statement can therefore be treated
+as a re-upload; this is an unavoidable conservative false-positive until the
+provider supplies stable transaction identifiers.
 
 Suggestions are read-only. Only admins and owners can confirm match, create or
 ignore decisions. Confirmation locks the staged transaction and candidate
@@ -151,6 +151,24 @@ that already belongs to an active member, while acceptance repeats the
 membership check under a row lock so legacy or concurrently accepted links
 cannot bypass the invariant. Use the dedicated member-role action for active
 members.
+
+### Workspace currency contracts
+
+A workspace currency can change only while no currency-dependent state exists.
+The guard includes every expense (live or in the 30-day trash), recurring
+schedule, budget, unexpired import preview and pending legacy bank transaction
+that predates currency snapshots. Explicit-currency bank rows remain valid
+history and do not block a change: after a change, mismatched pending rows can
+only be ignored.
+
+Currency changes and all application paths that create expenses, recurring
+schedules, budgets, import previews or staged bank transactions share one
+transaction-scoped advisory lock per workspace. Writers read the current
+currency after taking that lock instead of trusting a request-cached value.
+This makes either concurrency order safe: an existing/new monetary artifact
+blocks the change, while a writer queued behind a successful change persists
+the new currency. Do not bypass these service transactions when adding a new
+monetary write path.
 
 ### CSS ownership
 

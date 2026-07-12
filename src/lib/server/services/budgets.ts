@@ -25,6 +25,7 @@ import { formatCents } from '$lib/utils/format';
 import { assertCategoryInWorkspace } from '$lib/server/utils/category';
 import { isSupportedLocale, translate, type SupportedLocale } from '$lib/i18n';
 import type { WorkspaceContext } from './workspaces';
+import { lockWorkspaceCurrency } from './workspace-currency';
 import { insertAuditEvent, writeAuditEvent } from './audit';
 
 export type BudgetInput = {
@@ -327,6 +328,7 @@ export async function upsertBudget(context: WorkspaceContext, input: BudgetInput
 	const amountCents = parseCurrencyToCents(input.amount);
 
 	return db.transaction(async (tx) => {
+		await lockWorkspaceCurrency(tx, context.workspaceId);
 		const [saved] = await tx
 			.insert(categoryBudget)
 			.values({

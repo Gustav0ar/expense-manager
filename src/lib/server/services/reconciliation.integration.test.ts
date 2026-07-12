@@ -226,7 +226,7 @@ describe.sequential('OFX reconciliation integration', () => {
 			)
 		);
 		const [transaction] = await listReconciliationQueue(fixture.context);
-		expect(transaction).toMatchObject({ sourceCurrency: null, currencyMismatch: false });
+		expect(transaction).toMatchObject({ sourceCurrency: 'BRL', currencyMismatch: false });
 		await expect(
 			decideBankTransaction(fixture.context, {
 				transactionId: transaction.id,

@@ -698,8 +698,8 @@ export const ptBrMessages = {
 	'Select {description}': 'Selecionar {description}',
 	'You cannot change your own role.': 'Você não pode alterar seu próprio papel.',
 	'You cannot remove yourself.': 'Você não pode remover a si mesmo.',
-	'Cannot change currency: this workspace has {count} live or retained expense(s). Remove them permanently first.':
-		'Não é possível alterar a moeda: este workspace tem {count} despesa(s) ativa(s) ou retida(s). Remova-as permanentemente primeiro.',
+	'Cannot change currency while this workspace has monetary records. Remove or finish them first.':
+		'Não é possível alterar a moeda enquanto este workspace tiver registros monetários. Remova-os ou conclua-os primeiro.',
 	'Bank ledger': 'Livro bancário',
 	'Bank transaction ignored.': 'Lançamento bancário ignorado.',
 	'Bank transaction currency does not match the workspace currency.':

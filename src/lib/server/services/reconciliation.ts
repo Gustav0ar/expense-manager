@@ -8,6 +8,7 @@ import { canReconcileExpenses } from '$lib/server/security/roles';
 import { sha256 } from '$lib/server/utils/crypto';
 import { insertImportedExpenseRows } from './imports';
 import type { WorkspaceContext } from './workspaces';
+import { lockWorkspaceCurrency } from './workspace-currency';
 
 const maxOfxBytes = 1024 * 1024;
 const maxOfxRows = 500;
@@ -126,6 +127,7 @@ export async function stageOfxTransactions(context: WorkspaceContext, file: File
 	const sourceChecksum = sha256(content);
 	const fileName = file.name.slice(0, 180) || 'statement.ofx';
 	return db.transaction(async (tx) => {
+		const currentCurrency = await lockWorkspaceCurrency(tx, context.workspaceId);
 		const inserted =
 			parsed.transactions.length === 0
 				? []
@@ -138,7 +140,7 @@ export async function stageOfxTransactions(context: WorkspaceContext, file: File
 								sourceAccountFingerprint: parsed.sourceAccountFingerprint,
 								sourceIdentity: row.sourceIdentity,
 								sourceChecksum,
-								sourceCurrency: parsed.sourceCurrency,
+								sourceCurrency: parsed.sourceCurrency ?? currentCurrency,
 								providerTransactionId: row.providerTransactionId,
 								fileName,
 								postedDate: row.postedDate,
@@ -275,6 +277,8 @@ export async function decideBankTransaction(
 	assertReconciler(context);
 	const now = options.now ?? new Date();
 	return db.transaction(async (tx) => {
+		const currentCurrency = await lockWorkspaceCurrency(tx, context.workspaceId);
+		const currentContext = { ...context, currency: currentCurrency };
 		const [transaction] = await tx
 			.select()
 			.from(bankTransaction)
@@ -302,7 +306,7 @@ export async function decideBankTransaction(
 			throw error(400, translate(context.locale, 'Credit transactions can only be ignored.'));
 		if (
 			transaction.sourceCurrency !== null &&
-			transaction.sourceCurrency !== context.currency &&
+			transaction.sourceCurrency !== currentCurrency &&
 			input.decision !== 'ignore'
 		)
 			throw error(
@@ -385,7 +389,7 @@ export async function decideBankTransaction(
 					createdAt: now
 				})
 				.returning({ id: importBatch.id });
-			const [created] = await insertImportedExpenseRows(tx, context, {
+			const [created] = await insertImportedExpenseRows(tx, currentContext, {
 				rows: [
 					{
 						sourceRowId: `bank:${transaction.id}`,

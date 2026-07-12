@@ -44,6 +44,7 @@ import {
 	type ImportExpenseIdentity
 } from './import-batching';
 import type { WorkspaceContext } from './workspaces';
+import { lockWorkspaceCurrency } from './workspace-currency';
 
 const maxImportBytes = 1 * 1024 * 1024;
 const maxImportRows = 500;
@@ -264,20 +265,24 @@ export async function previewImportExpenses(
 	});
 	const now = options.now ?? new Date();
 	const sourceChecksum = sha256(content);
-	const [preview] = await db
-		.insert(importPreview)
-		.values({
-			workspaceId: context.workspaceId,
-			uploadedByUserId: context.userId,
-			sourceType: input.sourceType,
-			fileName: input.file.name.slice(0, 180) || `import.${input.sourceType}`,
-			sourceChecksum,
-			rowCount: parsed.rows.length + parsed.errors.length,
-			analysis,
-			expiresAt: new Date(now.getTime() + importPreviewTtlMs),
-			createdAt: now
-		})
-		.returning({ id: importPreview.id, expiresAt: importPreview.expiresAt });
+	const preview = await db.transaction(async (tx) => {
+		await lockWorkspaceCurrency(tx, context.workspaceId);
+		const [created] = await tx
+			.insert(importPreview)
+			.values({
+				workspaceId: context.workspaceId,
+				uploadedByUserId: context.userId,
+				sourceType: input.sourceType,
+				fileName: input.file.name.slice(0, 180) || `import.${input.sourceType}`,
+				sourceChecksum,
+				rowCount: parsed.rows.length + parsed.errors.length,
+				analysis,
+				expiresAt: new Date(now.getTime() + importPreviewTtlMs),
+				createdAt: now
+			})
+			.returning({ id: importPreview.id, expiresAt: importPreview.expiresAt });
+		return created;
+	});
 
 	return {
 		previewId: preview.id,
@@ -303,6 +308,8 @@ export async function confirmImportPreview(
 
 	return db.transaction(async (tx) => {
 		await lockWorkspaceImport(tx, context.workspaceId);
+		const currentCurrency = await lockWorkspaceCurrency(tx, context.workspaceId);
+		const currentContext = { ...context, currency: currentCurrency };
 		const [preview] = await tx
 			.select()
 			.from(importPreview)
@@ -379,7 +386,7 @@ export async function confirmImportPreview(
 			})
 			.returning({ id: importBatch.id });
 
-		await insertImportedExpenseRows(tx, context, {
+		await insertImportedExpenseRows(tx, currentContext, {
 			rows: acceptedRows,
 			batchId: batch.id,
 			now,
