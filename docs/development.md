@@ -142,6 +142,16 @@ The ledger-to-expense foreign key uses `ON DELETE SET NULL`: ordinary soft
 deletion preserves the link, while a later retention purge may remove the
 expense without erasing the decided bank ledger row or its audit history.
 
+### Invitation membership contracts
+
+Invitations add new members or explicitly reactivate disabled non-owner
+memberships. They are never a role-change mechanism for an active member and
+must never overwrite an owner membership. Invitation creation rejects an email
+that already belongs to an active member, while acceptance repeats the
+membership check under a row lock so legacy or concurrently accepted links
+cannot bypass the invariant. Use the dedicated member-role action for active
+members.
+
 ### CSS ownership
 
 `src/routes/layout.css` contains application-wide primitives and styles shared by multiple routes. Expense-page, support-catalog, attachment and bulk-review rules live in `src/routes/(protected)/app/expenses/expenses.css`, which is imported by the expense page and emitted as a route-only CSS asset. Add new expense-specific responsive rules there instead of growing the global stylesheet.

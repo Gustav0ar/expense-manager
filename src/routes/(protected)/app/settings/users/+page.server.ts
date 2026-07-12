@@ -12,6 +12,7 @@ import {
 import { assignableRoleSchema, idSchema, inviteSchema, parseForm } from '$lib/server/validation';
 import { translate } from '$lib/i18n';
 import { canManageMembers } from '$lib/server/security/roles';
+import { handleServiceError } from '$lib/server/action-utils';
 
 export const load: PageServerLoad = async (event) => {
 	const context = await requireWorkspaceContext(event);
@@ -29,7 +30,12 @@ export const actions: Actions = {
 		if (!parsed.success)
 			return fail(400, { message: translate(event.locals.locale, 'Check email and role.') });
 
-		const result = await inviteMember(context, parsed.data);
+		let result: Awaited<ReturnType<typeof inviteMember>>;
+		try {
+			result = await inviteMember(context, parsed.data);
+		} catch (serviceError) {
+			return handleServiceError(serviceError, {}, { only409: true });
+		}
 		return {
 			inviteUrl: result.url,
 			inviteDeliveryStatus: result.deliveryStatus,

@@ -252,6 +252,29 @@ export async function inviteMember(
 	const origin = env.ORIGIN || 'http://localhost:5173';
 
 	const result = await db.transaction(async (tx) => {
+		const [existingMembership] = await tx
+			.select({
+				id: workspaceMember.id,
+				role: workspaceMember.role,
+				status: workspaceMember.status
+			})
+			.from(workspaceMember)
+			.innerJoin(authUser, eq(authUser.id, workspaceMember.userId))
+			.where(
+				and(
+					eq(workspaceMember.workspaceId, context.workspaceId),
+					sql`lower(${authUser.email}) = ${email}`
+				)
+			)
+			.limit(1)
+			.for('update');
+		if (existingMembership?.status === 'active' || existingMembership?.role === 'owner') {
+			throw error(
+				409,
+				translate(context.locale, 'This user is already an active workspace member.')
+			);
+		}
+
 		await tx.execute(sql`
 			with expired as (
 				update "workspace_invitation"
