@@ -84,9 +84,11 @@ import {
 } from './expense-catalogs';
 import {
 	confirmImportPreview,
+	confirmedImportPreviewRetentionMs,
 	importExpenses,
 	importPreviewTtlMs,
 	listImportBatches,
+	pruneExpiredImportPreviews,
 	previewImportExpenses,
 	undoImportBatch
 } from './imports';
@@ -344,6 +346,84 @@ describe('server service integration', () => {
 			.from(importPreview)
 			.where(eq(importPreview.id, preview.previewId));
 		expect(storedPreview).toEqual({ status: 'confirmed', batchId: first.importBatchId });
+	});
+
+	it('prunes expired import previews while retaining fresh and recently confirmed replay state', async () => {
+		const fixture = await createWorkspaceFixture();
+		const now = new Date('2026-07-13T12:00:00.000Z');
+		const makePreview = (description: string, createdAt: Date) =>
+			previewImportExpenses(
+				fixture.context,
+				{
+					sourceType: 'csv',
+					defaultCategoryId: fixture.categoryId,
+					file: new File(
+						[`date,description,amount\n2026-07-11,${description},10.00\n`],
+						`${description}.csv`,
+						{ type: 'text/csv' }
+					)
+				},
+				{ now: createdAt }
+			);
+		const expiredPending = await makePreview(
+			'Expired pending',
+			new Date(now.getTime() - importPreviewTtlMs - 1)
+		);
+		const freshPending = await makePreview('Fresh pending', now);
+		const oldConfirmed = await makePreview(
+			'Old confirmed',
+			new Date(now.getTime() - confirmedImportPreviewRetentionMs - importPreviewTtlMs - 1)
+		);
+		await confirmImportPreview(
+			fixture.context,
+			{ previewId: oldConfirmed.previewId, sourceChecksum: oldConfirmed.sourceChecksum },
+			{ now: new Date(oldConfirmed.expiresAt.getTime() - 1) }
+		);
+		const recentConfirmed = await makePreview('Recent confirmed', now);
+		await confirmImportPreview(
+			fixture.context,
+			{ previewId: recentConfirmed.previewId, sourceChecksum: recentConfirmed.sourceChecksum },
+			{ now }
+		);
+
+		const cleanup = await pruneExpiredImportPreviews(now);
+		expect(cleanup.deletedPreviews).toBeGreaterThanOrEqual(2);
+		const remaining = await db
+			.select({ id: importPreview.id })
+			.from(importPreview)
+			.where(
+				inArray(importPreview.id, [
+					expiredPending.previewId,
+					freshPending.previewId,
+					oldConfirmed.previewId,
+					recentConfirmed.previewId
+				])
+			);
+		expect(new Set(remaining.map((row) => row.id))).toEqual(
+			new Set([freshPending.previewId, recentConfirmed.previewId])
+		);
+	});
+
+	it('skips import preview cleanup while another instance owns its advisory lock', async () => {
+		const reserved = await client.reserve();
+		try {
+			await reserved`
+				select pg_advisory_lock(
+					hashtextextended('expense-manager:import-preview-cleanup:v1', 0)
+				)
+			`;
+			await expect(pruneExpiredImportPreviews()).resolves.toEqual({
+				deletedPreviews: 0,
+				skipped: true
+			});
+		} finally {
+			await reserved`
+				select pg_advisory_unlock(
+					hashtextextended('expense-manager:import-preview-cleanup:v1', 0)
+				)
+			`;
+			reserved.release();
+		}
 	});
 
 	it('undoes only unchanged unpaid rows and is scoped and repeat-safe', async () => {

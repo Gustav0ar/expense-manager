@@ -806,6 +806,7 @@ satisfy this fixture; record production-like `EXPLAIN` evidence before proposing
 
 `/api/health` reports the recurring-expense scheduler, automatic budget-alert
 scheduler, durable invitation-delivery scheduler, expense-trash purge, email-delivery event retention and expired-registration cleanup
+and expired import-preview cleanup
 under `backgroundJobs`. Each job
 exposes its attempt count, advisory-lock skip count, last
 attempt/completion/success/error timestamps, last duration, cumulative failed
