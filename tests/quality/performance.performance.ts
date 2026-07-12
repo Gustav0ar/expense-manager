@@ -26,10 +26,10 @@ const assetBudget: AssetBudget = {
 	// Touch-friendly planning navigation and the reviewed contrast fixes moved
 	// three clean builds to exactly 85,991 bytes. Keep 281 bytes of headroom.
 	totalCssBytes: 86_272,
-	// The portable export contract, exhaustive audit registry and planning workflow
-	// split moved three clean builds to 163,753-163,762 gzipped bytes. Keep 334 bytes
-	// above the observed maximum without changing per-asset or runtime limits.
-	totalGzipJsBytes: 164_096,
+	// Complete pt-BR message coverage and deferred expense-management data measured
+	// 164,383 gzipped JS bytes in a clean combined build. Keep 289 bytes of headroom
+	// without changing per-asset or runtime limits.
+	totalGzipJsBytes: 164_672,
 	// Complete pt-BR message coverage and deferred expense-management data measured
 	// 465,778 raw JS bytes in a clean combined build. Keep 270 bytes of headroom
 	// so unreviewed aggregate growth still fails this gate.
