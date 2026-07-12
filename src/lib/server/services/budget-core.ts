@@ -109,13 +109,13 @@ export async function getBudgetSummary(context: WorkspaceContext, periodMonth: s
 export async function upsertBudget(context: WorkspaceContext, input: BudgetInput) {
 	if (!canManageBudgets(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
-	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
 
 	const periodMonth = startOfMonth(input.periodMonth);
 	const amountCents = parseCurrencyToCents(input.amount);
 
 	return db.transaction(async (tx) => {
 		await lockWorkspaceCurrency(tx, context.workspaceId);
+		await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale, tx);
 		const [saved] = await tx
 			.insert(categoryBudget)
 			.values({

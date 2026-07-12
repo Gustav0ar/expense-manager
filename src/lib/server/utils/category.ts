@@ -1,25 +1,25 @@
 import { error } from '@sveltejs/kit';
-import { and, eq } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { category } from '$lib/server/db/schema';
 import { translate, type SupportedLocale } from '$lib/i18n';
+
+type CategoryExecutor = {
+	execute(query: SQL): PromiseLike<unknown>;
+};
 
 export async function assertCategoryInWorkspace(
 	workspaceId: number,
 	categoryId: number,
-	locale: SupportedLocale = 'en'
+	locale: SupportedLocale = 'en',
+	executor: CategoryExecutor = db
 ) {
-	const [row] = await db
-		.select({ id: category.id })
-		.from(category)
-		.where(
-			and(
-				eq(category.id, categoryId),
-				eq(category.workspaceId, workspaceId),
-				eq(category.isArchived, false)
-			)
-		)
-		.limit(1);
+	const rows = (await executor.execute(sql`
+		select id
+		from category
+		where id = ${categoryId} and workspace_id = ${workspaceId} and is_archived = false
+		for key share
+	`)) as { id: number }[];
+	const row = rows[0];
 
 	if (!row) throw error(400, translate(locale, 'Category is invalid.'));
 }

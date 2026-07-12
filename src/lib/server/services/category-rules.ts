@@ -45,9 +45,9 @@ export async function listCategoryRules(context: WorkspaceContext) {
 export async function createCategoryRule(context: WorkspaceContext, input: CategoryRuleInput) {
 	if (!canManageCategories(context.role))
 		throw error(403, translate(context.locale, 'Permission denied.'));
-	await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale);
 
 	const created = await db.transaction(async (tx) => {
+		await assertCategoryInWorkspace(context.workspaceId, input.categoryId, context.locale, tx);
 		const [row] = await tx
 			.insert(categoryRule)
 			.values({
