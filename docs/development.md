@@ -161,6 +161,13 @@ links. SvelteKit named form actions replace the page query string while an actio
 is being rendered, so the loader also maps each named action back to its owning
 workflow. Add new planning actions to that mapping and to the workflow E2E coverage.
 
+The route component is only the shared heading, tabs, action notice and workflow
+coordinator. Budget and alert controls live in `BudgetAlertsSection.svelte`,
+recurring schedules in `RecurringSection.svelte`, and import preview plus OFX
+reconciliation in `ImportsReconciliationSection.svelte`. Keep workflow-local
+state in its owning component; in particular, import row selection and bank-ledger
+search must not move back into the route coordinator.
+
 Delete and import undo both move expenses into a 30-day recoverable trash.
 Deduplication intentionally ignores trash, so reimporting an equivalent row can
 create a new live expense; restoring the older imported expense does not rewind
