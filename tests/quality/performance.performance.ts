@@ -23,19 +23,16 @@ type RuntimeBudget = {
 
 const assetBudget: AssetBudget = {
 	largestJsBytes: 90 * kib,
-	// The responsive trash route adds 1,684 bytes to the former 80 KiB ceiling;
-	// retain a narrow 83,968-byte aggregate limit.
-	totalCssBytes: 82 * kib,
-	// The trash route initially measured 158,601 bytes. Its later cursor-pagination
-	// controls intentionally moved three clean builds to 158,887-158,898 bytes.
-	// Keep 334 bytes of headroom above that observed maximum without changing the
-	// per-asset/runtime limits.
-	totalGzipJsBytes: 159_232,
-	// The trash route initially measured 444,003 bytes. Its later cursor-pagination
-	// controls intentionally moved three clean builds to 445,170-445,174 bytes.
-	// Keep 266 bytes of headroom above that observed maximum without changing the
-	// per-asset/runtime limits.
-	totalJsBytes: 445_440
+	// Touch-friendly planning navigation and the reviewed contrast fixes moved
+	// three clean builds to exactly 85,991 bytes. Keep 281 bytes of headroom.
+	totalCssBytes: 86_272,
+	// The portable export contract, exhaustive audit registry and planning workflow
+	// split moved three clean builds to 163,753-163,762 gzipped bytes. Keep 334 bytes
+	// above the observed maximum without changing per-asset or runtime limits.
+	totalGzipJsBytes: 164_096,
+	// The same builds measured 463,846-463,850 raw JS bytes. Keep 278 bytes of
+	// headroom so unreviewed aggregate growth still fails this gate.
+	totalJsBytes: 464_128
 };
 
 const runtimeBudget: RuntimeBudget = {
