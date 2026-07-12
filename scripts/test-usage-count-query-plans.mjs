@@ -7,6 +7,9 @@ if (!databaseUrl) throw new Error('DATABASE_URL is required');
 const client = postgres(databaseUrl, { max: 1, prepare: false });
 const rollbackSentinel = new Error('rollback usage-count fixture');
 const auditWorkspaceStride = 401;
+// Keep enough sparse workspace rows to distinguish the cursor index from an
+// index that filters by workspace and sorts every matching audit row.
+const auditEventCount = 205_000;
 let report;
 
 async function main() {
@@ -207,7 +210,7 @@ async function seedFixture(tx, workspaceId, userId) {
 			)
 		end,
 		${userId}, 'expense.updated', 'expense'
-		from generate_series(1, 41000) series
+		from generate_series(1, ${auditEventCount}) series
 	`;
 	await tx`analyze category`;
 	await tx`analyze expense`;
