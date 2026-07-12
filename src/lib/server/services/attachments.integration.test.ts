@@ -305,19 +305,21 @@ describe('attachment service integration', () => {
 		await deleteExpenseAttachment(fixture.context, saved!.id);
 		const due = new Date(Date.now() + attachmentDeletionGraceMs + 1);
 		let removals = 0;
+		const removeFile = async (filePath: string) => {
+			removals++;
+			await rm(filePath);
+		};
 		const results = await Promise.all([
 			runAttachmentWorkerUntilAcquired({
 				now: due,
 				workspaceId: fixture.context.workspaceId,
-				removeFile: async (filePath) => {
-					removals++;
-					await rm(filePath);
-				},
+				removeFile,
 				reconcile: false
 			}),
 			runAttachmentWorkerUntilAcquired({
 				now: due,
 				workspaceId: fixture.context.workspaceId,
+				removeFile,
 				reconcile: false
 			})
 		]);
