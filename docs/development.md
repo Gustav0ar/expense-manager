@@ -105,6 +105,16 @@ content.
 
 Imported expenses store a baseline hash of their material fields. Batch undo locks the batch and its expenses and soft-deletes only rows that are still unpaid, unreconciled, active and baseline-identical. Edited or financially protected rows are counted as skipped. Attachment tombstones, durable deletion intents, expense changes, batch counters and audit events belong to the same transaction; never hard-delete imported expenses during undo.
 
+### Planning workflow routes
+
+The planning screen is split into URL-addressable workflows under `/app/planning`:
+`section=budgets`, `section=recurring`, and `section=imports`. The loader must query
+only the active workflow's data; shared categories are the only common dataset.
+Keep the active section in redirects, alert-history pagination, and preview-cancel
+links. SvelteKit named form actions replace the page query string while an action
+is being rendered, so the loader also maps each named action back to its owning
+workflow. Add new planning actions to that mapping and to the workflow E2E coverage.
+
 Delete and import undo both move expenses into a 30-day recoverable trash.
 Deduplication intentionally ignores trash, so reimporting an equivalent row can
 create a new live expense; restoring the older imported expense does not rewind

@@ -62,6 +62,7 @@ import { canManageBudgets } from '$lib/server/security/roles';
 
 export const load: PageServerLoad = async (event) => {
 	const context = await requireWorkspaceContext(event);
+	const section = planningSection(event.url.searchParams, event.locals.locale);
 	const filters = planningFilterSchema.safeParse({
 		periodMonth: event.url.searchParams.get('periodMonth') || undefined
 	});
@@ -73,32 +74,52 @@ export const load: PageServerLoad = async (event) => {
 	if (!historyFilters.success)
 		throw error(400, translate(event.locals.locale, 'Filters are invalid.'));
 	const canManageBudgetAlerts = canManageBudgets(context.role);
+	const categoriesPromise = listCategories(context);
+	const emptyCatalogs = { paymentMethods: [], vendors: [], costCenters: [] };
+	let catalogs: Awaited<ReturnType<typeof listExpenseCatalogs>> = emptyCatalogs;
+	let budgets: Awaited<ReturnType<typeof listBudgetStatus>> = [];
+	let budgetAlertPreference: Awaited<ReturnType<typeof getBudgetAlertPreference>> = {
+		isEnabled: false,
+		recipientMode: 'all_managers',
+		escalateOverBudget: false,
+		recipientUserIds: [],
+		locale: context.locale
+	};
+	let budgetAlertRecipients: Awaited<ReturnType<typeof listBudgetAlertEligibleRecipients>> = [];
+	let budgetAlertHistory: Awaited<ReturnType<typeof listBudgetAlertDeliveryHistory>> = {
+		items: [],
+		nextCursor: null
+	};
+	let recurringExpenses: Awaited<ReturnType<typeof listRecurringExpenses>> = [];
+	let importBatches: Awaited<ReturnType<typeof listImportBatches>> = [];
+	let reconciliationQueue: Awaited<ReturnType<typeof listReconciliationQueue>> = [];
 
-	const [
-		categories,
-		catalogs,
-		budgets,
-		budgetAlertPreference,
-		recurringExpenses,
-		importBatches,
-		reconciliationQueue
-	] = await Promise.all([
-		listCategories(context),
-		listExpenseCatalogs(context),
-		listBudgetStatus(context, periodMonth),
-		getBudgetAlertPreference(context),
-		listRecurringExpenses(context),
-		listImportBatches(context),
-		listReconciliationQueue(context)
-	]);
-	const [budgetAlertRecipients, budgetAlertHistory] = canManageBudgetAlerts
-		? await Promise.all([
+	if (section === 'budgets') {
+		[budgets, budgetAlertPreference] = await Promise.all([
+			listBudgetStatus(context, periodMonth),
+			getBudgetAlertPreference(context)
+		]);
+		if (canManageBudgetAlerts) {
+			[budgetAlertRecipients, budgetAlertHistory] = await Promise.all([
 				listBudgetAlertEligibleRecipients(context),
 				listBudgetAlertDeliveryHistory(context, historyFilters.data)
-			])
-		: [[], { items: [], nextCursor: null }];
+			]);
+		}
+	} else if (section === 'recurring') {
+		[catalogs, recurringExpenses] = await Promise.all([
+			listExpenseCatalogs(context),
+			listRecurringExpenses(context)
+		]);
+	} else {
+		[importBatches, reconciliationQueue] = await Promise.all([
+			listImportBatches(context),
+			listReconciliationQueue(context)
+		]);
+	}
+	const categories = await categoriesPromise;
 
 	return {
+		section,
 		categories,
 		catalogs,
 		periodMonth,
@@ -112,6 +133,45 @@ export const load: PageServerLoad = async (event) => {
 		reconciliationQueue
 	};
 };
+
+function planningSection(searchParams: URLSearchParams, locale: Parameters<typeof translate>[0]) {
+	const explicitSection = searchParams.get('section');
+	if (explicitSection) {
+		if (
+			explicitSection === 'budgets' ||
+			explicitSection === 'recurring' ||
+			explicitSection === 'imports'
+		)
+			return explicitSection;
+		throw error(400, translate(locale, 'Filters are invalid.'));
+	}
+
+	const actionName = [...searchParams.keys()].find((key) => key.startsWith('/'))?.slice(1);
+	if (
+		actionName &&
+		[
+			'createCatalog',
+			'createRecurring',
+			'pauseRecurring',
+			'resumeRecurring',
+			'syncRecurring'
+		].includes(actionName)
+	)
+		return 'recurring' as const;
+	if (
+		actionName &&
+		[
+			'importExpenses',
+			'confirmImport',
+			'undoImport',
+			'matchBankTransaction',
+			'createFromBankTransaction',
+			'ignoreBankTransaction'
+		].includes(actionName)
+	)
+		return 'imports' as const;
+	return 'budgets' as const;
+}
 
 export const actions: Actions = {
 	upsertBudget: async (event) => {
@@ -127,7 +187,7 @@ export const actions: Actions = {
 		}
 
 		await upsertBudget(context, parsed.data);
-		throw redirect(303, `/app/planning?periodMonth=${parsed.data.periodMonth}`);
+		throw redirect(303, `/app/planning?section=budgets&periodMonth=${parsed.data.periodMonth}`);
 	},
 	deleteBudget: async (event) => {
 		const context = await requireWorkspaceContext(event);
@@ -443,7 +503,10 @@ function planningPath(formData: FormData) {
 	const parsed = planningFilterSchema.safeParse({
 		periodMonth: formData.get('periodMonth')?.toString() || undefined
 	});
-	return parsed.success && parsed.data.periodMonth
-		? `/app/planning?periodMonth=${parsed.data.periodMonth}`
-		: '/app/planning';
+	const sectionValue = formData.get('section')?.toString();
+	const section =
+		sectionValue === 'recurring' || sectionValue === 'imports' ? sectionValue : 'budgets';
+	const params = new URLSearchParams({ section });
+	if (parsed.success && parsed.data.periodMonth) params.set('periodMonth', parsed.data.periodMonth);
+	return `/app/planning?${params.toString()}`;
 }

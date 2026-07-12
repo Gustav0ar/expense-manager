@@ -39,7 +39,7 @@ async function registerAndSeed(page: Page) {
 	await expenseForm.getByRole('button', { name: 'Add' }).click();
 	await expect(expenseRow(page, 'Visual expense')).toBeVisible();
 
-	await page.goto('/app/planning?periodMonth=2026-06');
+	await page.goto('/app/planning?section=imports&periodMonth=2026-06');
 	const budgetForm = page.locator('form[action="?/upsertBudget"]').first();
 	await budgetForm.getByLabel('Category').selectOption({ label: '🧰 Operations' });
 	await budgetForm.getByLabel('Value').fill('500.00');
