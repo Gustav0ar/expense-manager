@@ -12,6 +12,12 @@ permissions:
   attestations: write
   packages: write
 
+concurrency:
+  # A completed build triggers production deployment. Cancel superseded builds so
+  # an older commit cannot finish after a newer one and deploy its stale images.
+  group: expense-manager-containers-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   CONTAINER_PLATFORMS: ${{ vars.CONTAINER_PLATFORMS || 'linux/amd64,linux/arm64' }}

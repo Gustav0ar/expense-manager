@@ -134,6 +134,19 @@ test('pins the VPS SSH host identity in deploy and rollback workflows', async ()
 	expect(helper).toContain('No scanned VPS host key matched VPS_SSH_HOST_FINGERPRINT.');
 });
 
+test('prevents a stale container build from deploying an older image', async () => {
+	const [deploy, containers] = await Promise.all([
+		readFile(new URL('../../.github/workflows/deploy.yml', import.meta.url), 'utf8'),
+		readFile(new URL('../../.github/workflows/containers.yml', import.meta.url), 'utf8')
+	]);
+
+	expect(containers).toContain('group: expense-manager-containers-${{ github.ref }}');
+	expect(containers).toContain('cancel-in-progress: true');
+	expect(deploy).toContain('should_deploy: ${{ steps.target.outputs.should_deploy }}');
+	expect(deploy).toContain('Skipping stale deployment for ${headSha}');
+	expect(deploy).toContain("steps.target.outputs.should_deploy == 'true'");
+});
+
 test('reports a real database outage through the health endpoint', async () => {
 	const port = await getFreePort();
 	const baseURL = `http://127.0.0.1:${port}`;
