@@ -65,6 +65,23 @@ podman compose -f .devcontainer/compose.yml exec app pnpm exec playwright instal
 podman compose -f .devcontainer/compose.yml exec app pnpm test:e2e
 ```
 
+Every local Playwright configuration derives a unique database named with the
+strict `expense_manager_pw_` prefix, creates it through the configured
+PostgreSQL role, applies the complete migration ledger in global setup, and
+force-drops it in global teardown. Tests and preview servers receive only that
+isolated URL, so browser runs never write to the persistent development
+database. Concurrent suites receive different names. The database role used by
+local and CI Playwright runs must have `CREATEDB`; setup fails before tests with
+an explicit error when it does not. External `SMOKE_BASE_URL` runs do not create
+or drop any database because they target an already deployed environment.
+
+The teardown safety check requires the generated prefix and an exact match
+between the generated name, target URL, host, port and user. It refuses the
+development database, `postgres`, production-style names and cross-host
+targets. If a test process is forcibly killed before teardown, remove only the
+orphaned `expense_manager_pw_*` database after confirming no Playwright process
+still owns it.
+
 Playwright configurations are split by runtime mode:
 
 | Configuration                                | Purpose                                                                       | Usual command                                                           |
