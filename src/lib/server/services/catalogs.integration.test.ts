@@ -2,7 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { user } from '$lib/server/db/auth.schema';
-import { auditEvent, category, expense, workspace, workspaceMember } from '$lib/server/db/schema';
+import {
+	auditEvent,
+	category,
+	costCenter,
+	expense,
+	paymentMethod,
+	vendor,
+	workspace,
+	workspaceMember
+} from '$lib/server/db/schema';
 import { db } from '$lib/server/db';
 import {
 	createCategory,
@@ -242,7 +251,7 @@ describe('category and expense catalog integration', () => {
 
 	it('loads lightweight category and catalog options without usage aggregates', async () => {
 		const fixture = await createFixture();
-		const [paymentMethod, vendor, costCenter] = await Promise.all([
+		const [activePaymentMethod, activeVendor, activeCostCenter] = await Promise.all([
 			createExpenseCatalogItem(fixture.context, {
 				kind: 'paymentMethod',
 				name: 'Lightweight payment method'
@@ -256,6 +265,42 @@ describe('category and expense catalog integration', () => {
 				name: 'Lightweight cost center'
 			})
 		]);
+		const [archivedCategory, archivedPaymentMethod, archivedVendor, archivedCostCenter] =
+			await Promise.all([
+				db
+					.insert(category)
+					.values({
+						workspaceId: fixture.context.workspaceId,
+						name: 'Archived lightweight category',
+						color: '#102030',
+						isArchived: true
+					})
+					.returning({ id: category.id }),
+				db
+					.insert(paymentMethod)
+					.values({
+						workspaceId: fixture.context.workspaceId,
+						name: 'Archived lightweight payment method',
+						isArchived: true
+					})
+					.returning({ id: paymentMethod.id }),
+				db
+					.insert(vendor)
+					.values({
+						workspaceId: fixture.context.workspaceId,
+						name: 'Archived lightweight vendor',
+						isArchived: true
+					})
+					.returning({ id: vendor.id }),
+				db
+					.insert(costCenter)
+					.values({
+						workspaceId: fixture.context.workspaceId,
+						name: 'Archived lightweight cost center',
+						isArchived: true
+					})
+					.returning({ id: costCenter.id })
+			]);
 
 		const [categories, catalogs] = await Promise.all([
 			listCategories(fixture.context, false, false),
@@ -273,13 +318,35 @@ describe('category and expense catalog integration', () => {
 			})
 		);
 		expect(catalogs).toMatchObject({
-			paymentMethods: [{ id: paymentMethod.id, expenseCount: 0, recurringCount: 0 }],
-			vendors: [{ id: vendor.id, expenseCount: 0, recurringCount: 0 }],
-			costCenters: [{ id: costCenter.id, expenseCount: 0, recurringCount: 0 }]
+			paymentMethods: [{ id: activePaymentMethod.id, expenseCount: 0, recurringCount: 0 }],
+			vendors: [{ id: activeVendor.id, expenseCount: 0, recurringCount: 0 }],
+			costCenters: [{ id: activeCostCenter.id, expenseCount: 0, recurringCount: 0 }]
 		});
+		expect(categories).not.toContainEqual(expect.objectContaining({ id: archivedCategory[0].id }));
+		expect(catalogs.paymentMethods).not.toContainEqual(
+			expect.objectContaining({ id: archivedPaymentMethod[0].id })
+		);
+		expect(catalogs.vendors).not.toContainEqual(
+			expect.objectContaining({ id: archivedVendor[0].id })
+		);
+		expect(catalogs.costCenters).not.toContainEqual(
+			expect.objectContaining({ id: archivedCostCenter[0].id })
+		);
 
-		await expect(listCategories(fixture.context, true, false)).resolves.toEqual(categories);
-		await expect(listExpenseCatalogs(fixture.context, true, false)).resolves.toEqual(catalogs);
+		await expect(listCategories(fixture.context, true, false)).resolves.toContainEqual(
+			expect.objectContaining({ id: archivedCategory[0].id, isArchived: true })
+		);
+		await expect(listExpenseCatalogs(fixture.context, true, false)).resolves.toMatchObject({
+			paymentMethods: expect.arrayContaining([
+				expect.objectContaining({ id: archivedPaymentMethod[0].id, isArchived: true })
+			]),
+			vendors: expect.arrayContaining([
+				expect.objectContaining({ id: archivedVendor[0].id, isArchived: true })
+			]),
+			costCenters: expect.arrayContaining([
+				expect.objectContaining({ id: archivedCostCenter[0].id, isArchived: true })
+			])
+		});
 	});
 });
 
