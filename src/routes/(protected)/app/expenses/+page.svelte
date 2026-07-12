@@ -7,22 +7,13 @@
 	import { translate } from '$lib/i18n';
 	import { formatCents } from '$lib/utils/format';
 	import { reviewLabel, reviewClass, paymentLabel, paymentClass } from '$lib/utils/status';
+	import ExpenseCreateForm from './ExpenseCreateForm.svelte';
+	import ExpenseWorkflowPanel from './ExpenseWorkflowPanel.svelte';
 	import AttachmentPanel from './AttachmentPanel.svelte';
 	import BulkReviewBar from './BulkReviewBar.svelte';
 	import DeleteExpenseDialog from './DeleteExpenseDialog.svelte';
 	import SupportCatalogDialog from './SupportCatalogDialog.svelte';
-	import {
-		CheckCircle2,
-		ChevronDown,
-		CreditCard,
-		Paperclip,
-		Plus,
-		RotateCcw,
-		Save,
-		Search,
-		Trash2,
-		XCircle
-	} from '@lucide/svelte';
+	import { ChevronDown, Paperclip, RotateCcw, Save, Search, Trash2 } from '@lucide/svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { tick } from 'svelte';
 	import type { ActionData, PageData } from './$types';
@@ -96,8 +87,6 @@
 	function t(key: string, params?: Record<string, string | number | null | undefined>) {
 		return translate(data.locale, key, params);
 	}
-
-	const amountPlaceholder = $derived(data.locale === 'pt-BR' ? '0,00' : '0.00');
 
 	function money(cents: number) {
 		return formatCents(cents, currency, data.locale);
@@ -179,78 +168,6 @@
 	<title>{t('Expenses')} | Expense Manager</title>
 </svelte:head>
 
-{#snippet expenseWorkflowPanel(expense: PageData['expenses']['items'][number])}
-	<div class="expense-workflow-panel">
-		<div class="workflow-summary">
-			<span class={reviewClass(expense.reviewStatus)}>
-				{reviewLabel(expense.reviewStatus, t)}
-			</span>
-			<span class={paymentClass(expense.paymentStatus)}>
-				{paymentLabel(expense.paymentStatus, t)}
-			</span>
-		</div>
-		{#if data.permissions.canReview}
-			<form method="post" action="?/review" class="workflow-form workflow-approve-form">
-				<input type="hidden" name="id" value={expense.id} />
-				<input type="hidden" name="returnTo" value={data.returnTo} />
-				<input type="hidden" name="reviewStatus" value="approved" />
-				<button
-					class="button review-approve"
-					type="submit"
-					disabled={expense.reviewStatus === 'approved'}
-				>
-					<CheckCircle2 size={16} />
-					<span>{t('Approve')}</span>
-				</button>
-			</form>
-			<form method="post" action="?/review" class="workflow-form reject-form">
-				<input type="hidden" name="id" value={expense.id} />
-				<input type="hidden" name="returnTo" value={data.returnTo} />
-				<input type="hidden" name="reviewStatus" value="rejected" />
-				<input
-					name="reason"
-					aria-label={t('Rejection reason')}
-					placeholder={t('Reason')}
-					maxlength="500"
-					required
-				/>
-				<button
-					class="button secondary danger"
-					type="submit"
-					disabled={expense.reviewStatus === 'rejected'}
-				>
-					<XCircle size={16} />
-					<span>{t('Reject')}</span>
-				</button>
-			</form>
-		{/if}
-
-		{#if data.permissions.canReconcile && expense.reviewStatus === 'approved'}
-			<form method="post" action="?/payment" class="workflow-form">
-				<input type="hidden" name="id" value={expense.id} />
-				<input type="hidden" name="returnTo" value={data.returnTo} />
-				<select name="paymentStatus" aria-label={t('Payment status')}>
-					<option value="unpaid" selected={expense.paymentStatus === 'unpaid'}>{t('Open')}</option>
-					<option value="paid" selected={expense.paymentStatus === 'paid'}>{t('Paid')}</option>
-					<option value="reconciled" selected={expense.paymentStatus === 'reconciled'}
-						>{t('Reconciled')}</option
-					>
-				</select>
-				<input
-					name="paidAt"
-					type="date"
-					value={expense.paidAt ?? ''}
-					aria-label={t('Payment date')}
-				/>
-				<button class="button secondary" type="submit">
-					<CreditCard size={16} />
-					<span>{t('Save payment')}</span>
-				</button>
-			</form>
-		{/if}
-	</div>
-{/snippet}
-
 <section class="page-section">
 	<div class="section-heading">
 		<div>
@@ -267,154 +184,15 @@
 		<p class="notice danger" role="alert">{form.message}</p>
 	{/if}
 
-	<section class="panel expense-create-panel">
-		<div class="panel-heading">
-			<h3>{t('New expense')}</h3>
-			<button
-				class="button secondary support-catalog-trigger"
-				type="button"
-				onclick={openSupportCatalogDialog}
-			>
-				<Plus size={16} />
-				<span>{t('Support catalogs')}</span>
-			</button>
-		</div>
-
-		<form method="post" action="?/create" class="form-grid expense-create-form">
-			<input type="hidden" name="returnTo" value={data.returnTo} />
-			<label class="expense-field description-field">
-				<span>{t('Description')}</span>
-				<input
-					name="description"
-					required
-					maxlength="160"
-					value={form?.values?.description ?? ''}
-					aria-invalid={!!form?.fieldErrors?.description}
-					aria-describedby={form?.fieldErrors?.description ? 'err-description' : undefined}
-				/>
-				{#if form?.fieldErrors?.description}
-					<span id="err-description" class="field-error">{form.fieldErrors.description}</span>
-				{/if}
-			</label>
-
-			<label class="expense-field amount-field">
-				<span>{t('Installment amount')}</span>
-				<input
-					name="amount"
-					inputmode="decimal"
-					placeholder={amountPlaceholder}
-					required
-					value={form?.values?.amount ?? ''}
-					aria-invalid={!!form?.fieldErrors?.amount}
-					aria-describedby={form?.fieldErrors?.amount ? 'err-amount' : undefined}
-				/>
-				{#if form?.fieldErrors?.amount}
-					<span id="err-amount" class="field-error">{form.fieldErrors.amount}</span>
-				{/if}
-			</label>
-
-			<label class="expense-field">
-				<span>{t('Date')}</span>
-				<input
-					name="expenseDate"
-					type="date"
-					required
-					value={form?.values?.expenseDate ?? ''}
-					aria-invalid={!!form?.fieldErrors?.expenseDate}
-					aria-describedby={form?.fieldErrors?.expenseDate ? 'err-expenseDate' : undefined}
-				/>
-				{#if form?.fieldErrors?.expenseDate}
-					<span id="err-expenseDate" class="field-error">{form.fieldErrors.expenseDate}</span>
-				{/if}
-			</label>
-
-			<label class="expense-field">
-				<span>{t('Category')}</span>
-				<select
-					name="categoryId"
-					required
-					aria-invalid={!!form?.fieldErrors?.categoryId}
-					aria-describedby={form?.fieldErrors?.categoryId ? 'err-categoryId' : undefined}
-				>
-					<option value="">{t('Select')}</option>
-					{#each activeCategories as category (category.id)}
-						<option
-							value={category.id}
-							selected={category.id.toString() === (form?.values?.categoryId ?? '')}
-							>{category.icon ?? '💼'} {category.name}</option
-						>
-					{/each}
-				</select>
-				{#if form?.fieldErrors?.categoryId}
-					<span id="err-categoryId" class="field-error">{form.fieldErrors.categoryId}</span>
-				{/if}
-			</label>
-
-			<label class="expense-field">
-				<span>{t('Payment')}</span>
-				<select name="paymentMethodId">
-					<option value="">{t('Select')}</option>
-					{#each data.catalogs.paymentMethods as paymentMethod (paymentMethod.id)}
-						<option
-							value={paymentMethod.id}
-							selected={paymentMethod.id.toString() === (form?.values?.paymentMethodId ?? '')}
-							>{paymentMethod.name}</option
-						>
-					{/each}
-				</select>
-			</label>
-
-			<SearchableSelect
-				id="expense-create-vendor"
-				name="vendorId"
-				label={t('Vendor')}
-				options={catalogOptions(data.catalogs.vendors)}
-				selectedId={form?.values?.vendorId}
-				placeholder={t('Search {item}', { item: lower(t('Vendor')) })}
-				empty={t('No vendor found.')}
-				wrapperClass="expense-field"
-				locale={data.locale}
-			/>
-
-			<SearchableSelect
-				id="expense-create-cost-center"
-				name="costCenterId"
-				label={t('Cost center')}
-				options={catalogOptions(data.catalogs.costCenters)}
-				selectedId={form?.values?.costCenterId}
-				placeholder={t('Search {item}', { item: lower(t('Cost center')) })}
-				empty={t('No cost center found.')}
-				wrapperClass="expense-field"
-				locale={data.locale}
-			/>
-
-			<label class="expense-field">
-				<span>{t('Competency')}</span>
-				<input name="competencyMonth" type="month" value={form?.values?.competencyMonth ?? ''} />
-			</label>
-
-			<label class="expense-field">
-				<span>{t('Installments')}</span>
-				<input
-					name="installments"
-					type="number"
-					min="1"
-					max="120"
-					value={form?.values?.installments ?? '1'}
-				/>
-			</label>
-
-			<label class="expense-field notes-field">
-				<span>{t('Notes')}</span>
-				<input name="notes" maxlength="1000" value={form?.values?.notes ?? ''} />
-			</label>
-
-			<button class="button primary expense-submit" type="submit">
-				<Plus size={18} />
-				<span>{t('Add')}</span>
-			</button>
-		</form>
-	</section>
+	<ExpenseCreateForm
+		{activeCategories}
+		catalogs={data.catalogs}
+		{form}
+		returnTo={data.returnTo}
+		locale={data.locale}
+		{t}
+		onSupportCatalog={openSupportCatalogDialog}
+	/>
 
 	<SupportCatalogDialog
 		bind:this={supportCatalogDialog}
@@ -721,7 +499,13 @@
 										aria-colspan={data.permissions.canReview ? 8 : 7}
 									>
 										{#if data.permissions.canReview || data.permissions.canReconcile}
-											{@render expenseWorkflowPanel(expense)}
+											<ExpenseWorkflowPanel
+												{expense}
+												canReview={data.permissions.canReview}
+												canReconcile={data.permissions.canReconcile}
+												returnTo={data.returnTo}
+												{t}
+											/>
 										{/if}
 										<form
 											method="post"

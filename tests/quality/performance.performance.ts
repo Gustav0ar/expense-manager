@@ -30,9 +30,10 @@ const assetBudget: AssetBudget = {
 	// split moved three clean builds to 163,753-163,762 gzipped bytes. Keep 334 bytes
 	// above the observed maximum without changing per-asset or runtime limits.
 	totalGzipJsBytes: 164_096,
-	// The same builds measured 463,846-463,850 raw JS bytes. Keep 278 bytes of
-	// headroom so unreviewed aggregate growth still fails this gate.
-	totalJsBytes: 464_128
+	// Extracting the expense creation and workflow panels measured 464,897 raw
+	// JS bytes across three clean local builds (CI measured 464,901). Keep 283
+	// bytes of headroom so unreviewed aggregate growth still fails this gate.
+	totalJsBytes: 465_184
 };
 
 const runtimeBudget: RuntimeBudget = {
