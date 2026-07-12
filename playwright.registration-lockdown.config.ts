@@ -1,6 +1,10 @@
 import { defineConfig } from '@playwright/test';
+import { configurePlaywrightDatabase } from './tests/playwright/config';
+
+const database = configurePlaywrightDatabase('registration');
 
 export default defineConfig({
+	...database.lifecycle,
 	workers: 1,
 	use: {
 		baseURL: 'http://localhost:4174'
@@ -10,6 +14,7 @@ export default defineConfig({
 		env: {
 			ALLOW_REGISTRATION: 'false',
 			BETTER_AUTH_RATE_LIMIT_MAX: '1000',
+			DATABASE_URL: database.databaseUrl!,
 			EMAIL_DELIVERY: 'log',
 			ORIGIN: 'http://localhost:4174'
 		},
