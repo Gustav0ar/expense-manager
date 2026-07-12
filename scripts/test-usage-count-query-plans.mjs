@@ -6,6 +6,7 @@ if (!databaseUrl) throw new Error('DATABASE_URL is required');
 
 const client = postgres(databaseUrl, { max: 1, prepare: false });
 const rollbackSentinel = new Error('rollback usage-count fixture');
+const auditWorkspaceStride = 401;
 let report;
 
 async function main() {
@@ -194,7 +195,7 @@ async function seedFixture(tx, workspaceId, userId) {
 	await tx`
 		insert into audit_event (workspace_id, actor_user_id, action, entity_type)
 		select case
-			when series % 41 = 0 then ${workspaceId}
+			when series % ${auditWorkspaceStride} = 0 then ${workspaceId}
 			else (
 				select noise.id
 				from workspace noise
