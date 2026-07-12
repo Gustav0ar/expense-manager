@@ -16,6 +16,13 @@
 	function t(key: string, params?: Record<string, string | number | null | undefined>) {
 		return translate(data.locale, key, params);
 	}
+
+	function auditPageHref(cursor: string) {
+		const params = new URLSearchParams({ cursor });
+		if (data.filters.action) params.set('action', data.filters.action);
+		if (data.filters.entityType) params.set('entityType', data.filters.entityType);
+		return `${auditPath}?${params.toString()}`;
+	}
 </script>
 
 <svelte:head>
@@ -90,7 +97,7 @@
 
 		{#if data.audit.nextCursor}
 			<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-			<a class="button secondary" href={`${auditPath}?cursor=${data.audit.nextCursor}`}
+			<a class="button secondary" href={auditPageHref(data.audit.nextCursor)}
 				>{t('Next page')}</a
 			>
 		{/if}

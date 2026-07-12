@@ -412,6 +412,12 @@ test('covers audit filters, metadata, empty state, pagination and invalid filter
 	await expect(page).toHaveURL(/entityType=workspace/);
 	await expect(auditRows(page).first()).toContainText('workspace.updated');
 	await expect(auditRows(page).first()).toContainText('workspace');
+	await expect(page.getByRole('link', { name: 'Próxima página' })).toBeVisible();
+	await page.getByRole('link', { name: 'Próxima página' }).click();
+	await expect(page).toHaveURL(/action=workspace\.updated/);
+	await expect(page).toHaveURL(/entityType=workspace/);
+	await expect(auditRows(page).first()).toContainText('workspace.updated');
+	await expect(auditRows(page).first()).toContainText('workspace');
 
 	await page.goto('/app/settings/audit');
 	await page.getByLabel('Ação').fill('workspace_member.invited');
