@@ -32,7 +32,8 @@ import {
 	classifyAttachmentDeletionError,
 	reconcileAttachmentStorage,
 	resolveAttachmentWorkerWorkspaceId,
-	runAttachmentDeletionWorker
+	runAttachmentDeletionWorker,
+	runAttachmentStorageReconciliation
 } from './attachment-deletion';
 import type { WorkspaceContext } from './workspaces';
 
@@ -95,6 +96,11 @@ describe('attachment service integration', () => {
 				completed: 0,
 				failed: 0,
 				pending: 0,
+				skipped: true
+			});
+			await expect(runAttachmentStorageReconciliation()).resolves.toMatchObject({
+				failed: 0,
+				reconciliation: null,
 				skipped: true
 			});
 		} finally {
@@ -452,7 +458,7 @@ describe('attachment service integration', () => {
 			.where(eq(attachmentDeletion.attachmentId, retained!.id));
 		await rm(safeStoragePath(getUploadDir(), retainedRow.storageKey));
 		await expect(
-			runAttachmentWorkerUntilAcquired({
+			runAttachmentStorageReconciliation({
 				uploadDir: getUploadDir(),
 				workspaceId: fixture.context.workspaceId
 			})
@@ -468,7 +474,7 @@ describe('attachment service integration', () => {
 			limit: 0,
 			workspaceId: fixture.context.workspaceId
 		});
-		expect(finalWorkerResult).toHaveProperty('reconciliation');
+		expect(finalWorkerResult).toMatchObject({ reconciliation: null });
 	});
 });
 

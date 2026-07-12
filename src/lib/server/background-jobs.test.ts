@@ -24,11 +24,13 @@ describe('BackgroundJobCoordinator', () => {
 		const attachmentDeletionScheduler = vi
 			.fn()
 			.mockResolvedValue({ processed: 0, completed: 0, pending: 0, failed: 0 });
+		const attachmentReconciliation = vi.fn().mockResolvedValue({ failed: 0, reconciliation: null });
 		const coordinator = new BackgroundJobCoordinator({
 			verificationCleanup,
 			recurringScheduler,
 			budgetAlertScheduler,
 			invitationDeliveryScheduler,
+			attachmentReconciliation,
 			attachmentDeletionScheduler,
 			expenseTrashPurgeScheduler: vi.fn().mockResolvedValue({}),
 			importPreviewCleanup: vi.fn().mockResolvedValue({ deletedPreviews: 0 }),
@@ -47,6 +49,7 @@ describe('BackgroundJobCoordinator', () => {
 		expect(budgetAlertScheduler).toHaveBeenCalledTimes(1);
 		expect(emailDeliveryCleanup).toHaveBeenCalledTimes(1);
 		expect(invitationDeliveryScheduler).toHaveBeenCalledTimes(1);
+		expect(attachmentReconciliation).toHaveBeenCalledTimes(1);
 		expect(attachmentDeletionScheduler).toHaveBeenCalledTimes(1);
 
 		await vi.advanceTimersByTimeAsync(300);
@@ -72,6 +75,7 @@ describe('BackgroundJobCoordinator', () => {
 			recurringScheduler,
 			budgetAlertScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			invitationDeliveryScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			attachmentReconciliation: vi.fn().mockResolvedValue({ skipped: true }),
 			attachmentDeletionScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			expenseTrashPurgeScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			importPreviewCleanup: vi.fn().mockResolvedValue({ skipped: true }),
@@ -104,6 +108,7 @@ describe('BackgroundJobCoordinator', () => {
 			recurringScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			budgetAlertScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			invitationDeliveryScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			attachmentReconciliation: vi.fn().mockResolvedValue({ skipped: true }),
 			attachmentDeletionScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			expenseTrashPurgeScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			importPreviewCleanup: vi.fn().mockResolvedValue({ skipped: true }),
@@ -137,11 +142,13 @@ describe('BackgroundJobCoordinator', () => {
 		const emailDeliveryCleanup = vi.fn().mockResolvedValue({ skipped: true });
 		const invitationDeliveryScheduler = vi.fn().mockResolvedValue({ skipped: true });
 		const attachmentDeletionScheduler = vi.fn().mockResolvedValue({ skipped: true });
+		const attachmentReconciliation = vi.fn().mockResolvedValue({ skipped: true });
 		const coordinator = new BackgroundJobCoordinator({
 			verificationCleanup,
 			recurringScheduler,
 			budgetAlertScheduler,
 			invitationDeliveryScheduler,
+			attachmentReconciliation,
 			attachmentDeletionScheduler,
 			expenseTrashPurgeScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			importPreviewCleanup: vi.fn().mockResolvedValue({ skipped: true }),
@@ -157,6 +164,7 @@ describe('BackgroundJobCoordinator', () => {
 		expect(budgetAlertScheduler).toHaveBeenCalledOnce();
 		expect(emailDeliveryCleanup).toHaveBeenCalledOnce();
 		expect(invitationDeliveryScheduler).toHaveBeenCalledOnce();
+		expect(attachmentReconciliation).toHaveBeenCalledOnce();
 		expect(attachmentDeletionScheduler).toHaveBeenCalledOnce();
 	});
 
@@ -170,6 +178,7 @@ describe('BackgroundJobCoordinator', () => {
 			recurringScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			budgetAlertScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			invitationDeliveryScheduler,
+			attachmentReconciliation: vi.fn().mockResolvedValue({ skipped: true }),
 			attachmentDeletionScheduler: vi
 				.fn()
 				.mockResolvedValue({ processed: 0, completed: 0, pending: 2, failed: 0 }),
@@ -209,6 +218,7 @@ describe('BackgroundJobCoordinator', () => {
 			recurringScheduler,
 			budgetAlertScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			invitationDeliveryScheduler: vi.fn().mockResolvedValue({ skipped: true }),
+			attachmentReconciliation: vi.fn().mockResolvedValue({ skipped: true }),
 			attachmentDeletionScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			expenseTrashPurgeScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			importPreviewCleanup: vi.fn().mockResolvedValue({ skipped: true }),
@@ -234,17 +244,13 @@ describe('BackgroundJobCoordinator', () => {
 		await coordinator.stop();
 	});
 
-	it('exposes attachment queue and reconciliation counts without storage paths', async () => {
+	it('exposes separate attachment queue and reconciliation health without storage paths', async () => {
 		const coordinator = new BackgroundJobCoordinator({
 			verificationCleanup: vi.fn().mockResolvedValue({ deletedUsers: 0 }),
 			recurringScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			budgetAlertScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			invitationDeliveryScheduler: vi.fn().mockResolvedValue({ skipped: true }),
-			emailDeliveryCleanup: vi.fn().mockResolvedValue({ skipped: true }),
-			attachmentDeletionScheduler: vi.fn().mockResolvedValue({
-				processed: 0,
-				completed: 0,
-				pending: 3,
+			attachmentReconciliation: vi.fn().mockResolvedValue({
 				failed: 1,
 				reconciliation: {
 					missingActive: 1,
@@ -253,23 +259,35 @@ describe('BackgroundJobCoordinator', () => {
 					scanFailed: false
 				}
 			}),
+			emailDeliveryCleanup: vi.fn().mockResolvedValue({ skipped: true }),
+			attachmentDeletionScheduler: vi.fn().mockResolvedValue({
+				processed: 0,
+				completed: 0,
+				pending: 3,
+				failed: 1
+			}),
 			expenseTrashPurgeScheduler: vi.fn().mockResolvedValue({ skipped: true }),
 			importPreviewCleanup: vi.fn().mockResolvedValue({ skipped: true })
 		});
 
 		coordinator.trigger();
 		await coordinator.waitForIdle();
-		const health = coordinator.health().jobs.attachmentDeletionScheduler;
-		expect(health).toMatchObject({
+		const deletionHealth = coordinator.health().jobs.attachmentDeletionScheduler;
+		expect(deletionHealth).toMatchObject({
 			status: 'degraded',
 			lastPendingCount: 3,
+			lastFailedCount: 1
+		});
+		const reconciliationHealth = coordinator.health().jobs.attachmentReconciliation;
+		expect(reconciliationHealth).toMatchObject({
+			status: 'degraded',
 			lastFailedCount: 1,
 			lastMissingActiveCount: 1,
 			lastMissingRetainedCount: 0,
 			lastUnknownDiskCount: 2,
 			lastStorageScanFailed: false
 		});
-		expect(JSON.stringify(health)).not.toContain('storageKey');
-		expect(JSON.stringify(health)).not.toContain('/');
+		expect(JSON.stringify(reconciliationHealth)).not.toContain('storageKey');
+		expect(JSON.stringify(reconciliationHealth)).not.toContain('/');
 	});
 });

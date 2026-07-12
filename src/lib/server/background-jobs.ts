@@ -3,7 +3,10 @@ import { runRecurringExpenseScheduler } from '$lib/server/services/recurring';
 import { runAutomaticBudgetAlertScheduler } from '$lib/server/services/budgets';
 import { pruneEmailDeliveryEvents } from '$lib/server/services/email-delivery-events';
 import { runInvitationDeliveryScheduler } from '$lib/server/services/invitation-delivery';
-import { runAttachmentDeletionWorker } from '$lib/server/services/attachment-deletion';
+import {
+	runAttachmentDeletionWorker,
+	runAttachmentStorageReconciliation
+} from '$lib/server/services/attachment-deletion';
 import { runExpenseTrashPurgeWorker } from '$lib/server/services/expense-trash';
 import { pruneExpiredImportPreviews } from '$lib/server/services/imports';
 
@@ -13,6 +16,7 @@ export const budgetAlertSchedulerIntervalMs = 60 * 60 * 1000;
 export const emailDeliveryCleanupIntervalMs = 24 * 60 * 60 * 1000;
 export const invitationDeliverySchedulerIntervalMs = 60_000;
 export const attachmentDeletionSchedulerIntervalMs = 5 * 60 * 1000;
+export const attachmentReconciliationIntervalMs = 6 * 60 * 60 * 1000;
 export const expenseTrashPurgeSchedulerIntervalMs = 5 * 60 * 1000;
 export const importPreviewCleanupIntervalMs = 60 * 60 * 1000;
 
@@ -21,6 +25,7 @@ type BackgroundJobName =
 	| 'recurringScheduler'
 	| 'budgetAlertScheduler'
 	| 'invitationDeliveryScheduler'
+	| 'attachmentReconciliation'
 	| 'attachmentDeletionScheduler'
 	| 'expenseTrashPurgeScheduler'
 	| 'importPreviewCleanup'
@@ -64,6 +69,7 @@ type BackgroundJobCoordinatorOptions = {
 	recurringScheduler?: BackgroundJobRunner;
 	budgetAlertScheduler?: BackgroundJobRunner;
 	invitationDeliveryScheduler?: BackgroundJobRunner;
+	attachmentReconciliation?: BackgroundJobRunner;
 	attachmentDeletionScheduler?: BackgroundJobRunner;
 	expenseTrashPurgeScheduler?: BackgroundJobRunner;
 	importPreviewCleanup?: BackgroundJobRunner;
@@ -72,6 +78,7 @@ type BackgroundJobCoordinatorOptions = {
 	recurringIntervalMs?: number;
 	budgetAlertIntervalMs?: number;
 	invitationDeliveryIntervalMs?: number;
+	attachmentReconciliationIntervalMs?: number;
 	attachmentDeletionIntervalMs?: number;
 	expenseTrashPurgeIntervalMs?: number;
 	importPreviewCleanupIntervalMs?: number;
@@ -114,6 +121,7 @@ export class BackgroundJobCoordinator {
 		recurringScheduler: initialJobState(),
 		budgetAlertScheduler: initialJobState(),
 		invitationDeliveryScheduler: initialJobState(),
+		attachmentReconciliation: initialJobState(),
 		attachmentDeletionScheduler: initialJobState(),
 		expenseTrashPurgeScheduler: initialJobState(),
 		importPreviewCleanup: initialJobState(),
@@ -124,6 +132,7 @@ export class BackgroundJobCoordinator {
 		recurringScheduler: 0,
 		budgetAlertScheduler: 0,
 		invitationDeliveryScheduler: 0,
+		attachmentReconciliation: 0,
 		attachmentDeletionScheduler: 0,
 		expenseTrashPurgeScheduler: 0,
 		importPreviewCleanup: 0,
@@ -139,6 +148,8 @@ export class BackgroundJobCoordinator {
 			budgetAlertScheduler: options.budgetAlertScheduler ?? runAutomaticBudgetAlertScheduler,
 			invitationDeliveryScheduler:
 				options.invitationDeliveryScheduler ?? runInvitationDeliveryScheduler,
+			attachmentReconciliation:
+				options.attachmentReconciliation ?? runAttachmentStorageReconciliation,
 			attachmentDeletionScheduler:
 				options.attachmentDeletionScheduler ?? runAttachmentDeletionWorker,
 			expenseTrashPurgeScheduler: options.expenseTrashPurgeScheduler ?? runExpenseTrashPurgeWorker,
@@ -151,6 +162,8 @@ export class BackgroundJobCoordinator {
 			budgetAlertScheduler: options.budgetAlertIntervalMs ?? budgetAlertSchedulerIntervalMs,
 			invitationDeliveryScheduler:
 				options.invitationDeliveryIntervalMs ?? invitationDeliverySchedulerIntervalMs,
+			attachmentReconciliation:
+				options.attachmentReconciliationIntervalMs ?? attachmentReconciliationIntervalMs,
 			attachmentDeletionScheduler:
 				options.attachmentDeletionIntervalMs ?? attachmentDeletionSchedulerIntervalMs,
 			expenseTrashPurgeScheduler:
@@ -180,6 +193,10 @@ export class BackgroundJobCoordinator {
 		this.triggerJob('recurringScheduler');
 		this.triggerJob('budgetAlertScheduler');
 		this.triggerJob('invitationDeliveryScheduler');
+		// Reconciliation intentionally enters the microtask queue before deletion.
+		// Both share one storage lock, so the infrequent integrity scan wins the
+		// startup cycle and deletion retries on its five-minute cadence.
+		this.triggerJob('attachmentReconciliation');
 		this.triggerJob('attachmentDeletionScheduler');
 		this.triggerJob('expenseTrashPurgeScheduler');
 		this.triggerJob('importPreviewCleanup');
@@ -204,6 +221,7 @@ export class BackgroundJobCoordinator {
 			recurringScheduler: this.publicJobState('recurringScheduler', now),
 			budgetAlertScheduler: this.publicJobState('budgetAlertScheduler', now),
 			invitationDeliveryScheduler: this.publicJobState('invitationDeliveryScheduler', now),
+			attachmentReconciliation: this.publicJobState('attachmentReconciliation', now),
 			attachmentDeletionScheduler: this.publicJobState('attachmentDeletionScheduler', now),
 			expenseTrashPurgeScheduler: this.publicJobState('expenseTrashPurgeScheduler', now),
 			importPreviewCleanup: this.publicJobState('importPreviewCleanup', now),
