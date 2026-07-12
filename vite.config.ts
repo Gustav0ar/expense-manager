@@ -58,6 +58,8 @@ export default defineConfig({
 			exclude: [
 				// Tests verify production modules but are not themselves product behavior.
 				'src/**/*.{test,spec}.ts',
+				// Domain scenario modules are imported by the service integration test entry point.
+				'src/lib/server/services/service-integration/**/*.ts',
 				// Declarative Drizzle schemas contain table metadata rather than executable behavior.
 				'src/lib/server/db/*.schema.ts',
 				'src/lib/server/db/schema.ts',
