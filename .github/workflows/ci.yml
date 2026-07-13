@@ -96,7 +96,7 @@ jobs:
       - run: PLAYWRIGHT_PREBUILT=true pnpm test:e2e
       - name: Upload functional Playwright diagnostics
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-functional-${{ github.run_id }}
           path: |
@@ -162,7 +162,7 @@ jobs:
         run: pnpm test:${{ matrix.suite }}
       - name: Upload Playwright diagnostics
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-${{ matrix.suite }}-${{ github.run_id }}
           path: |
