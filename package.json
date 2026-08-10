@@ -66,14 +66,14 @@
 		"vitest": "^4.1.10"
 	},
 	"dependencies": {
-		"@lucide/svelte": "^1.23.0",
+		"@lucide/svelte": "^1.30.0",
 		"@opentelemetry/api": "^1.9.1",
-		"@opentelemetry/exporter-trace-otlp-http": "^0.220.0",
-		"@opentelemetry/resources": "^2.9.0",
-		"@opentelemetry/sdk-node": "^0.220.0",
-		"better-auth": "^1.6.23",
+		"@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
+		"@opentelemetry/resources": "^2.10.0",
+		"@opentelemetry/sdk-node": "^0.221.0",
+		"better-auth": "^1.6.26",
 		"drizzle-orm": "^0.45.2",
-		"nodemailer": "^9.0.3",
+		"nodemailer": "^9.0.5",
 		"postgres": "^3.4.9",
 		"qrcode": "^1.5.4",
 		"zod": "^4.4.3"
